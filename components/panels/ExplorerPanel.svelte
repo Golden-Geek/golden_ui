@@ -1,11 +1,12 @@
 <script lang="ts">
-	import type { DockPanelProps, DockPanelState } from "../../dockview/panel-types";
+	import type { PanelProps, PanelState } from "../../dockview/panel-types";
 
-	const initialProps: DockPanelProps = $props();
-	const api = initialProps.api;
+	const initialProps: PanelProps = $props();
+	const panelApi = initialProps.panelApi;
 
-	let panel = $state<DockPanelState>({
+	let panel = $state<PanelState>({
 		panelId: initialProps.panelId,
+		panelType: initialProps.panelType,
 		title: initialProps.title,
 		params: initialProps.params
 	});
@@ -36,11 +37,11 @@
 			return;
 		}
 
-		api.setTitle(dynamicTitle);
+		panelApi.setTitle(dynamicTitle);
 		publishedTitle = dynamicTitle;
 	});
 
-	export function setDockPanelState(next: DockPanelState): void {
+	export function setPanelState(next: PanelState): void {
 		panel = next;
 	}
 </script>

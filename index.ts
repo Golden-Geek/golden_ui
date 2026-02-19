@@ -17,7 +17,25 @@ export { default as UnknownPanel } from './components/panels/UnknownPanel.svelte
 
 export { goldenDockviewTheme } from './dockview/goldenDockviewTheme';
 export { createGoldenTabRenderer } from './dockview/createGoldenTabRenderer';
-export type { DockPanelProps, DockPanelState } from './dockview/panel-types';
+export type {
+	DockPanelComponent,
+	DockPanelExports,
+	DockPanelParams,
+	DockPanelProps,
+	DockPanelState,
+	PanelApi,
+	PanelComponent,
+	PanelDefinition,
+	PanelDockDirection,
+	PanelExports,
+	PanelParams,
+	PanelProps,
+	PanelSpawnPosition,
+	PanelSpawnRequest,
+	PanelState,
+	UserPanelDefinition,
+	UserPanelDefinitionMap
+} from './dockview/panel-types';
 export { default as NodeTree } from './components/panels/outliner/NodeTree.svelte';
 export { default as Inspector } from './components/panels/inspector/Inspector.svelte';
 export { default as NodeInspector } from './components/panels/inspector/NodeInspector.svelte';

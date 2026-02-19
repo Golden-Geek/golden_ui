@@ -1,10 +1,15 @@
 <script lang="ts">
-    import { mount, onMount, unmount, type Component } from "svelte";
+    import { mount, onMount, unmount } from "svelte";
     import {
         DockviewComponent,
+        type AddPanelOptions,
         type CreateComponentOptions,
+        type DockviewGroupPanel,
+        type DockviewIDisposable,
         type GroupPanelPartInitParameters,
         type IContentRenderer,
+        type IGroupHeaderProps,
+        type IHeaderActionsRenderer,
         type PanelUpdateEvent,
     } from "dockview-core";
 
@@ -13,36 +18,144 @@
     import { createGoldenTabRenderer } from "../../dockview/createGoldenTabRenderer";
 
     import type {
-        DockPanelExports,
-        DockPanelProps,
-        DockPanelState,
+        PanelApi,
+        PanelDefinition,
+        PanelExports,
+        PanelSpawnPosition,
+        PanelSpawnRequest,
+        PanelState,
+        UserPanelDefinition,
+        UserPanelDefinitionMap,
     } from "$lib/golden_ui/dockview/panel-types";
     import type { WorkbenchSession } from "../../store/workbench.svelte";
 
-    //Internal Panels
     import ExplorerPanel from "../panels/ExplorerPanel.svelte";
     import MainViewPanel from "../panels/MainViewPanel.svelte";
     import UnknownPanel from "../panels/UnknownPanel.svelte";
 
     const props = $props<{
         session?: WorkbenchSession | null;
-        userPanels?: Record<
-            string,
-            Component<DockPanelProps, DockPanelExports>
-        >;
+        userPanels?: UserPanelDefinitionMap;
+        initialPanels?: PanelSpawnRequest[];
     }>();
 
-    type DockPanelComponent = Component<DockPanelProps, DockPanelExports>;
-    type MountedDockPanel = DockPanelExports & Record<string, unknown>;
+    type MountedPanel = PanelExports & Record<string, unknown>;
 
-    const panelRegistry: Record<string, DockPanelComponent> = {
-        explorer: ExplorerPanel,
-        mainView: MainViewPanel,
-        ...props.userPanels,
+    const goldenPanelDefinitions: Record<string, PanelDefinition> = {
+        explorer: {
+            panelType: "explorer",
+            title: "Explorer",
+            component: ExplorerPanel,
+            defaultParams: {
+                nodes: ["project/", "sequences/", "midi/", "audio/", "presets/"],
+            },
+            origin: "golden",
+        },
+        mainView: {
+            panelType: "mainView",
+            title: "Main View",
+            component: MainViewPanel,
+            defaultParams: {
+                mode: "graph",
+                nodeCount: 3,
+            },
+            origin: "golden",
+        },
     };
+
+    const formatPanelTypeTitle = (panelType: string): string =>
+        panelType
+            .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+            .replace(/[_-]+/g, " ")
+            .replace(/\s+/g, " ")
+            .trim()
+            .replace(/^./, (match) => match.toUpperCase());
+
+    const isUserPanelDefinition = (
+        value: UserPanelDefinitionMap[string],
+    ): value is UserPanelDefinition =>
+        typeof value === "object" && value !== null && "component" in value;
+
+    const normalizeUserPanels = (
+        entries: UserPanelDefinitionMap | undefined,
+    ): Record<string, PanelDefinition> => {
+        if (!entries) {
+            return {};
+        }
+
+        return Object.entries(entries).reduce<Record<string, PanelDefinition>>(
+            (accumulator, [panelType, entry]) => {
+                if (isUserPanelDefinition(entry)) {
+                    accumulator[panelType] = {
+                        panelType,
+                        title: entry.title ?? formatPanelTypeTitle(panelType),
+                        component: entry.component,
+                        description: entry.description,
+                        defaultParams: entry.defaultParams,
+                        origin: "user",
+                    };
+                    return accumulator;
+                }
+
+                accumulator[panelType] = {
+                    panelType,
+                    title: formatPanelTypeTitle(panelType),
+                    component: entry,
+                    origin: "user",
+                };
+                return accumulator;
+            },
+            {},
+        );
+    };
+
+    const panelDefinitions: Record<string, PanelDefinition> = {
+        ...goldenPanelDefinitions,
+        ...normalizeUserPanels(props.userPanels),
+    };
+    const availablePanelDefinitions = Object.values(panelDefinitions).sort(
+        (first, second) => first.title.localeCompare(second.title),
+    );
 
     let containerElement: HTMLDivElement | undefined;
     let dockview: DockviewComponent | undefined;
+
+    const panelInstanceCounters = new Map<string, number>();
+
+    const nextPanelId = (panelType: string): string => {
+        let nextIndex = panelInstanceCounters.get(panelType) ?? 1;
+        let panelId = `${panelType}-${nextIndex}`;
+
+        while (dockview?.getPanel(panelId)) {
+            nextIndex += 1;
+            panelId = `${panelType}-${nextIndex}`;
+        }
+
+        panelInstanceCounters.set(panelType, nextIndex + 1);
+        return panelId;
+    };
+
+    const toDockviewPosition = (
+        position: PanelSpawnPosition | undefined,
+    ): AddPanelOptions["position"] | undefined => {
+        if (!position) {
+            return undefined;
+        }
+
+        const direction = position.direction ?? "within";
+        if (position.referencePanelId) {
+            return {
+                referencePanel: position.referencePanelId,
+                direction,
+            };
+        }
+
+        if (direction === "within") {
+            return undefined;
+        }
+
+        return { direction };
+    };
 
     const createPanelRenderer = (
         options: CreateComponentOptions,
@@ -50,12 +163,14 @@
         const hostElement = document.createElement("div");
         hostElement.className = "gc-dock-panel-host";
 
-        const PanelComponent = panelRegistry[options.name] ?? UnknownPanel;
+        const panelDefinition = panelDefinitions[options.name];
+        const PanelComponent = panelDefinition?.component ?? UnknownPanel;
 
-        let mountedPanel: MountedDockPanel | undefined;
-        let panelState: DockPanelState = {
+        let mountedPanel: MountedPanel | undefined;
+        let panelState: PanelState = {
             panelId: options.id,
-            title: options.name,
+            panelType: options.name,
+            title: panelDefinition?.title ?? options.name,
             params: {},
         };
 
@@ -64,28 +179,38 @@
             init: (parameters: GroupPanelPartInitParameters): void => {
                 panelState = {
                     panelId: parameters.api.id,
-                    title: parameters.title ?? options.name,
-                    params: parameters.params,
+                    panelType: options.name,
+                    title: parameters.title ?? panelDefinition?.title ?? options.name,
+                    params: parameters.params ?? {},
+                };
+
+                const panelApi: PanelApi = {
+                    setTitle: (nextTitle: string): void => {
+                        parameters.api.setTitle(nextTitle);
+                    },
+                    close: (): void => {
+                        parameters.api.close();
+                    },
                 };
 
                 mountedPanel = mount(PanelComponent, {
                     target: hostElement,
                     props: {
-                        api: parameters.api,
+                        panelApi,
                         ...panelState,
                     },
-                }) as MountedDockPanel;
+                }) as MountedPanel;
             },
             update: (event: PanelUpdateEvent): void => {
                 panelState = {
                     ...panelState,
                     params: {
                         ...panelState.params,
-                        ...event.params,
+                        ...(event.params ?? {}),
                     },
                 };
 
-                mountedPanel?.setDockPanelState(panelState);
+                mountedPanel?.setPanelState(panelState);
             },
             dispose: (): void => {
                 if (!mountedPanel) {
@@ -98,9 +223,226 @@
         };
     };
 
-    onMount(() => {
+    const addPanel = (
+        request: PanelSpawnRequest,
+        overridePosition?: AddPanelOptions["position"],
+    ): string | null => {
+        if (!dockview) {
+            return null;
+        }
+
+        const panelDefinition = panelDefinitions[request.panelType];
+        if (!panelDefinition) {
+            console.error(`Panel "${request.panelType}" is not registered.`);
+            return null;
+        }
+
+        const panelId = request.panelId ?? nextPanelId(request.panelType);
+        const options: AddPanelOptions = {
+            id: panelId,
+            component: request.panelType,
+            title: request.title ?? panelDefinition.title,
+            params: {
+                ...(panelDefinition.defaultParams ?? {}),
+                ...(request.params ?? {}),
+            },
+            inactive: request.inactive,
+            initialWidth: request.initialWidth,
+            initialHeight: request.initialHeight,
+            minimumWidth: request.minimumWidth,
+            maximumWidth: request.maximumWidth,
+            minimumHeight: request.minimumHeight,
+            maximumHeight: request.maximumHeight,
+        };
+
+        const position = overridePosition ?? toDockviewPosition(request.position);
+        if (position) {
+            options.position = position;
+        }
+
+        dockview.addPanel(options);
+        return panelId;
+    };
+
+    const createGroupAddRenderer = (
+        group: DockviewGroupPanel,
+    ): IHeaderActionsRenderer => {
+        const element = document.createElement("div");
+        element.className = "gc-group-panel-add";
+
+        const trigger = document.createElement("button");
+        trigger.type = "button";
+        trigger.className = "gc-group-panel-add-trigger";
+        trigger.textContent = "+";
+        trigger.setAttribute("aria-label", "Add panel in this group");
+        trigger.setAttribute("title", "Add panel");
+        trigger.disabled = availablePanelDefinitions.length === 0;
+
+        const menu = document.createElement("div");
+        menu.className = "gc-group-panel-add-menu";
+        menu.hidden = true;
+
+        const listenerDisposables: DockviewIDisposable[] = [];
+        const dockviewDisposables: DockviewIDisposable[] = [];
+
+        const positionMenu = (): void => {
+            if (menu.hidden) {
+                return;
+            }
+
+            const viewportPadding = 8;
+            menu.style.transform = "";
+
+            const rect = menu.getBoundingClientRect();
+            let shiftX = 0;
+            const maxRight = window.innerWidth - viewportPadding;
+
+            if (rect.right > maxRight) {
+                shiftX -= rect.right - maxRight;
+            }
+
+            if (rect.left + shiftX < viewportPadding) {
+                shiftX += viewportPadding - (rect.left + shiftX);
+            }
+
+            menu.style.transform = `translateX(${Math.round(shiftX)}px)`;
+        };
+
+        const closeMenu = (): void => {
+            menu.hidden = true;
+            element.classList.remove("is-open");
+            menu.style.transform = "";
+        };
+
+        const openMenu = (): void => {
+            if (availablePanelDefinitions.length === 0) {
+                return;
+            }
+
+            menu.hidden = false;
+            element.classList.add("is-open");
+            requestAnimationFrame(positionMenu);
+        };
+
+        const toggleMenu = (): void => {
+            if (menu.hidden) {
+                openMenu();
+                return;
+            }
+
+            closeMenu();
+        };
+
+        const stopMouseDown = (event: MouseEvent): void => {
+            event.preventDefault();
+            event.stopPropagation();
+        };
+
+        const onTriggerClick = (event: MouseEvent): void => {
+            event.preventDefault();
+            event.stopPropagation();
+            toggleMenu();
+        };
+
+        const onGlobalPointerDown = (event: PointerEvent): void => {
+            if (!(event.target instanceof Node)) {
+                closeMenu();
+                return;
+            }
+
+            if (!element.contains(event.target)) {
+                closeMenu();
+            }
+        };
+
+        const onViewportResize = (): void => {
+            positionMenu();
+        };
+
+        trigger.addEventListener("click", onTriggerClick);
+        trigger.addEventListener("mousedown", stopMouseDown);
+        menu.addEventListener("mousedown", stopMouseDown);
+        document.addEventListener("pointerdown", onGlobalPointerDown);
+        window.addEventListener("resize", onViewportResize);
+
+        listenerDisposables.push(
+            {
+                dispose: () => {
+                    trigger.removeEventListener("click", onTriggerClick);
+                    trigger.removeEventListener("mousedown", stopMouseDown);
+                },
+            },
+            {
+                dispose: () => {
+                    menu.removeEventListener("mousedown", stopMouseDown);
+                },
+            },
+            {
+                dispose: () => {
+                    document.removeEventListener("pointerdown", onGlobalPointerDown);
+                },
+            },
+            {
+                dispose: () => {
+                    window.removeEventListener("resize", onViewportResize);
+                },
+            },
+        );
+
+        for (const panelDefinition of availablePanelDefinitions) {
+            const item = document.createElement("button");
+            item.type = "button";
+            item.className = "gc-group-panel-add-item";
+            item.textContent = panelDefinition.title;
+
+            const onItemClick = (event: MouseEvent): void => {
+                event.preventDefault();
+                event.stopPropagation();
+                addPanel(
+                    { panelType: panelDefinition.panelType },
+                    { referenceGroup: group, direction: "within" },
+                );
+                closeMenu();
+            };
+
+            item.addEventListener("click", onItemClick);
+            item.addEventListener("mousedown", stopMouseDown);
+            listenerDisposables.push({
+                dispose: () => {
+                    item.removeEventListener("click", onItemClick);
+                    item.removeEventListener("mousedown", stopMouseDown);
+                },
+            });
+
+            menu.append(item);
+        }
+
+        element.append(trigger, menu);
+
+        return {
+            element,
+            init: (parameters: IGroupHeaderProps): void => {
+                dockviewDisposables.push(
+                    parameters.group.model.onDidActivePanelChange(() => {
+                        closeMenu();
+                    }),
+                );
+            },
+            dispose: (): void => {
+                closeMenu();
+                for (const disposable of listenerDisposables) {
+                    disposable.dispose();
+                }
+                for (const disposable of dockviewDisposables) {
+                    disposable.dispose();
+                }
+            },
+        };
+    };
+
+    const createDefaultInitialPanels = (): PanelSpawnRequest[] => {
         if (!containerElement) {
-            return;
+            return [];
         }
 
         const rootFontSizePx =
@@ -111,8 +453,6 @@
             Math.round(value * rootFontSizePx);
 
         const containerWidth = containerElement.clientWidth;
-        const containerHeight = containerElement.clientHeight;
-
         const explorerTargetWidth = Math.round(containerWidth * 0.24);
         const explorerMinWidth = remToPx(14);
         const explorerMaxWidth = Math.round(containerWidth * 0.45);
@@ -125,9 +465,26 @@
             remToPx(18),
         );
 
-        const terminalInitialHeight = Math.round(containerHeight * 0.28);
-        const terminalMinHeight = remToPx(10);
-        const terminalMaxHeight = Math.round(containerHeight * 0.55);
+        return [
+            {
+                panelId: "panel-explorer",
+                panelType: "explorer",
+                minimumWidth: explorerMinWidth,
+                maximumWidth: explorerMaxWidth,
+            },
+            {
+                panelId: "panel-main",
+                panelType: "mainView",
+                initialWidth: mainInitialWidth,
+                position: { referencePanelId: "panel-explorer", direction: "right" },
+            },
+        ];
+    };
+
+    onMount(() => {
+        if (!containerElement) {
+            return;
+        }
 
         dockview = new DockviewComponent(containerElement, {
             createComponent: createPanelRenderer,
@@ -136,54 +493,15 @@
                 options.name === "golden-tab"
                     ? createGoldenTabRenderer()
                     : undefined,
+            createLeftHeaderActionComponent: (group) =>
+                createGroupAddRenderer(group),
             theme: goldenDockviewTheme,
         });
 
-        dockview.addPanel({
-            id: "panel-explorer",
-            title: "Explorer",
-            component: "explorer",
-            minimumWidth: explorerMinWidth,
-            maximumWidth: explorerMaxWidth,
-            params: {
-                nodes: [
-                    "project/",
-                    "sequences/",
-                    "midi/",
-                    "audio/",
-                    "presets/",
-                ],
-            },
-        });
-
-        dockview.addPanel({
-            id: "panel-main",
-            title: "Main View",
-            component: "mainView",
-            initialWidth: mainInitialWidth,
-            params: {
-                mode: "graph",
-                nodeCount: 3,
-            },
-            position: { referencePanel: "panel-explorer", direction: "right" },
-        });
-
-        // dockview.addPanel({
-        //     id: "panel-terminal",
-        //     title: "Terminal",
-        //     component: "terminal",
-        //     initialHeight: terminalInitialHeight,
-        //     minimumHeight: terminalMinHeight,
-        //     maximumHeight: terminalMaxHeight,
-        //     params: {
-        //         lines: [
-        //             "[info] Session created",
-        //             "[info] Panels connected",
-        //             "[warn] No backend signal",
-        //         ],
-        //     },
-        //     position: { referencePanel: "panel-main", direction: "below" },
-        // });
+        const initialPanels = props.initialPanels ?? createDefaultInitialPanels();
+        for (const panel of initialPanels) {
+            addPanel(panel);
+        }
 
         return () => {
             dockview?.dispose();
@@ -192,4 +510,74 @@
     });
 </script>
 
-<div bind:this={containerElement} class="gc-dockview"></div>
+<div class="gc-main">
+    <div bind:this={containerElement} class="gc-dockview"></div>
+</div>
+
+<style>
+
+
+    :global(.gc-group-panel-add) {
+        position: relative;
+        display: flex;
+        align-items: center;
+        block-size: 100%;
+    }
+
+    :global(.gc-group-panel-add-trigger) {
+        inline-size: 1.4rem;
+        block-size: 1.4rem;
+        border: 0.0625rem solid
+            color-mix(in srgb, var(--gc-color-panel-outline) 88%, white 12%);
+        border-radius: 0.35rem;
+        background: color-mix(in srgb, var(--gc-color-panel-row) 78%, black);
+        color: inherit;
+        font-size: 0.92rem;
+        line-height: 1;
+        cursor: pointer;
+        padding: 0;
+    }
+
+    :global(.gc-group-panel-add-trigger:disabled) {
+        cursor: default;
+        opacity: 0.45;
+    }
+
+    :global(.gc-group-panel-add-menu) {
+        position: absolute;
+        inset-inline-start: 0;
+        inset-block-start: calc(100% + 0.3rem);
+        min-inline-size: 9rem;
+        max-inline-size: min(14rem, calc(100vw - 1rem));
+        display: grid;
+        gap: 0.2rem;
+        padding: 0.3rem;
+        border-radius: 0.45rem;
+        z-index: 20;
+        border: 0.0625rem solid
+            color-mix(in srgb, var(--gc-color-focus) 45%, transparent);
+        background: color-mix(in srgb, var(--gc-color-header) 84%, transparent);
+        backdrop-filter: blur(0.3rem);
+        box-shadow: 0 0.4rem 1rem color-mix(in srgb, black 60%, transparent);
+    }
+
+    :global(.gc-group-panel-add-menu[hidden]) {
+        display: none;
+    }
+
+    :global(.gc-group-panel-add-item) {
+        inline-size: 100%;
+        text-align: start;
+        padding: 0.35rem 0.5rem;
+        border: 0;
+        border-radius: 0.3rem;
+        color: inherit;
+        cursor: pointer;
+        font-size: 0.76rem;
+        background: color-mix(in srgb, var(--gc-color-panel-row) 76%, black);
+    }
+
+    :global(.gc-group-panel-add-item:hover) {
+        background: color-mix(in srgb, var(--gc-color-focus-muted) 74%, black);
+    }
+</style>

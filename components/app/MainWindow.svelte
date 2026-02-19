@@ -1,16 +1,25 @@
 <script lang="ts">
+	import "../../style/golden-core.css";
+
 	import MainComponent from "./MainComponent.svelte";
 	import { onMount } from "svelte";
 
 	import type { Snippet } from "svelte";
-    import AppHeader from "./AppHeader.svelte";
-    import { createWorkbenchSession } from "../../store/workbench.svelte";
+	import AppHeader from "./AppHeader.svelte";
+	import { createWorkbenchSession } from "../../store/workbench.svelte";
+	import AppFooter from "./AppFooter.svelte";
+	import type {
+		PanelSpawnRequest,
+		UserPanelDefinitionMap,
+	} from "../../dockview/panel-types";
 
 	const props = $props<{
 		wsUrl?: string;
 		httpBaseUrl?: string;
 		pollIntervalMs?: number;
 		bootstrapRetryMs?: number;
+		userPanels?: UserPanelDefinitionMap;
+		initialPanels?: PanelSpawnRequest[];
 		children?: Snippet;
 	}>();
 
@@ -98,8 +107,10 @@
 
 <div class="gc-main">
 	<AppHeader {session} />
-	<div class="gc-content">
-		<MainComponent {session} />
-	</div>
-	<div class="gc-footer"></div>
+	<MainComponent
+		{session}
+		userPanels={props.userPanels}
+		initialPanels={props.initialPanels}
+	/>
+	<AppFooter />
 </div>
