@@ -92,6 +92,7 @@
                         component: entry.component,
                         description: entry.description,
                         defaultParams: entry.defaultParams,
+                        renderPolicy: entry.renderPolicy,
                         origin: "user",
                     };
                     return accumulator;
@@ -246,6 +247,7 @@
                 ...(panelDefinition.defaultParams ?? {}),
                 ...(request.params ?? {}),
             },
+            renderer: request.renderPolicy ?? panelDefinition.renderPolicy,
             inactive: request.inactive,
             initialWidth: request.initialWidth,
             initialHeight: request.initialHeight,
@@ -284,6 +286,7 @@
 
         const listenerDisposables: DockviewIDisposable[] = [];
         const dockviewDisposables: DockviewIDisposable[] = [];
+        let hasGlobalListeners = false;
 
         const positionMenu = (): void => {
             if (menu.hidden) {
@@ -312,11 +315,22 @@
             menu.hidden = true;
             element.classList.remove("is-open");
             menu.style.transform = "";
+            if (hasGlobalListeners) {
+                document.removeEventListener("pointerdown", onGlobalPointerDown);
+                window.removeEventListener("resize", onViewportResize);
+                hasGlobalListeners = false;
+            }
         };
 
         const openMenu = (): void => {
             if (availablePanelDefinitions.length === 0) {
                 return;
+            }
+
+            if (!hasGlobalListeners) {
+                document.addEventListener("pointerdown", onGlobalPointerDown);
+                window.addEventListener("resize", onViewportResize);
+                hasGlobalListeners = true;
             }
 
             menu.hidden = false;
@@ -362,8 +376,6 @@
         trigger.addEventListener("click", onTriggerClick);
         trigger.addEventListener("mousedown", stopMouseDown);
         menu.addEventListener("mousedown", stopMouseDown);
-        document.addEventListener("pointerdown", onGlobalPointerDown);
-        window.addEventListener("resize", onViewportResize);
 
         listenerDisposables.push(
             {
@@ -375,16 +387,6 @@
             {
                 dispose: () => {
                     menu.removeEventListener("mousedown", stopMouseDown);
-                },
-            },
-            {
-                dispose: () => {
-                    document.removeEventListener("pointerdown", onGlobalPointerDown);
-                },
-            },
-            {
-                dispose: () => {
-                    window.removeEventListener("resize", onViewportResize);
                 },
             },
         );

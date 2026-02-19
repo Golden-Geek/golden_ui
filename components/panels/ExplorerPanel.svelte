@@ -1,4 +1,5 @@
 <script lang="ts">
+    import { onMount } from "svelte";
 	import type { PanelProps, PanelState } from "../../dockview/panel-types";
 
 	const initialProps: PanelProps = $props();

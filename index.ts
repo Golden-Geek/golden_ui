@@ -30,6 +30,7 @@ export type {
 	PanelExports,
 	PanelParams,
 	PanelProps,
+	PanelRenderPolicy,
 	PanelSpawnPosition,
 	PanelSpawnRequest,
 	PanelState,

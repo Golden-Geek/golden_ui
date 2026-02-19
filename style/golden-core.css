@@ -90,6 +90,13 @@ html {
     min-block-size: 0;
     display: flex;
     padding: .25rem;
+    app-region: no-drag;
+    -webkit-app-region: no-drag;
+}
+
+.gc-content * {
+    app-region: no-drag;
+    -webkit-app-region: no-drag;
 }
 
 

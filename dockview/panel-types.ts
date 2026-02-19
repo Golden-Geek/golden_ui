@@ -1,7 +1,9 @@
 import type { Component } from "svelte";
+import type { DockviewPanelRenderer } from "dockview-core";
 
 export type PanelParams = Record<string, unknown>;
 export type PanelDockDirection = "within" | "left" | "right" | "above" | "below";
+export type PanelRenderPolicy = DockviewPanelRenderer;
 
 export interface PanelState {
 	panelId: string;
@@ -31,6 +33,7 @@ export interface PanelDefinition {
 	component: PanelComponent;
 	description?: string;
 	defaultParams?: PanelParams;
+	renderPolicy?: PanelRenderPolicy;
 	origin?: "golden" | "user";
 }
 
@@ -39,6 +42,7 @@ export interface UserPanelDefinition {
 	component: PanelComponent;
 	description?: string;
 	defaultParams?: PanelParams;
+	renderPolicy?: PanelRenderPolicy;
 }
 
 export type UserPanelDefinitionMap = Record<string, UserPanelDefinition | PanelComponent>;
@@ -53,6 +57,7 @@ export interface PanelSpawnRequest {
 	panelId?: string;
 	title?: string;
 	params?: PanelParams;
+	renderPolicy?: PanelRenderPolicy;
 	position?: PanelSpawnPosition;
 	initialWidth?: number;
 	initialHeight?: number;

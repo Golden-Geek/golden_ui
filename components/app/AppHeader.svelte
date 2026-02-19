@@ -79,7 +79,7 @@
     });
 </script>
 
-<div class="gc-header">
+<div class="gc-header" data-tauri-drag-region>
     <div class="app-title">Chataigne 2.0.0</div>
     <div class="spacer"></div>
     <div class="controls">
