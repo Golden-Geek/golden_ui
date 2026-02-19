@@ -223,7 +223,7 @@ html {
         border: none;
         width: .7rem;
         height: .7rem;
-        background: url("assets/icons/close.png") center center no-repeat;
+        background: url("icons/close.png") center center no-repeat;
         background-size: contain;
         color: inherit;
         cursor: pointer;
