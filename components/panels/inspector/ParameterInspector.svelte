@@ -1,292 +1,379 @@
 <script lang="ts">
-	import { getWorkbenchContext } from '../../../store/workbench-context';
-	import type { ParamEventBehaviour, ParamValue, UiNodeDto } from '../../../types';
+	import { tick } from 'svelte';
+	import {
+		PropertyMode,
+		PropertyType,
+		type Property,
+		type PropertyValueType
+	} from '$lib/property/property.svelte';
+	import { propertiesInspectorClass } from './Inspector.svelte.ts';
+	import { saveData } from '$lib/engine/engine.svelte';
+	import { fade, slide } from 'svelte/transition';
+	import ExpressionEditor from './expression/ExpressionEditor.svelte';
+	import PropertyContainerInspector from './PropertyContainerInspector.svelte';
 
-	let {
-		node,
-		title = null
-	}: {
-		node: UiNodeDto;
-		title?: string | null;
-	} = $props();
+	let { targets, property = $bindable(), propKey, definition, level } = $props();
+	let target = $derived(targets.length > 0 ? targets[0] : null);
 
-	const session = getWorkbenchContext();
-	const param = $derived(node.data.kind === 'parameter' ? node.data.param : null);
-	const selectedEnumVariantId = $derived.by(() => {
-		if (!param) {
-			return undefined;
-		}
+	let propertyType = $derived(property ? (definition.type as PropertyType) : PropertyType.NONE);
+	let isContainer = $derived(definition.children != null);
+	let canDisable = $derived(definition.canDisable ?? false);
+	let enabled = $derived(canDisable ? (property.enabled ?? false) : true);
+	let visible = $derived(
+		definition?.visible instanceof Function
+			? definition.visible(target)
+			: (definition?.visible ?? true)
+	);
 
-		if (param.value.kind === 'enum') {
-			return param.value.value;
-		}
+	//Expression
+	let usingExpression = $derived(
+		property.mode == PropertyMode.EXPRESSION && property.expression != undefined
+	);
 
-		const exactValueMatch = param.constraints.enum_options.find(
-			(option) => JSON.stringify(option.value) === JSON.stringify(param.value)
-		);
-		if (exactValueMatch) {
-			return exactValueMatch.variant_id;
-		}
+	let resolvedValue = $derived(usingExpression ? (property as Property).getResolved() : null);
+	let expressionResultTag = $derived(
+		resolvedValue?.error ? 'error' : resolvedValue?.warning ? 'warning' : ''
+	);
 
-		if (param.value.kind === 'str') {
-			const variantId = param.value.value;
-			return param.constraints.enum_options.find(
-				(option) => option.variant_id === variantId
-			)?.variant_id;
-		}
+	let expressionMode = $derived(
+		usingExpression ? (property.bindingMode ? 'binding' : 'expression') : undefined
+	);
 
-		return undefined;
+	let canManuallyEdit = $derived(
+		!definition.readOnly && (!usingExpression || expressionMode === 'binding')
+	);
+
+	let propertyInfo: any = $derived(
+		propertiesInspectorClass[propertyType as keyof typeof propertiesInspectorClass]
+	);
+
+	let PropertyClass: any = $derived(propertyInfo ? propertyInfo.component : null);
+	let useFullSpace = $derived(propertyInfo ? (propertyInfo.useFullSpace ?? false) : false);
+
+	let valueOnFocus = undefined as PropertyValueType | undefined;
+
+	let customPropKey = $derived.by((): string | null => {
+		const pk = typeof propKey === 'string' ? propKey : String(propKey ?? '');
+		if (!pk) return null;
+		if (!pk.startsWith('customProps.')) return null;
+		const parts = pk.split('.');
+		const last = parts[parts.length - 1];
+		return last ? String(last) : null;
 	});
+	let isCustomProperty = $derived(customPropKey != null);
 
-	let activeContinuousEditId: string | null = null;
+	let isRenaming = $state(false);
+	let renameDraft = $state('');
 
-	const createClientEditId = (currentNode: UiNodeDto): string => {
-		if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-			return `drag-${currentNode.node_id}-${crypto.randomUUID()}`;
-		}
-		return `drag-${currentNode.node_id}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-	};
-
-	const beginContinuousEdit = (currentNode: UiNodeDto): void => {
-		if (activeContinuousEditId !== null) {
-			return;
-		}
-		const clientEditId = createClientEditId(currentNode);
-		activeContinuousEditId = clientEditId;
-		void session.sendIntent({
-			kind: 'beginEdit',
-			client_edit_id: clientEditId,
-			label: `Adjust ${currentNode.meta.label}`
-		});
-	};
-
-	const endContinuousEdit = (): void => {
-		if (activeContinuousEditId === null) {
+	function checkAndSaveProperty(force: boolean = false) {
+		if (property.getRaw() === valueOnFocus && !force) {
+			// console.log('No changes detected, skipping save.');
 			return;
 		}
 
-		void session.sendIntent({
-			kind: 'endEdit',
-			client_edit_id: activeContinuousEditId
+		saveData('Update ' + definition.name, {
+			coalesceID: `${target.id}-property-${level}-${definition.name}`
 		});
-		activeContinuousEditId = null;
-	};
+	}
 
-	const dispatchSetParam = (
-		currentNode: UiNodeDto,
-		value: ParamValue,
-		behaviourOverride?: ParamEventBehaviour
-	): void => {
-		if (currentNode.data.kind !== 'parameter') {
+	function reconcileTargetsAndSave(label: string, coalesceID: string) {
+		for (const t of targets ?? []) {
+			if (!t?.applySnapshot || !t?.toSnapshot) continue;
+			t.applySnapshot(t.toSnapshot(false), { mode: 'patch' });
+		}
+		saveData(label, { coalesceID });
+	}
+
+	async function beginRename() {
+		if (!isCustomProperty || definition.readOnly) return;
+		renameDraft = definition.name;
+		isRenaming = true;
+		await tick();
+	}
+
+	function commitRename() {
+		if (!customPropKey) return;
+		const nextName = String(renameDraft ?? '').trim();
+		if (!nextName) {
+			isRenaming = false;
 			return;
 		}
-		void session.sendIntent({
-			kind: 'setParam',
-			node: currentNode.node_id,
-			value,
-			behaviour: behaviourOverride ?? currentNode.data.param.event_behaviour
-		});
-	};
+
+		for (const t of targets ?? []) {
+			if (!t?.addCustomProperty) continue;
+			t.addCustomProperty(customPropKey, {
+				type: definition.type as PropertyType,
+				name: nextName,
+				default: definition.default,
+				canDisable: definition.canDisable,
+				readOnly: definition.readOnly,
+				description: definition.description,
+				options: definition.options,
+				min: typeof definition.min === 'number' ? definition.min : undefined,
+				max: typeof definition.max === 'number' ? definition.max : undefined,
+				step: typeof definition.step === 'number' ? definition.step : undefined,
+				syntax: definition.syntax
+			});
+		}
+
+		reconcileTargetsAndSave('Rename Custom Property', `custom-prop-rename-${customPropKey}`);
+		isRenaming = false;
+	}
 </script>
 
-{#if param}
-	<article class="param-card">
-		<header class="param-header">
-			<p class="param-label">{title ?? node.meta.label}</p>
-			<p class="param-subtitle">{node.decl_id}</p>
-		</header>
+{#if visible}
+	<div
+		class="property-inspector {isContainer ? 'container' : 'single'} {'level-' + level} {enabled
+			? ''
+			: 'disabled'}
+		{definition.readOnly ? 'readonly' : ''}"
+	>
+		{#if isContainer}
+			<PropertyContainerInspector {targets} bind:property {propKey} {definition} {level} />
+		{:else if target != null && property != null}
+			<div class="firstline">
+				<div class="property-label {expressionResultTag}">
+					{#if canDisable}
+						<button
+							class="enable-property"
+							onclick={() => {
+								property.enabled = !enabled ? true : undefined;
+								checkAndSaveProperty(true);
+							}}
+						>
+							{enabled ? '🟢' : '⚪'}
+						</button>
+					{/if}
+					{#if isCustomProperty && !definition.readOnly}
+						{#if isRenaming}
+							<input
+								class="custom-prop-name"
+								autofocus
+								bind:value={renameDraft}
+								onblur={commitRename}
+								onkeydown={(e) => {
+									if (e.key === 'Enter') commitRename();
+									if (e.key === 'Escape') {
+										isRenaming = false;
+										renameDraft = definition.name;
+									}
+								}}
+							/>
+						{:else}
+							<span
+								class="custom-prop-name-text"
+								ondblclick={beginRename}
+								title="Double-click to rename"
+							>
+								{definition.name}
+							</span>
+						{/if}
+					{:else}
+						{definition.name}
+					{/if}
+					{#if !definition.readOnly && property.isValueOverridden()}
+						<button
+							class="reset-property"
+							aria-label="Reset Property"
+							onclick={() => {
+								property.resetToDefault();
+								saveData('Reset Property', {
+									coalesceID: `${target.id}-property-${level}-${definition.name}-reset`
+								});
+							}}
+							transition:fade={{ duration: 200 }}
+						>
+							⟲
+						</button>
+					{/if}
+				</div>
 
-		<div class="field">
-			<p class="field-label">Value</p>
-			{#if param.value.kind === 'bool'}
-				<input
-					type="checkbox"
-					checked={param.value.value}
-					disabled={param.read_only}
-					onchange={(event) =>
-						dispatchSetParam(node, {
-							kind: 'bool',
-							value: (event.currentTarget as HTMLInputElement).checked
-						})}
-				/>
-			{:else if param.value.kind === 'int'}
-				<input
-					type="number"
-					value={param.value.value}
-					min={param.constraints.min}
-					max={param.constraints.max}
-					step={param.constraints.step ?? 1}
-					disabled={param.read_only}
-					onchange={(event) =>
-						dispatchSetParam(node, {
-							kind: 'int',
-							value: Number((event.currentTarget as HTMLInputElement).value)
-						})}
-				/>
-			{:else if param.value.kind === 'float'}
-				<input
-					type={param.constraints.min !== undefined && param.constraints.max !== undefined ? 'range' : 'number'}
-					value={param.value.value}
-					min={param.constraints.min}
-					max={param.constraints.max}
-					step={param.constraints.step ?? 0.01}
-					disabled={param.read_only}
-					onpointerdown={() => {
-						if (param.constraints.min !== undefined && param.constraints.max !== undefined) {
-							beginContinuousEdit(node);
-						}
-					}}
-					oninput={(event) => {
-						if (param.constraints.min !== undefined && param.constraints.max !== undefined) {
-							dispatchSetParam(
-								node,
-								{
-									kind: 'float',
-									value: Number((event.currentTarget as HTMLInputElement).value)
-								},
-								'Coalesce'
-							);
-						}
-					}}
-					onchange={(event) => {
-						if (param.constraints.min !== undefined && param.constraints.max !== undefined) {
-							endContinuousEdit();
-							return;
-						}
+				{#if !useFullSpace}
+					<div class="spacer"></div>
+				{/if}
 
-						dispatchSetParam(
-							node,
-							{
-								kind: 'float',
-								value: Number((event.currentTarget as HTMLInputElement).value)
-							},
-							'Append'
-						);
-					}}
-					onpointerup={() => endContinuousEdit()}
-					onpointercancel={() => endContinuousEdit()}
-					onblur={() => endContinuousEdit()}
-				/>
-			{:else if param.value.kind === 'enum'}
-				<input
-					type="text"
-					value={param.value.value}
-					disabled={param.read_only}
-					onchange={(event) =>
-						dispatchSetParam(node, {
-							kind: 'enum',
-							value: (event.currentTarget as HTMLInputElement).value
-						})}
-				/>
-			{:else if param.value.kind === 'str'}
-				<input
-					type="text"
-					value={param.value.value}
-					disabled={param.read_only}
-					onchange={(event) =>
-						dispatchSetParam(node, {
-							kind: 'str',
-							value: (event.currentTarget as HTMLInputElement).value
-						})}
-				/>
-			{:else}
-				<pre>{JSON.stringify(param.value)}</pre>
+				{#if PropertyClass}
+					<div
+						class="property-wrapper {expressionMode} {canManuallyEdit
+							? ''
+							: 'readonly'} {useFullSpace ? 'full-space' : ''}"
+					>
+						<PropertyClass
+							{targets}
+							bind:property
+							onStartEdit={() => (valueOnFocus = property.getRaw())}
+							onUpdate={() => checkAndSaveProperty()}
+							{definition}
+							{propKey}
+							{expressionMode}
+							{expressionResultTag}
+						/>
+					</div>
+
+					<button
+						class="expression-toggle {expressionMode}"
+						disabled={definition.readOnly}
+						onclick={() => {
+							property.mode =
+								property.mode == PropertyMode.EXPRESSION ? undefined : PropertyMode.EXPRESSION;
+							saveData('Set Property Mode', {
+								coalesceID: `${target.id}-property-${level}-${definition.name}-mode`
+							});
+						}}>ƒ</button
+					>
+				{/if}
+			</div>
+
+			{#if property.mode == PropertyMode.EXPRESSION && property.expression && (property?.enabled || !canDisable)}
+				<div class="property-expression" transition:slide={{ duration: 200 }}>
+					<ExpressionEditor
+						{targets}
+						bind:property
+						{definition}
+						onUpdate={() => checkAndSaveProperty(true)}
+					></ExpressionEditor>
+				</div>
 			{/if}
-
-			{#if param.constraints.enum_options.length > 0}
-				<select
-					value={selectedEnumVariantId}
-					disabled={param.read_only}
-					onchange={(event) => {
-						const variantId = (event.currentTarget as HTMLSelectElement).value;
-						const variant = param.constraints.enum_options.find(
-							(option) => option.variant_id === variantId
-						);
-						if (variant) {
-							dispatchSetParam(node, { kind: 'enum', value: variant.variant_id });
-						}
-					}}
-				>
-					{#each param.constraints.enum_options as option (option.variant_id)}
-						<option value={option.variant_id}>
-							{option.label}
-						</option>
-					{/each}
-				</select>
-			{/if}
-		</div>
-
-		<p class="hint">
-			event: {param.event_behaviour} | constraints: {param.constraints.policy}
-		</p>
-	</article>
+		{:else}
+			{definition.type} - {target} - {property}
+		{/if}
+	</div>
 {/if}
 
 <style>
-	.param-card {
-		background: color-mix(in srgb, var(--panel-bg) 86%, white 14%);
-		border: 0.0625rem solid var(--panel-border);
-		border-radius: 0.625rem;
-		padding: 0.65rem;
-		display: grid;
-		gap: 0.55rem;
+	.property-inspector.level-0 {
+		margin: 0.25em 0;
 	}
 
-	.param-header {
-		display: flex;
-		align-items: baseline;
-		justify-content: space-between;
-		gap: 0.75rem;
-	}
-
-	.param-label {
-		margin: 0;
-		font-weight: 600;
-	}
-
-	.param-subtitle {
-		margin: 0;
-		font-size: 0.68rem;
-		text-transform: uppercase;
-		letter-spacing: 0.05em;
-		opacity: 0.65;
-	}
-
-	.field {
-		display: grid;
-		grid-template-columns: 1fr;
-		gap: 0.35rem;
-	}
-
-	.field-label {
-		margin: 0;
-		font-size: 0.75rem;
-		text-transform: uppercase;
-		letter-spacing: 0.06em;
-		opacity: 0.75;
-	}
-
-	input[type='text'],
-	input[type='number'],
-	select {
+	.property-inspector {
 		width: 100%;
-		background: color-mix(in srgb, var(--panel-bg) 75%, white 25%);
-		color: inherit;
-		border: 0.0625rem solid var(--panel-border);
-		border-radius: 0.5rem;
-		padding: 0.4rem 0.45rem;
+		display: flex;
+		gap: 0.25rem;
+		flex-direction: column;
+		box-sizing: border-box;
+		transition: opacity 0.2s ease;
 	}
 
-	.hint {
-		margin: 0;
-		font-size: 0.75rem;
-		opacity: 0.7;
+	.property-inspector .firstline {
+		width: 100%;
+		display: flex;
+		align-items: center;
+		justify-content: stretch;
+		gap: 0.25rem;
 	}
 
-	pre {
-		margin: 0;
-		white-space: pre-wrap;
-		word-break: break-word;
-		font-size: 0.75rem;
+	.property-inspector.disabled,
+	.property-inspector.readonly {
+		opacity: 0.5;
+		user-select: none;
+		touch-action: none;
+		pointer-events: none;
+	}
+
+	.spacer {
+		flex-grow: 1;
+	}
+
+	.property-wrapper {
+		display: flex;
+		align-items: center;
+	}
+
+	.property-wrapper.full-space {
+		flex-grow: 1;
+		width: 100%;
+	}
+
+	.property-wrapper.readonly {
+		opacity: 0.6;
+		pointer-events: none;
+		touch-action: none;
+	}
+
+	.property-inspector.single {
+		padding: 0.1rem 0.3rem 0.2rem 0;
+		border-bottom: solid 1px rgb(from var(--border-color) r g b / 5%);
+		min-height: 1.5rem;
+	}
+
+	.property-label {
+		display: flex;
+		align-items: center;
+		min-width: max-content;
+	}
+
+	.property-label.error {
+		color: var(--error-color);
+		font-weight: bold;
+	}
+
+	.enable-property {
+		font-size: 0.5rem;
+		padding: 0.2rem 0.2rem 0.1rem;
+		vertical-align: middle;
+		cursor: pointer;
+		pointer-events: all;
+	}
+
+	.reset-property {
+		background: none;
+		border: none;
+		cursor: pointer;
+		font-size: 0.8rem;
+		margin-left: 0.25rem;
+		color: var(--text-color);
+		padding: 0;
+		opacity: 0.5;
+		transition: opacity 0.5s;
+	}
+
+	.reset-property:hover {
+		opacity: 1;
+	}
+
+	.custom-prop-name-text {
+		cursor: text;
+	}
+
+	.custom-prop-name {
+		height: 1.5rem;
+		background-color: var(--bg-color);
+		color: var(--text-color);
+		font-size: 0.8rem;
+		border: 1px solid rgba(from var(--border-color) r g b / 20%);
+		border-radius: 0.25rem;
+		padding: 0 0.35rem;
+	}
+
+	.expression-toggle {
+		background: none;
+		border: none;
+		cursor: pointer;
+		font-size: 1rem;
+		padding: 0 0.2rem 0 0.5rem;
+		color: var(--text-color);
+		opacity: 0.5;
+		transition: opacity 0.1s;
+	}
+
+	.expression-toggle:hover {
+		opacity: 1;
+	}
+
+	.expression-toggle.expression {
+		opacity: 0.9;
+		color: var(--expression-color);
+		font-weight: bold;
+	}
+
+	.expression-toggle.binding {
+		opacity: 0.9;
+		color: var(--binding-color);
+		font-weight: bold;
+	}
+
+	.property-inspector .property-expression {
+		flex-grow: 1;
+		width: 100%;
 	}
 </style>

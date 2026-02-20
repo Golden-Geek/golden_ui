@@ -27,28 +27,33 @@
         UserPanelDefinition,
         UserPanelDefinitionMap,
     } from "$lib/golden_ui/dockview/panel-types";
-    import type { WorkbenchSession } from "../../store/workbench.svelte";
+    import {
+        configureNodeIcons,
+        type NodeIconSet,
+    } from "../../store/node-types";
 
-    import ExplorerPanel from "../panels/ExplorerPanel.svelte";
     import MainViewPanel from "../panels/MainViewPanel.svelte";
     import UnknownPanel from "../panels/UnknownPanel.svelte";
+    import Outliner from "../panels/outliner/OutlinerPanel.svelte";
+    import InspectorPanel from "../panels/inspector/InspectorPanel.svelte";
 
     const props = $props<{
-        session?: WorkbenchSession | null;
         userPanels?: UserPanelDefinitionMap;
         initialPanels?: PanelSpawnRequest[];
+        nodeIcons?: NodeIconSet;
     }>();
+
+    $effect(() => {
+        configureNodeIcons(props.nodeIcons);
+    });
 
     type MountedPanel = PanelExports & Record<string, unknown>;
 
     const goldenPanelDefinitions: Record<string, PanelDefinition> = {
-        explorer: {
-            panelType: "explorer",
-            title: "Explorer",
-            component: ExplorerPanel,
-            defaultParams: {
-                nodes: ["project/", "sequences/", "midi/", "audio/", "presets/"],
-            },
+        inspector: {
+            panelType: "inspector",
+            title: "Inspector",
+            component: InspectorPanel,
             origin: "golden",
         },
         mainView: {
@@ -59,6 +64,13 @@
                 mode: "graph",
                 nodeCount: 3,
             },
+            origin: "golden",
+        },
+
+        outliner: {
+            panelType: "outliner",
+            title: "Outliner",
+            component: Outliner,
             origin: "golden",
         },
     };
@@ -181,7 +193,10 @@
                 panelState = {
                     panelId: parameters.api.id,
                     panelType: options.name,
-                    title: parameters.title ?? panelDefinition?.title ?? options.name,
+                    title:
+                        parameters.title ??
+                        panelDefinition?.title ??
+                        options.name,
                     params: parameters.params ?? {},
                 };
 
@@ -257,7 +272,8 @@
             maximumHeight: request.maximumHeight,
         };
 
-        const position = overridePosition ?? toDockviewPosition(request.position);
+        const position =
+            overridePosition ?? toDockviewPosition(request.position);
         if (position) {
             options.position = position;
         }
@@ -275,7 +291,7 @@
         const trigger = document.createElement("button");
         trigger.type = "button";
         trigger.className = "gc-group-panel-add-trigger";
-        trigger.textContent = "+";
+        // trigger.textContent = "+";
         trigger.setAttribute("aria-label", "Add panel in this group");
         trigger.setAttribute("title", "Add panel");
         trigger.disabled = availablePanelDefinitions.length === 0;
@@ -316,7 +332,10 @@
             element.classList.remove("is-open");
             menu.style.transform = "";
             if (hasGlobalListeners) {
-                document.removeEventListener("pointerdown", onGlobalPointerDown);
+                document.removeEventListener(
+                    "pointerdown",
+                    onGlobalPointerDown,
+                );
                 window.removeEventListener("resize", onViewportResize);
                 hasGlobalListeners = false;
             }
@@ -469,16 +488,27 @@
 
         return [
             {
-                panelId: "panel-explorer",
-                panelType: "explorer",
-                minimumWidth: explorerMinWidth,
-                maximumWidth: explorerMaxWidth,
+                panelId: "outliner",
+                panelType: "outliner",
+                initialWidth: remToPx(10),
+                maximumWidth: remToPx(30),
             },
             {
                 panelId: "panel-main",
                 panelType: "mainView",
                 initialWidth: mainInitialWidth,
-                position: { referencePanelId: "panel-explorer", direction: "right" },
+                position: {
+                    referencePanelId: "outliner",
+                    direction: "right",
+                },
+            },
+            {
+                panelId: "inspector",
+                panelType: "inspector",
+                position: {
+                    referencePanelId: "panel-main",
+                    direction: "right",
+                },
             },
         ];
     };
@@ -500,7 +530,8 @@
             theme: goldenDockviewTheme,
         });
 
-        const initialPanels = props.initialPanels ?? createDefaultInitialPanels();
+        const initialPanels =
+            props.initialPanels ?? createDefaultInitialPanels();
         for (const panel of initialPanels) {
             addPanel(panel);
         }
@@ -512,13 +543,11 @@
     });
 </script>
 
-<div class="gc-main">
+<div class="gc-content">
     <div bind:this={containerElement} class="gc-dockview"></div>
 </div>
 
 <style>
-
-
     :global(.gc-group-panel-add) {
         position: relative;
         display: flex;

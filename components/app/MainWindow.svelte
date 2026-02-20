@@ -6,12 +6,16 @@
 
 	import type { Snippet } from "svelte";
 	import AppHeader from "./AppHeader.svelte";
-	import { createWorkbenchSession } from "../../store/workbench.svelte";
+	import {
+		appState,
+		createWorkbenchSession,
+	} from "../../store/workbench.svelte";
 	import AppFooter from "./AppFooter.svelte";
 	import type {
 		PanelSpawnRequest,
 		UserPanelDefinitionMap,
 	} from "../../dockview/panel-types";
+	import type { NodeIconSet } from "../../store/node-types";
 
 	const props = $props<{
 		wsUrl?: string;
@@ -20,6 +24,7 @@
 		bootstrapRetryMs?: number;
 		userPanels?: UserPanelDefinitionMap;
 		initialPanels?: PanelSpawnRequest[];
+		nodeIcons?: NodeIconSet;
 		children?: Snippet;
 	}>();
 
@@ -30,6 +35,8 @@
 		bootstrapRetryMs: props.bootstrapRetryMs ?? 1000,
 	});
 
+	appState.session = session;
+	
 	onMount(() => session.mount());
 
 	let isWindowMaximized = $state(false);
@@ -106,11 +113,11 @@
 </script>
 
 <div class="gc-main">
-	<AppHeader {session} />
+	<AppHeader {session}/>
 	<MainComponent
-		{session}
 		userPanels={props.userPanels}
 		initialPanels={props.initialPanels}
+		nodeIcons={props.nodeIcons}
 	/>
 	<AppFooter />
 </div>
