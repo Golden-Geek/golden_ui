@@ -5,6 +5,7 @@
 	import { appState } from "$lib/golden_ui/store/workbench.svelte";
 	import ParameterInspector from "./ParameterInspector.svelte";
 	import { getIconURLForNode } from "$lib/golden_ui/store/node-types";
+	import EnableButton from "../../common/EnableButton.svelte";
 
 	let {
 		nodes = [],
@@ -38,8 +39,12 @@
 	let isParameter = $derived(node?.data.kind === "parameter");
 	let showAsContainer = $derived(!isParameter);
 	let hasChildren = $derived(children.length > 0);
-
+	let canBeDisabled = $derived(node?.meta?.can_be_disabled ?? false);
+	$inspect("node", node?.meta);
 	let iconURL = $derived(getIconURLForNode(node));
+
+	let titleTextElem : HTMLSpanElement = $state(null as HTMLSpanElement | null);
+	let arrowElem : HTMLSpanElement = $state(null as HTMLSpanElement | null);
 </script>
 
 {#if node}
@@ -56,7 +61,10 @@
 					role="switch"
 					aria-checked={!collapsed}
 					tabindex="0"
-					onclick={() => (collapsed = !collapsed)}
+					onclick={(e) => {
+						if (e.target == arrowElem || e.target == titleTextElem)
+							collapsed = !collapsed;
+					}}
 					onkeydown={(e) => {
 						if (e.key === "Enter" || e.key === " ") {
 							collapsed = !collapsed;
@@ -64,12 +72,20 @@
 					}}
 				>
 					{#if hasChildren}
-						<span class="arrow {collapsed ? '' : 'down'}"></span>
+						<span
+							class="arrow {collapsed ? '' : 'down'}"
+							bind:this={arrowElem}
+						></span>
 					{/if}
 					<span class="header-icon">
 						<img src={iconURL} alt="" />
 					</span>
-					<span class="title-text">
+
+					{#if canBeDisabled}
+						<EnableButton {node} />
+					{/if}
+
+					<span class="title-text" bind:this={titleTextElem}>
 						{node.meta.label || "Container"}
 					</span>
 				</span>

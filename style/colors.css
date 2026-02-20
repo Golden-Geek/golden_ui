@@ -7,6 +7,7 @@
 	--gc-color-text: #bababa;
 	--gc-color-panel: #1f2021;
 
+
 	/* SELECTION */
 	--gc-color-selection: #d81dac;
 	--gc-color-focus: #23bbd9;
@@ -14,7 +15,10 @@
 	/*  OUTLINER */
 	--gc-color-outliner-border: rgba(255, 255, 255, 0.152);
 
-    /* DOCKVIEW COLORS */
+	/* NODES */
+	--gc-color-node-enabled: #54c30f;
+
+	/* DOCKVIEW COLORS */
 	--gc-color-dock-surface: transparent;
 	--gc-color-dock-group-background: transparent;
 	--gc-color-dock-tabbar-background: transparent;
