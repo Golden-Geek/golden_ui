@@ -1,127 +1,103 @@
 <script lang="ts">
-	import { tick } from 'svelte';
-	import {
-		PropertyMode,
-		PropertyType,
-		type Property,
-		type PropertyValueType
-	} from '$lib/property/property.svelte';
-	import { propertiesInspectorClass } from './Inspector.svelte.ts';
-	import { saveData } from '$lib/engine/engine.svelte';
-	import { fade, slide } from 'svelte/transition';
-	import ExpressionEditor from './expression/ExpressionEditor.svelte';
-	import PropertyContainerInspector from './PropertyContainerInspector.svelte';
+	import type { UiNodeDto } from "$lib/golden_ui/types";
 
-	let { targets, property = $bindable(), propKey, definition, level } = $props();
-	let target = $derived(targets.length > 0 ? targets[0] : null);
+	let { node, level, order } = $props<{
+		node: UiNodeDto;
+		level: number;
+		order: "first" | "last" | "solo" | "";
+	}>();
 
-	let propertyType = $derived(property ? (definition.type as PropertyType) : PropertyType.NONE);
-	let isContainer = $derived(definition.children != null);
-	let canDisable = $derived(definition.canDisable ?? false);
-	let enabled = $derived(canDisable ? (property.enabled ?? false) : true);
-	let visible = $derived(
-		definition?.visible instanceof Function
-			? definition.visible(target)
-			: (definition?.visible ?? true)
-	);
+	let param = $derived(node.data.param);
+	let type = $derived(param.value.kind);
+	let canDisable = $derived(node.can_be_disabled ?? false);
+	let enabled = $derived(node.enabled ?? true);
+	let visible = $derived(!node.meta.hiden_in_inspector ? false : true);
 
-	//Expression
-	let usingExpression = $derived(
-		property.mode == PropertyMode.EXPRESSION && property.expression != undefined
-	);
+	let canManuallyEdit = $derived(!param.meta.read_only);
 
-	let resolvedValue = $derived(usingExpression ? (property as Property).getResolved() : null);
-	let expressionResultTag = $derived(
-		resolvedValue?.error ? 'error' : resolvedValue?.warning ? 'warning' : ''
-	);
+	// let propertyInfo: any = $derived(
+	// 	propertiesInspectorClass[propertyType as keyof typeof propertiesInspectorClass]
+	// );
 
-	let expressionMode = $derived(
-		usingExpression ? (property.bindingMode ? 'binding' : 'expression') : undefined
-	);
+	// let PropertyClass: any = $derived(propertyInfo ? propertyInfo.component : null);
+	// let useFullSpace = $derived(propertyInfo ? (propertyInfo.useFullSpace ?? false) : false);
 
-	let canManuallyEdit = $derived(
-		!definition.readOnly && (!usingExpression || expressionMode === 'binding')
-	);
+	// let valueOnFocus = undefined as PropertyValueType | undefined;
 
-	let propertyInfo: any = $derived(
-		propertiesInspectorClass[propertyType as keyof typeof propertiesInspectorClass]
-	);
+	// let customPropKey = $derived.by((): string | null => {
+	// 	const pk = typeof propKey === 'string' ? propKey : String(propKey ?? '');
+	// 	if (!pk) return null;
+	// 	if (!pk.startsWith('customProps.')) return null;
+	// 	const parts = pk.split('.');
+	// 	const last = parts[parts.length - 1];
+	// 	return last ? String(last) : null;
+	// });
+	// let isCustomProperty = $derived(customPropKey != null);
 
-	let PropertyClass: any = $derived(propertyInfo ? propertyInfo.component : null);
-	let useFullSpace = $derived(propertyInfo ? (propertyInfo.useFullSpace ?? false) : false);
+	// let isRenaming = $state(false);
+	// let renameDraft = $state('');
 
-	let valueOnFocus = undefined as PropertyValueType | undefined;
+	// function checkAndSaveProperty(force: boolean = false) {
+	// 	if (property.getRaw() === valueOnFocus && !force) {
+	// 		// console.log('No changes detected, skipping save.');
+	// 		return;
+	// 	}
 
-	let customPropKey = $derived.by((): string | null => {
-		const pk = typeof propKey === 'string' ? propKey : String(propKey ?? '');
-		if (!pk) return null;
-		if (!pk.startsWith('customProps.')) return null;
-		const parts = pk.split('.');
-		const last = parts[parts.length - 1];
-		return last ? String(last) : null;
-	});
-	let isCustomProperty = $derived(customPropKey != null);
+	// 	saveData('Update ' + definition.name, {
+	// 		coalesceID: `${target.id}-property-${level}-${definition.name}`
+	// 	});
+	// }
 
-	let isRenaming = $state(false);
-	let renameDraft = $state('');
+	// function reconcileTargetsAndSave(label: string, coalesceID: string) {
+	// 	for (const t of targets ?? []) {
+	// 		if (!t?.applySnapshot || !t?.toSnapshot) continue;
+	// 		t.applySnapshot(t.toSnapshot(false), { mode: 'patch' });
+	// 	}
+	// 	saveData(label, { coalesceID });
+	// }
 
-	function checkAndSaveProperty(force: boolean = false) {
-		if (property.getRaw() === valueOnFocus && !force) {
-			// console.log('No changes detected, skipping save.');
-			return;
-		}
+	// async function beginRename() {
+	// 	if (!isCustomProperty || definition.readOnly) return;
+	// 	renameDraft = definition.name;
+	// 	isRenaming = true;
+	// 	await tick();
+	// }
 
-		saveData('Update ' + definition.name, {
-			coalesceID: `${target.id}-property-${level}-${definition.name}`
-		});
-	}
+	// function commitRename() {
+	// 	if (!customPropKey) return;
+	// 	const nextName = String(renameDraft ?? '').trim();
+	// 	if (!nextName) {
+	// 		isRenaming = false;
+	// 		return;
+	// 	}
 
-	function reconcileTargetsAndSave(label: string, coalesceID: string) {
-		for (const t of targets ?? []) {
-			if (!t?.applySnapshot || !t?.toSnapshot) continue;
-			t.applySnapshot(t.toSnapshot(false), { mode: 'patch' });
-		}
-		saveData(label, { coalesceID });
-	}
+	// 	for (const t of targets ?? []) {
+	// 		if (!t?.addCustomProperty) continue;
+	// 		t.addCustomProperty(customPropKey, {
+	// 			type: definition.type as PropertyType,
+	// 			name: nextName,
+	// 			default: definition.default,
+	// 			canDisable: definition.canDisable,
+	// 			readOnly: definition.readOnly,
+	// 			description: definition.description,
+	// 			options: definition.options,
+	// 			min: typeof definition.min === 'number' ? definition.min : undefined,
+	// 			max: typeof definition.max === 'number' ? definition.max : undefined,
+	// 			step: typeof definition.step === 'number' ? definition.step : undefined,
+	// 			syntax: definition.syntax
+	// 		});
+	// 	}
 
-	async function beginRename() {
-		if (!isCustomProperty || definition.readOnly) return;
-		renameDraft = definition.name;
-		isRenaming = true;
-		await tick();
-	}
-
-	function commitRename() {
-		if (!customPropKey) return;
-		const nextName = String(renameDraft ?? '').trim();
-		if (!nextName) {
-			isRenaming = false;
-			return;
-		}
-
-		for (const t of targets ?? []) {
-			if (!t?.addCustomProperty) continue;
-			t.addCustomProperty(customPropKey, {
-				type: definition.type as PropertyType,
-				name: nextName,
-				default: definition.default,
-				canDisable: definition.canDisable,
-				readOnly: definition.readOnly,
-				description: definition.description,
-				options: definition.options,
-				min: typeof definition.min === 'number' ? definition.min : undefined,
-				max: typeof definition.max === 'number' ? definition.max : undefined,
-				step: typeof definition.step === 'number' ? definition.step : undefined,
-				syntax: definition.syntax
-			});
-		}
-
-		reconcileTargetsAndSave('Rename Custom Property', `custom-prop-rename-${customPropKey}`);
-		isRenaming = false;
-	}
+	// 	reconcileTargetsAndSave('Rename Custom Property', `custom-prop-rename-${customPropKey}`);
+	// 	isRenaming = false;
+	// }
 </script>
 
-{#if visible}
+<div class="parameter-inspector level-{level} {order}">
+	Parameter Inspector for {node?.meta.label}
+</div>
+
+<!-- {#if visible}
 	<div
 		class="property-inspector {isContainer ? 'container' : 'single'} {'level-' + level} {enabled
 			? ''
@@ -238,23 +214,28 @@
 			{definition.type} - {target} - {property}
 		{/if}
 	</div>
-{/if}
+{/if} -->
 
 <style>
-	.property-inspector.level-0 {
-		margin: 0.25em 0;
+	.parameter-inspector.level-0 {
+		margin: 2rem;
 	}
 
-	.property-inspector {
+	.parameter-inspector {
 		width: 100%;
 		display: flex;
 		gap: 0.25rem;
 		flex-direction: column;
 		box-sizing: border-box;
 		transition: opacity 0.2s ease;
+		padding: 0.5rem 0;
 	}
 
-	.property-inspector .firstline {
+	.parameter-inspector:not(.last):not(.solo):not(.level-0) {
+		border-bottom: solid 1px rgba(255, 255, 255, 0.1);
+	}
+
+	.parameter-inspector .firstline {
 		width: 100%;
 		display: flex;
 		align-items: center;
@@ -262,8 +243,8 @@
 		gap: 0.25rem;
 	}
 
-	.property-inspector.disabled,
-	.property-inspector.readonly {
+	.parameter-inspector.disabled,
+	.parameter-inspector.readonly {
 		opacity: 0.5;
 		user-select: none;
 		touch-action: none;
@@ -290,7 +271,7 @@
 		touch-action: none;
 	}
 
-	.property-inspector.single {
+	.parameter-inspector.single {
 		padding: 0.1rem 0.3rem 0.2rem 0;
 		border-bottom: solid 1px rgb(from var(--border-color) r g b / 5%);
 		min-height: 1.5rem;
@@ -372,7 +353,7 @@
 		font-weight: bold;
 	}
 
-	.property-inspector .property-expression {
+	.parameter-inspector .property-expression {
 		flex-grow: 1;
 		width: 100%;
 	}

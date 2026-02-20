@@ -1,13 +1,14 @@
 <script lang="ts">
-	import { Menu } from "./inspector.svelte.ts";
-	// import DataInspector from "./DataInspector.svelte";
-	// import GenericInspector from "./GenericInspector.svelte";
-	import { slide } from "svelte/transition";
+	import NodeDataInspector from "./NodeDataInspector.svelte";
+	import NodeInspector from "./NodeInspector.svelte";
+
 	import { appState } from "../../../store/workbench.svelte.ts";
 	import type {
 		PanelProps,
 		PanelState,
 	} from "../../../dockview/panel-types.ts";
+	import { slide } from "svelte/transition";
+	import { getIconURLForNode } from "$lib/golden_ui/store/node-types.ts";
 
 	const initialProps: PanelProps = $props();
 
@@ -23,55 +24,28 @@
 	};
 
 	let session = $derived(appState.session);
-	let mainGraphState = $derived(session?.graph.state);
-
-	let currentMenu = Menu.Node; // $derived(mainState.editor?.inspectorMenu);
 
 	let selectedNodes = $derived(session?.getSelectedNodes() ?? []);
 	$inspect("nodes", selectedNodes);
 
-	// $effect(() => {
-	// 	switch (currentMenu) {
-	// 		case Menu.Widget:
-	// 			targets = selectedWidgets;
-	// 			break;
-	//
-	// case Menu.Board:
-	// 	targets = mainState.selectedBoard
-	// 		? [mainState.selectedBoard]
-	// 		: [];
-	// 	break;
-
-	// case Menu.Server:
-	// 	targets = mainState.selectedServer
-	// 		? [mainState.selectedServer]
-	// 		: [];
-	// 	break;
-	//
-	// 		case Menu.Global:
-	// 			targets = mainState.globalSettings
-	// 				? [mainState.globalSettings]
-	// 				: [];
-	// 			break;
-	// 	}
-	// });
-
-	function setCurrentMenu(menu: Menu) {
-		// mainState.editor.inspectorMenu = menu;
-		// saveData("Change Inspector Menu", {
-		// 	coalesceID: "change-inspector-menu",
-		// });
-	}
+	let iconURL = $derived(
+		selectedNodes.length === 1 ? getIconURLForNode(selectedNodes[0]) : null,
+	);
 
 	let dataInspectorCollapsed = $state(true);
 </script>
 
 <div class="inspector">
 	<div class="inspector-header">
+		<span class="header-icon">
+			{#if iconURL}
+				<img src={iconURL} alt="" />
+			{/if}
+		</span>
 		<span class="target-id"
 			>{selectedNodes.length > 0
 				? selectedNodes.length === 1
-					? selectedNodes[0].uuid
+					? selectedNodes[0].meta.label
 					: selectedNodes.length + " selected nodes"
 				: ""}
 			<button
@@ -85,25 +59,22 @@
 			>
 		</span>
 	</div>
-	<div class="menu-bar">
-		{#each Object.values(Menu) as menu}
-			<button
-				class="menu-button {menu === currentMenu ? 'active' : ''}"
-				style="--accent-color: var(--{menu.toLowerCase()}-color)"
-				onclick={() => setCurrentMenu(menu)}
-			>
-				{menu}
-			</button>
-		{/each}
-	</div>
 
 	<div class="inspector-content">
-		<!-- <GenericInspector {selectedNodes} /> -->
+		<NodeInspector nodes={selectedNodes} level={0} />
 	</div>
+
 	<div class="data-inspector {dataInspectorCollapsed ? 'collapsed' : ''}">
 		<div
 			class="data-inspector-header"
+			role="button"
+			tabindex="0"
 			onclick={() => (dataInspectorCollapsed = !dataInspectorCollapsed)}
+			onkeydown={(e) => {
+				if (e.key !== "Enter" && e.key !== " ") return;
+				e.preventDefault();
+				dataInspectorCollapsed = !dataInspectorCollapsed;
+			}}
 		>
 			<span>Raw Data</span>
 			<div class="arrow {dataInspectorCollapsed ? 'up' : 'down'}"></div>
@@ -113,7 +84,7 @@
 				class="data-inspector-content"
 				transition:slide|local={{ duration: 200 }}
 			>
-				<!-- <DataInspector {selectedNodes} /> -->
+				<NodeDataInspector nodes={selectedNodes} />
 			</div>
 		{/if}
 	</div>
@@ -126,9 +97,23 @@
 		height: 100%;
 	}
 
+	.inspector-header {
+		border-bottom: solid 1px rgba(255, 255, 255, 0.1);
+		display: flex;
+		align-items: center;
+		gap: .5rem;
+		padding: .5rem;
+	}
+
+	.inspector-header .header-icon img {
+		width: 1.2rem;
+		height: 1.2rem;
+		vertical-align: middle;
+	}
+
 	.inspector-header .target-id {
-		font-size: 0.7rem;
-		padding: 0.5em 0.8em;
+		font-size: 0.9rem;
+		font-weight: bold;
 		border-radius: 0.5em;
 		background-color: rgba(from var(--panel-bg-color) r g b / 6%);
 		color: var(--text-color);
@@ -143,39 +128,6 @@
 
 	.inspector-header .copy-button:hover {
 		opacity: 1;
-	}
-
-	.menu-bar {
-		position: relative;
-		display: flex;
-		margin-top: 0.25em;
-		justify-content: space-around;
-		background-color: var(--panel-background-color);
-		border-bottom: 1px solid var(--border-color);
-	}
-
-	button.menu-button {
-		background-color: var(--panel-background-color);
-		border: none;
-		padding: 0.5em 1em;
-		cursor: pointer;
-		color: var(--text-color);
-		font-size: 0.8rem;
-		border-bottom: solid 2px transparent;
-		transition:
-			color 0.1s,
-			border-bottom-color 0.1s;
-		border-radius: 0px;
-	}
-
-	button.menu-button:hover {
-		color: var(--accent-color);
-		border-bottom-color: var(--accent-color);
-	}
-
-	button.menu-button.active {
-		font-weight: bold;
-		border-bottom-color: var(--accent-color);
 	}
 
 	.inspector-content {
@@ -200,7 +152,6 @@
 		justify-content: center;
 		font-size: 0.7rem;
 		background-color: rgba(255, 255, 255, 0.05);
-		border-top: solid 1px var(--border-color);
 		border-bottom: none;
 		font-size: 0.7rem;
 		cursor: pointer;
@@ -221,11 +172,13 @@
 	}
 
 	.data-inspector-content {
-		overflow-x: hidden;
-		overflow-y: visible;
-		background-color: var(--bg-color);
-		border-top: solid 1px var(--border-color);
+		overflow-y: auto;
+		scrollbar-gutter: stable;
+		background-color: rgba(0, 0, 0, 0.6);
+		border-top: solid 2px rgba(255, 255, 255, 0.2);
 		padding: 0.5rem;
+		box-sizing: border-box;
+		border-radius: 0.5rem;
 		font-size: 0.7rem;
 		color: var(--text-color);
 		width: 100%;

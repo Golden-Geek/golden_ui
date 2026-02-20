@@ -30,6 +30,7 @@ export interface WorkbenchSession {
 	readonly historyBusy: boolean;
 	readonly canUndo: boolean;
 	readonly canRedo: boolean;
+	getNodeData(nodeId: NodeId): UiNodeDto | null;
 	getSelectedNodes(): UiNodeDto[];
 	getFirstSelectedNode(): UiNodeDto | null;
 	isNodeSelected(nodeId: NodeId): boolean;
@@ -103,10 +104,15 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 		}
 	});
 
+	const getNodeData = (nodeId: NodeId): UiNodeDto | null => {
+		return graph.state.nodesById.get(nodeId) ?? null;
+	};
+
 	const reconcileSelection = (): void => {
 		selectedNodeIds = selectedNodeIds.filter((nodeId) => graph.state.nodesById.has(nodeId));
 	};
 
+	
 	const getSelectedNodes = (): UiNodeDto[] =>
 		selectedNodeIds
 			.map((nodeId) => graph.state.nodesById.get(nodeId))
@@ -407,6 +413,7 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 		get canRedo(): boolean {
 			return canRedo;
 		},
+		getNodeData,
 		getSelectedNodes,
 		getFirstSelectedNode,
 		isNodeSelected,

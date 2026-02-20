@@ -27,6 +27,7 @@ html {
     width: 100%;
     height: 100%;
     box-sizing: border-box;
+    user-select: none;
 }
 
 .gc-header {
@@ -139,6 +140,7 @@ input:focus {
     background-size: contain;
     opacity: 0.5;
     transition: transform 0.2s, opacity 0.2s;
+    cursor: pointer;
 }
 
 .arrow:hover {
@@ -156,6 +158,7 @@ input:focus {
 /* Custom dark mode, rounded scrollbar */
 ::-webkit-scrollbar {
     width: .3rem;
+    height: .3rem;
     background: rgba(255, 255, 255, .1);
     border-radius: 1rem;
 }

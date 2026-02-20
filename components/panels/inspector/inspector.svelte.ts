@@ -5,10 +5,6 @@ import NumberProperty from "./properties/NumberProperty.svelte";
 import TextEditorProperty from "./properties/TextEditorProperty.svelte";
 import TextInputProperty from "./properties/TextInputProperty.svelte";
 
-export enum Menu {
-    Node = "Node",
-    Preferences = "Preferences"
-};
 
 export const propertiesInspectorClass = {
     int : { component: NumberProperty },
