@@ -9,7 +9,9 @@ import parameterFloatIcon from "../style/icons/parameter/float.svg";
 import parameterIntIcon from "../style/icons/parameter/int.svg";
 import parameterStringIcon from "../style/icons/parameter/string.svg";
 import parameterTriggerIcon from "../style/icons/parameter/trigger.svg";
-
+import parameterVec2Icon from "../style/icons/parameter/vec2.svg";
+import parameterVec3Icon from "../style/icons/parameter/vec3.svg";
+import parameterReferenceIcon from "../style/icons/parameter/reference.svg";
 
 const DEFAULT_FALLBACK_ICON = nodeAddIcon;
 const DEFAULT_MANAGER_ICON = nodeManagerIcon;
@@ -47,6 +49,9 @@ const defaultNodeIcons: ResolvedNodeIconSet = {
         int: parameterIntIcon,
         str: parameterStringIcon,
         trigger: parameterTriggerIcon,
+        vec2: parameterVec2Icon,
+        vec3: parameterVec3Icon,
+        reference: parameterReferenceIcon,
     },
 };
 

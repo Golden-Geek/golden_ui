@@ -4,23 +4,22 @@
 		min = undefined,
 		max = undefined,
 		step = 0,
+		stepBase = 0,
 		sensitivity = 1,
 		orientation = 'horizontal',
 		disabled = false,
+		readOnly = false,
 		onStartEdit = null,
 		onEndEdit = null,
 		onValueChange = null,
-		bgColor = 'var(--slider-bg)',
-		fgColor = 'var(--slider-fg)',
-		width = 'auto',
-		height = '1rem',
+		bgColor = 'var(--gc-color-slider-bg)',
+		fgColor = 'var(--gc-color-slider-fg)',
 		label = '',
 		showValue = false
 	} = $props();
 
 	let infiniteMode = $derived(min === undefined || max === undefined);
 	let sliderDiv = $state(null as HTMLDivElement | null);
-	let sliderWidth = $derived(infiniteMode ? 100 : sliderDiv!.getBoundingClientRect().width);
 
 	let valueAtDown = $state(0);
 	let mouseAtDown = $state(0);
@@ -72,6 +71,7 @@
 				? sensitivity * 10
 				: sensitivity;
 
+		let sliderWidth = infiniteMode ? 100 : sliderDiv!.getBoundingClientRect().width;
 		if (step > 0) {
 			const stepCount = range / step;
 			const pixelsPerStep = sliderWidth / stepCount / alteredSensitivity;
@@ -109,22 +109,27 @@
 {:else}
 	<div
 		class="slider"
-		class:disabled={disabled}
+		class:disabled
+		class:readonly={readOnly}
 		bind:this={sliderDiv}
 		onmousedown={startDrag}
-		style="--bg-color: {bgColor}; --fg-color: {fgColor}; width: {width}; height: {height};"
-	>
+		role="slider"
+		aria-valuenow={value}
+		tabindex="-1"
+		style="--bg-color: {bgColor}; --fg-color: {fgColor};">
 		<div
 			class="slider-foreground {midZero ? 'mid-zero' : ''}"
 			style="--value: {(value - min) / (max - min)};  --left:{targetLeft *
-				100}%; --right:{targetRight * 100}%"
-		></div>
-
-		<div class="slider-label">
-			{label}
-			{label && showValue ? ' : ' : ''}
-			{showValue ? value.toFixed(3) : ''}
+				100}%; --right:{targetRight * 100}%">
 		</div>
+
+		{#if label || showValue}
+			<div class="slider-label">
+				{label}
+				{label && showValue ? ' : ' : ''}
+				{showValue ? value.toFixed(3) : ''}
+			</div>
+		{/if}
 	</div>
 {/if}
 
@@ -132,16 +137,27 @@
 	.slider {
 		min-width: 6rem;
 		position: relative;
-		height: 1rem;
+		height: 100%;
+		width: 100%;
 		user-select: none;
 		border-radius: 0.5rem;
 		overflow: hidden;
 		background: var(--bg-color);
 		border: none;
+		transition: filter 0.2s;
+	}
+
+	.slider:hover {
+		filter: brightness(120%);
+	}
+
+	.slider.disabled,
+	.slider.readonly {
+		pointer-events: none;
 	}
 
 	.slider.disabled {
-		pointer-events: none;
+		filter: grayscale(60%);
 	}
 
 	.slider-label {
@@ -171,6 +187,10 @@
 		pointer-events: none;
 	}
 
+	.readonly .slider-foreground {
+		background: var(--gc-color-readonly);
+	}
+
 	.slider-foreground.mid-zero {
 		min-width: 1px;
 	}
@@ -185,10 +205,16 @@
 		border: none;
 		font-size: 0.6rem;
 		cursor: ew-resize;
+		color: rgb(from var(--gc-color-text) r g b / 50%);
+		transition: color 0.2s;
+	}
+
+	.infinite-slider:hover {
+		color: var(--gc-color-text);
 	}
 
 	.infinite-slider:hover,
 	.infinite-slider.dragging {
-		background-color: rgba(from var(--panel-bg-color) r g b / 10%);
+		background-color: rgba(from var(--gc-color-slider-bg) r g b / 10%);
 	}
 </style>

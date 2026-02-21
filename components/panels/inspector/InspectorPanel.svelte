@@ -1,14 +1,11 @@
 <script lang="ts">
-	import NodeDataInspector from "./NodeDataInspector.svelte";
-	import NodeInspector from "./NodeInspector.svelte";
+	import NodeDataInspector from './NodeDataInspector.svelte';
+	import NodeInspector from './NodeInspector.svelte';
 
-	import { appState } from "../../../store/workbench.svelte.ts";
-	import type {
-		PanelProps,
-		PanelState,
-	} from "../../../dockview/panel-types.ts";
-	import { slide } from "svelte/transition";
-	import { getIconURLForNode } from "$lib/golden_ui/store/node-types.ts";
+	import { appState } from '../../../store/workbench.svelte.ts';
+	import type { PanelProps, PanelState } from '../../../dockview/panel-types.ts';
+	import { slide } from 'svelte/transition';
+	import { getIconURLForNode } from '$lib/golden_ui/store/node-types.ts';
 
 	const initialProps: PanelProps = $props();
 
@@ -16,7 +13,7 @@
 		panelId: initialProps.panelId,
 		panelType: initialProps.panelType,
 		title: initialProps.title,
-		params: initialProps.params,
+		params: initialProps.params
 	});
 
 	export const setPanelState = (next: PanelState): void => {
@@ -26,11 +23,9 @@
 	let session = $derived(appState.session);
 
 	let selectedNodes = $derived(session?.getSelectedNodes() ?? []);
-	$inspect("nodes", selectedNodes);
+	$inspect('nodes', selectedNodes);
 
-	let iconURL = $derived(
-		selectedNodes.length === 1 ? getIconURLForNode(selectedNodes[0]) : null,
-	);
+	let iconURL = $derived(selectedNodes.length === 1 ? getIconURLForNode(selectedNodes[0]) : null);
 
 	let dataInspectorCollapsed = $state(true);
 </script>
@@ -46,8 +41,8 @@
 			>{selectedNodes.length > 0
 				? selectedNodes.length === 1
 					? selectedNodes[0].meta.label
-					: selectedNodes.length + " selected nodes"
-				: ""}
+					: selectedNodes.length + ' selected nodes'
+				: ''}
 			<button
 				class="copy-button"
 				title="Copy ID to Clipboard"
@@ -55,8 +50,7 @@
 					if (selectedNodes.length === 1) {
 						navigator.clipboard.writeText(selectedNodes[0].uuid);
 					}
-				}}>📋</button
-			>
+				}}>📋</button>
 		</span>
 	</div>
 
@@ -71,19 +65,15 @@
 			tabindex="0"
 			onclick={() => (dataInspectorCollapsed = !dataInspectorCollapsed)}
 			onkeydown={(e) => {
-				if (e.key !== "Enter" && e.key !== " ") return;
+				if (e.key !== 'Enter' && e.key !== ' ') return;
 				e.preventDefault();
 				dataInspectorCollapsed = !dataInspectorCollapsed;
-			}}
-		>
+			}}>
 			<span>Raw Data</span>
 			<div class="arrow {dataInspectorCollapsed ? 'up' : 'down'}"></div>
 		</div>
 		{#if !dataInspectorCollapsed}
-			<div
-				class="data-inspector-content"
-				transition:slide|local={{ duration: 200 }}
-			>
+			<div class="data-inspector-content" transition:slide|local={{ duration: 200 }}>
 				<NodeDataInspector nodes={selectedNodes} />
 			</div>
 		{/if}
@@ -101,8 +91,8 @@
 		border-bottom: solid 1px rgba(255, 255, 255, 0.1);
 		display: flex;
 		align-items: center;
-		gap: .5rem;
-		padding: .5rem;
+		gap: 0.5rem;
+		padding: 0.5rem;
 	}
 
 	.inspector-header .header-icon img {

@@ -283,6 +283,7 @@
 					dragTarget = null;
 					notifyEndEdit();
 				}}
+				role="application"
 			>
 				<div class="cp-overlay" style="background: {areaOverlay1}"></div>
 				<div class="cp-overlay" style="background: {areaOverlay2}"></div>
@@ -310,6 +311,9 @@
 					dragTarget = null;
 						notifyEndEdit();
 					}}
+					role="slider"
+					aria-valuenow={mode === 0 ? h : mode === 1 ? s : v}
+					tabindex="0"
 				>
 					<div class="cp-thumb" style="left: {sliderPos}%"></div>
 				</div>
@@ -328,6 +332,9 @@
 						dragTarget = null;
 						notifyEndEdit();
 					}}
+					role="slider"
+					aria-valuenow={a}
+					tabindex="0"
 				>
 					<div
 						class="cp-track-bg"
@@ -428,7 +435,6 @@
 	.cp-container.expanded {
 		border: 0.0625rem solid #27272a;
 		background-color: #18181b;
-		width: 15rem;
 		padding: 0.3rem 0.7rem;
 	}
 

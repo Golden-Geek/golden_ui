@@ -44,8 +44,7 @@
 		onUpdate && onUpdate();
 	}}
 	onfocus={() => onStartEdit && onStartEdit()}
-	onblur={() => onUpdate && onUpdate()}>{property.get()}</textarea
-> -->
+	onblur={() => onUpdate && onUpdate()}>{property.get()}</textarea> -->
 
 <!-- <style>
 	:global {

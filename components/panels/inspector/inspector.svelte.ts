@@ -1,17 +1,21 @@
-import CheckboxProperty from "./properties/CheckboxProperty.svelte";
-import ColorPickerProperty from "./properties/ColorPickerProperty.svelte";
-import DropdownProperty from "./properties/DropdownProperty.svelte";
-import NumberProperty from "./properties/NumberProperty.svelte";
-import TextEditorProperty from "./properties/TextEditorProperty.svelte";
-import TextInputProperty from "./properties/TextInputProperty.svelte";
+import CheckboxEditor from "./parameters/CheckboxEditor.svelte";
+import ColorPickerEditor from "./parameters/ColorPickerEditor.svelte";
+import DropdownEditor from "./parameters/DropdownEditor.svelte";
+import NumberEditor from "./parameters/NumberEditor.svelte";
+import TextInputEditor from "./parameters/TextInputEditor.svelte";
+import TriggerEditor from "./parameters/TriggerEditor.svelte";
+import ReferenceEditor from "./parameters/ReferenceEditor.svelte";
+import MultiNumberEditor from "./parameters/MultiNumberEditor.svelte";
 
-
-export const propertiesInspectorClass = {
-    int : { component: NumberProperty },
-    string : { component: TextInputProperty },
-    float : { component: NumberProperty },
-    boolean : { component: CheckboxProperty },
-    color : { component: ColorPickerProperty },
-    enum : { component: DropdownProperty },
-    text : { component: TextEditorProperty, useFullSpace: true }
+export const propertiesInspectorClass: Record<string, { component: any; useFullSpace?: boolean }> = {
+    "trigger": { component: TriggerEditor },
+    "int": { component: NumberEditor },
+    "str": { component: TextInputEditor },
+    "float": { component: NumberEditor },
+    "bool": { component: CheckboxEditor },
+    "color": { component: ColorPickerEditor },
+    "enum": { component: DropdownEditor },
+    "vec2": { component: MultiNumberEditor },
+    "vec3": { component: MultiNumberEditor },
+    "reference": { component: ReferenceEditor },
 }

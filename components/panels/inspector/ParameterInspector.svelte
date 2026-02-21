@@ -1,25 +1,59 @@
 <script lang="ts">
-	import type { UiNodeDto } from "$lib/golden_ui/types";
+	import type { UiNodeDto, UiNodeMetaDto, UiParamDto } from '$lib/golden_ui/types';
+	import EnableButton from '../../common/EnableButton.svelte';
+	import { fade } from 'svelte/transition';
+	import { propertiesInspectorClass } from './inspector.svelte';
 
 	let { node, level, order } = $props<{
 		node: UiNodeDto;
 		level: number;
-		order: "first" | "last" | "solo" | "";
+		order: 'first' | 'last' | 'solo' | '';
 	}>();
 
-	let param = $derived(node.data.param);
-	let type = $derived(param.value.kind);
+	let param: UiParamDto = $derived(node.data.param);
+	let meta: UiNodeMetaDto = $derived(node.meta);
+	let type: string = $derived(param.value.kind);
 	let canDisable = $derived(node.can_be_disabled ?? false);
 	let enabled = $derived(node.enabled ?? true);
-	let visible = $derived(!node.meta.hiden_in_inspector ? false : true);
+	let visible = $derived(meta.tags.includes('hidden') ? false : true);
+	let readOnly = $derived(meta.tags.includes('read_only') ?? false);
 
-	let canManuallyEdit = $derived(!param.meta.read_only);
+	let isUserMade = $derived(meta.tags.includes('is_user_made') ?? false); //to find : the right property
+
+	let editorInfos: any = $derived(propertiesInspectorClass[type] ?? null);
+	let EditorComponent = $derived(editorInfos ? editorInfos.component : null);
+	let useFullSpace = $derived(editorInfos ? (editorInfos.useFullSpace ?? false) : false);
+
+	//Value
+	let isValueOverridden = $derived(true);
+
+	let resetValue = (): void => {
+		if (readOnly) return;
+		//to fill
+	};
+
+	//Renaming
+	let renamingState = $state({
+		isRenaming: false,
+		renameDraft: ''
+	});
+
+	function commitRename() {
+		if (!isUserMade) return;
+		const nextName = String(renamingState.renameDraft ?? '').trim();
+		if (!nextName) {
+			renamingState.isRenaming = false;
+			return;
+		}
+
+		// node.renameParameter(param.name, nextName);
+		renamingState.isRenaming = false;
+	}
 
 	// let propertyInfo: any = $derived(
 	// 	propertiesInspectorClass[propertyType as keyof typeof propertiesInspectorClass]
 	// );
 
-	// let PropertyClass: any = $derived(propertyInfo ? propertyInfo.component : null);
 	// let useFullSpace = $derived(propertyInfo ? (propertyInfo.useFullSpace ?? false) : false);
 
 	// let valueOnFocus = undefined as PropertyValueType | undefined;
@@ -44,7 +78,7 @@
 	// 	}
 
 	// 	saveData('Update ' + definition.name, {
-	// 		coalesceID: `${target.id}-property-${level}-${definition.name}`
+	// 		coalesceID: `${target.id}-parameter-${level}-${definition.name}`
 	// 	});
 	// }
 
@@ -93,134 +127,74 @@
 	// }
 </script>
 
-<div class="parameter-inspector level-{level} {order}">
-	Parameter Inspector for {node?.meta.label}
-</div>
-
-<!-- {#if visible}
+{#if visible}
 	<div
-		class="property-inspector {isContainer ? 'container' : 'single'} {'level-' + level} {enabled
-			? ''
-			: 'disabled'}
-		{definition.readOnly ? 'readonly' : ''}"
-	>
-		{#if isContainer}
-			<PropertyContainerInspector {targets} bind:property {propKey} {definition} {level} />
-		{:else if target != null && property != null}
+		class="parameter-inspector {order} {'level-' + level} {enabled ? '' : 'disabled'}
+		{readOnly ? 'readonly' : ''}">
+		{#if param}
 			<div class="firstline">
-				<div class="property-label {expressionResultTag}">
+				<div class="parameter-label">
 					{#if canDisable}
-						<button
-							class="enable-property"
-							onclick={() => {
-								property.enabled = !enabled ? true : undefined;
-								checkAndSaveProperty(true);
-							}}
-						>
-							{enabled ? '🟢' : '⚪'}
-						</button>
+						<EnableButton {node} />
 					{/if}
-					{#if isCustomProperty && !definition.readOnly}
-						{#if isRenaming}
+					{#if isUserMade}
+						{#if renamingState.isRenaming}
 							<input
 								class="custom-prop-name"
 								autofocus
-								bind:value={renameDraft}
+								bind:value={renamingState.renameDraft}
 								onblur={commitRename}
 								onkeydown={(e) => {
 									if (e.key === 'Enter') commitRename();
 									if (e.key === 'Escape') {
-										isRenaming = false;
-										renameDraft = definition.name;
+										renamingState.isRenaming = false;
+										renamingState.renameDraft = node.meta.label;
 									}
-								}}
-							/>
+								}} />
 						{:else}
 							<span
 								class="custom-prop-name-text"
-								ondblclick={beginRename}
-								title="Double-click to rename"
-							>
-								{definition.name}
+								role="textbox"
+								tabindex="-1"
+								ondblclick={() => {
+									renamingState.renameDraft = node.meta.label;
+									renamingState.isRenaming = true;
+								}}
+								title="Double-click to rename">
+								{node.meta.label}
 							</span>
 						{/if}
 					{:else}
-						{definition.name}
+						{node.meta.label}
 					{/if}
-					{#if !definition.readOnly && property.isValueOverridden()}
+					{#if !readOnly && isValueOverridden}
 						<button
 							class="reset-property"
 							aria-label="Reset Property"
 							onclick={() => {
-								property.resetToDefault();
-								saveData('Reset Property', {
-									coalesceID: `${target.id}-property-${level}-${definition.name}-reset`
-								});
+								resetValue();
 							}}
-							transition:fade={{ duration: 200 }}
-						>
+							transition:fade={{ duration: 200 }}>
 							⟲
 						</button>
 					{/if}
 				</div>
 
-				{#if !useFullSpace}
-					<div class="spacer"></div>
-				{/if}
+				{#if EditorComponent}
+					<div class="parameter-wrapper {readOnly ? 'readonly' : ''}">
+						<EditorComponent {node} />
 
-				{#if PropertyClass}
-					<div
-						class="property-wrapper {expressionMode} {canManuallyEdit
-							? ''
-							: 'readonly'} {useFullSpace ? 'full-space' : ''}"
-					>
-						<PropertyClass
-							{targets}
-							bind:property
-							onStartEdit={() => (valueOnFocus = property.getRaw())}
-							onUpdate={() => checkAndSaveProperty()}
-							{definition}
-							{propKey}
-							{expressionMode}
-							{expressionResultTag}
-						/>
+						<button class="expression-toggle" disabled={readOnly}>ƒ</button>
 					</div>
-
-					<button
-						class="expression-toggle {expressionMode}"
-						disabled={definition.readOnly}
-						onclick={() => {
-							property.mode =
-								property.mode == PropertyMode.EXPRESSION ? undefined : PropertyMode.EXPRESSION;
-							saveData('Set Property Mode', {
-								coalesceID: `${target.id}-property-${level}-${definition.name}-mode`
-							});
-						}}>ƒ</button
-					>
 				{/if}
 			</div>
-
-			{#if property.mode == PropertyMode.EXPRESSION && property.expression && (property?.enabled || !canDisable)}
-				<div class="property-expression" transition:slide={{ duration: 200 }}>
-					<ExpressionEditor
-						{targets}
-						bind:property
-						{definition}
-						onUpdate={() => checkAndSaveProperty(true)}
-					></ExpressionEditor>
-				</div>
-			{/if}
 		{:else}
-			{definition.type} - {target} - {property}
+			{node.meta.label} has no parameter data.
 		{/if}
 	</div>
-{/if} -->
+{/if}
 
 <style>
-	.parameter-inspector.level-0 {
-		margin: 2rem;
-	}
-
 	.parameter-inspector {
 		width: 100%;
 		display: flex;
@@ -228,18 +202,20 @@
 		flex-direction: column;
 		box-sizing: border-box;
 		transition: opacity 0.2s ease;
-		padding: 0.5rem 0;
+		padding-left: 0.2rem;
+		padding-bottom: 0.2rem;
+		overflow: hidden;
 	}
 
 	.parameter-inspector:not(.last):not(.solo):not(.level-0) {
-		border-bottom: solid 1px rgba(255, 255, 255, 0.1);
+		border-bottom: solid 1px rgba(255, 255, 255, 0.05);
 	}
 
 	.parameter-inspector .firstline {
 		width: 100%;
 		display: flex;
 		align-items: center;
-		justify-content: stretch;
+		justify-content: space-between;
 		gap: 0.25rem;
 	}
 
@@ -251,21 +227,14 @@
 		pointer-events: none;
 	}
 
-	.spacer {
-		flex-grow: 1;
-	}
-
-	.property-wrapper {
+	.parameter-wrapper {
 		display: flex;
 		align-items: center;
+		justify-content: right;
+		flex-basis: 50%;
 	}
 
-	.property-wrapper.full-space {
-		flex-grow: 1;
-		width: 100%;
-	}
-
-	.property-wrapper.readonly {
+	.parameter-wrapper.readonly {
 		opacity: 0.6;
 		pointer-events: none;
 		touch-action: none;
@@ -277,13 +246,13 @@
 		min-height: 1.5rem;
 	}
 
-	.property-label {
+	.parameter-label {
 		display: flex;
 		align-items: center;
 		min-width: max-content;
 	}
 
-	.property-label.error {
+	.parameter-label.error {
 		color: var(--error-color);
 		font-weight: bold;
 	}
@@ -331,7 +300,7 @@
 		border: none;
 		cursor: pointer;
 		font-size: 1rem;
-		padding: 0 0.2rem 0 0.5rem;
+		padding: 0 .3rem;
 		color: var(--text-color);
 		opacity: 0.5;
 		transition: opacity 0.1s;
@@ -351,10 +320,5 @@
 		opacity: 0.9;
 		color: var(--binding-color);
 		font-weight: bold;
-	}
-
-	.parameter-inspector .property-expression {
-		flex-grow: 1;
-		width: 100%;
 	}
 </style>

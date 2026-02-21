@@ -18,6 +18,20 @@
 	/* NODES */
 	--gc-color-node-enabled: #54c30f;
 
+	/* PARAMETERS */
+	--gc-color-readonly: rgb(22, 134, 226);
+
+	--gc-color-trigger: #5a5a5aac;
+	--gc-color-trigger-on: #d81dac;
+
+	--gc-color-checkbox-bg: #151515c6;
+	--gc-color-checkbox-fg: #b527c8;
+	--gc-color-slider-bg: #04040468;
+	--gc-color-slider-fg: #b527c8;
+
+	--gc-color-dropdown-bg: #131313f0;
+
+
 	/* DOCKVIEW COLORS */
 	--gc-color-dock-surface: transparent;
 	--gc-color-dock-group-background: transparent;
