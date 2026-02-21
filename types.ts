@@ -61,6 +61,7 @@ export interface UiParamHints {
 
 export interface UiParamDto {
 	value: ParamValue;
+	default_value: ParamValue;
 	event_behaviour: ParamEventBehaviour;
 	read_only: boolean;
 	constraints: UiParamConstraints;

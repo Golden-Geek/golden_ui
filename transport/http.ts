@@ -47,6 +47,7 @@ export type RustParamValue =
 
 interface RustUiParamDto {
 	value: RustParamValue;
+	default_value?: RustParamValue;
 	event_behaviour: ParamEventBehaviour;
 	read_only: boolean;
 	constraints: {
@@ -301,6 +302,7 @@ const fromRustConstraints = (constraints: RustUiParamDto['constraints']): UiPara
 
 const fromRustParam = (param: RustUiParamDto): UiParamDto => ({
 	value: fromRustParamValue(param.value),
+	default_value: fromRustParamValue(param.default_value ?? param.value),
 	event_behaviour: param.event_behaviour,
 	read_only: param.read_only,
 	constraints: fromRustConstraints(param.constraints),

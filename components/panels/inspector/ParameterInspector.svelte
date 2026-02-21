@@ -1,9 +1,11 @@
 <script lang="ts">
-	import type { UiNodeDto, UiNodeMetaDto, UiParamDto } from '$lib/golden_ui/types';
-	import { appState } from '$lib/golden_ui/store/workbench.svelte';
-	import { sendPatchMetaIntent } from '$lib/golden_ui/store/ui-intents';
+	import type { UiNodeDto, UiNodeMetaDto, UiParamDto } from '../../../types';
+	import { appState } from '../../../store/workbench.svelte';
+	import { sendPatchMetaIntent, sendSetParamIntent } from '../../../store/ui-intents';
 	import EnableButton from '../../common/EnableButton.svelte';
 	import { propertiesInspectorClass } from './inspector.svelte';
+	import resetIcon from '../../../style/icons/reset.svg';
+	import { fade } from 'svelte/transition';
 
 	let { node, level, order } = $props<{
 		node: UiNodeDto;
@@ -25,8 +27,16 @@
 	let readOnly = $derived(Boolean(param?.read_only) || meta.tags.includes('read_only'));
 	let isUserMade = $derived(meta.tags.includes('is_user_made'));
 
-	let editorInfos: any = $derived(type.length > 0 ? propertiesInspectorClass[type] ?? null : null);
+	let editorInfos: any = $derived(
+		type.length > 0 ? (propertiesInspectorClass[type] ?? null) : null
+	);
 	let EditorComponent = $derived(editorInfos ? editorInfos.component : null);
+	let isValueOverridden = $derived.by((): boolean => {
+		if (!param) {
+			return false;
+		}
+		return !paramValuesEqual(param.value, param.default_value);
+	});
 
 	let renamingState = $state({
 		isRenaming: false,
@@ -46,6 +56,49 @@
 		await sendPatchMetaIntent(liveNode.node_id, { label: nextName });
 		renamingState.isRenaming = false;
 	}
+
+	function paramValuesEqual(left: UiParamDto['value'], right: UiParamDto['value']): boolean {
+		if (left.kind !== right.kind) {
+			return false;
+		}
+		switch (left.kind) {
+			case 'trigger':
+				return true;
+			case 'int':
+			case 'float':
+			case 'str':
+			case 'enum':
+			case 'bool':
+				return left.value === (right as typeof left).value;
+			case 'vec2':
+				return (
+					left.value[0] === (right as typeof left).value[0] &&
+					left.value[1] === (right as typeof left).value[1]
+				);
+			case 'vec3':
+				return (
+					left.value[0] === (right as typeof left).value[0] &&
+					left.value[1] === (right as typeof left).value[1] &&
+					left.value[2] === (right as typeof left).value[2]
+				);
+			case 'color':
+				return (
+					left.value[0] === (right as typeof left).value[0] &&
+					left.value[1] === (right as typeof left).value[1] &&
+					left.value[2] === (right as typeof left).value[2] &&
+					left.value[3] === (right as typeof left).value[3]
+				);
+			case 'reference':
+				return left.uuid === (right as typeof left).uuid;
+		}
+	}
+
+	const resetValue = (): void => {
+		if (!param || readOnly || !enabled || !isValueOverridden) {
+			return;
+		}
+		void sendSetParamIntent(liveNode.node_id, param.default_value, param.event_behaviour);
+	};
 </script>
 
 {#if visible}
@@ -90,6 +143,16 @@
 						{/if}
 					{:else}
 						{liveNode.meta.label}
+					{/if}
+					{#if !readOnly && enabled && isValueOverridden}
+						<button
+							type="button"
+							class="reset-value"
+							aria-label="Reset parameter value"
+							title="Reset to default value"
+							onclick={resetValue} transition:fade={{ duration: 100 }}>
+							<img src={resetIcon} alt="Reset Value" />
+						</button>
 					{/if}
 				</div>
 
@@ -188,5 +251,26 @@
 		border: 1px solid rgba(from var(--border-color) r g b / 20%);
 		border-radius: 0.25rem;
 		padding: 0 0.35rem;
+	}
+
+	.reset-value {
+		background: none;
+		border: none;
+		cursor: pointer;
+		font-size: 0.7rem;
+		margin-left: 0.4rem;
+		color: var(--text-color);
+		padding: 0;
+		opacity: 0.55;
+		transition: opacity 0.2s;
+		height:.8rem;
+	}
+
+	.reset-value img {
+		height: 100%;
+	}
+
+	.reset-value:hover {
+		opacity: 1;
 	}
 </style>
