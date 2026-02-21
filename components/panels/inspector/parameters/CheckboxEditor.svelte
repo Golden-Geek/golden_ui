@@ -1,48 +1,45 @@
 <script lang="ts">
+	import { appState } from '$lib/golden_ui/store/workbench.svelte';
+	import { sendSetParamIntent } from '$lib/golden_ui/store/ui-intents';
 	import type { UiNodeDto } from '$lib/golden_ui/types';
 
 	let { node } = $props<{
 		node: UiNodeDto;
 	}>();
 
-	let readOnly = $derived(node.meta.tags.includes('read_only') ?? false);
-	let value = $derived(node.data.param.value.value);
-	let property = $derived(node.data.param);
-	let definition = $derived(node.meta.param_definition);
+	let session = $derived(appState.session);
+	let liveNode = $derived(session?.graph.state.nodesById.get(node.node_id) ?? node);
+	let param = $derived(liveNode.data.kind === 'parameter' ? liveNode.data.param : null);
+	let enabled = $derived(liveNode.meta.enabled);
+	let readOnly = $derived(Boolean(param?.read_only) || liveNode.meta.tags.includes('read_only'));
+	let value = $derived(param?.value.kind === 'bool' ? param.value.value : false);
 
-	let momentary = false;
+	let draftValue = $state(false);
 
-	let updateValue = (newValue: boolean) => {
-		console.log('Updating value to', newValue);
-		return null;
-		// to fill
+	$effect(() => {
+		draftValue = value;
+	});
+
+	const updateValue = (nextValue: boolean): void => {
+		if (!param || param.value.kind !== 'bool' || readOnly) {
+			return;
+		}
+		draftValue = nextValue;
+		void sendSetParamIntent(
+			liveNode.node_id,
+			{ kind: 'bool', value: nextValue },
+			param.event_behaviour
+		);
 	};
 </script>
 
 <input
 	type="checkbox"
 	class="editor-checkbox"
-	disabled={!node.meta.enabled}
-	readonly={readOnly}
-	checked={value}
-	onclick={(e) => {
-		e.preventDefault();
-	}}
-	onmousedown={(e) => {
-		e.preventDefault(); // Prevent focus change
-		var elem = e.target as HTMLInputElement;
-		let newValue = !elem.checked;
-		elem.checked = newValue;
-		updateValue(newValue);
-	}}
-	onmouseup={(e) => {
-		e.preventDefault(); // Prevent focus change
-		var elem = e.target as HTMLInputElement;
-		if (momentary) {
-			let newValue = !elem.checked;
-			elem.checked = newValue;
-			updateValue(newValue);
-		}
+	disabled={!enabled || readOnly}
+	checked={draftValue}
+	onchange={(event) => {
+		updateValue((event.target as HTMLInputElement).checked);
 	}} />
 
 <style>

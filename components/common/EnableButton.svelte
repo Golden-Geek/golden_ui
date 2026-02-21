@@ -1,43 +1,65 @@
 <script lang="ts">
-    import type { UiNodeDto } from "$lib/golden_ui/types";
+	import { appState } from '$lib/golden_ui/store/workbench.svelte';
+	import { sendPatchMetaIntent } from '$lib/golden_ui/store/ui-intents';
+	import type { UiNodeDto } from '$lib/golden_ui/types';
 
-    let { node } = $props<{
-        node: UiNodeDto;
-    }>();
+	let { node } = $props<{
+		node: UiNodeDto;
+	}>();
 
-    let enabled = $derived(node.enabled);
+	let session = $derived(appState.session);
+	let liveNode = $derived(session?.graph.state.nodesById.get(node.node_id) ?? node);
+	let enabled = $derived(liveNode.meta.enabled);
+	let canBeDisabled = $derived(liveNode.meta.can_be_disabled);
+
+	const toggleEnabled = (): void => {
+		if (!canBeDisabled) {
+			return;
+		}
+		void sendPatchMetaIntent(liveNode.node_id, { enabled: !enabled });
+	};
 </script>
 
-<span
-    class="enable-button"
-    role="switch"
-    aria-checked={node.enabled}
-    class:enabled
-    tabindex="0"
-    onclick={() => (enabled = !enabled)}
-    onkeydown={(e) => {
-        if (e.key === "Enter" || e.key === " ") {
-            enabled = !enabled;
-        }
-    }}
-></span>
+<button
+	type="button"
+	class="enable-button"
+	role="switch"
+	aria-label="Toggle node enabled"
+	aria-checked={enabled}
+	disabled={!canBeDisabled}
+	class:enabled
+	tabindex="0"
+	onclick={toggleEnabled}
+	onkeydown={(event) => {
+		if (event.key === 'Enter' || event.key === ' ') {
+			event.preventDefault();
+			toggleEnabled();
+		}
+	}}></button>
 
 <style>
-    .enable-button {
-        width: 0.5rem;
-        height: 0.5rem;
-        border-radius: 2rem;
-        display: inline-block;
-        background-color: rgba(50, 50, 50, 0.5);
-        cursor: pointer;
-        vertical-align: text-top;
-        transition:
-            background-color 0.2s ease,
-            box-shadow 0.2s ease;
-    }
+	.enable-button {
+		width: 0.5rem;
+		height: 0.5rem;
+		border-radius: 2rem;
+		display: inline-block;
+		background-color: rgba(50, 50, 50, 0.5);
+		cursor: pointer;
+		vertical-align: text-top;
+		transition:
+			background-color 0.2s ease,
+			box-shadow 0.2s ease;
+		border: none;
+		padding: 0;
+	}
 
-    .enable-button.enabled {
-        background-color: var(--gc-color-node-enabled);
-        box-shadow: 0 0 0.3rem var(--gc-color-node-enabled);
-    }
+	.enable-button:disabled {
+		cursor: default;
+		opacity: 0.5;
+	}
+
+	.enable-button.enabled {
+		background-color: var(--gc-color-node-enabled);
+		box-shadow: 0 0 0.3rem var(--gc-color-node-enabled);
+	}
 </style>

@@ -1,66 +1,123 @@
 <script lang="ts">
-	import type { UiNodeDto, UiParamDto } from '$lib/golden_ui/types';
+	import { onDestroy } from 'svelte';
 	import Slider from '../../../common/Slider.svelte';
+	import { appState } from '$lib/golden_ui/store/workbench.svelte';
+	import { createUiEditSession, sendSetParamIntent } from '$lib/golden_ui/store/ui-intents';
+	import type { UiNodeDto } from '$lib/golden_ui/types';
 
 	let { node } = $props<{
 		node: UiNodeDto;
 	}>();
 
-	let meta = $derived(node.meta);
-	let param = $derived(node.data.param);
-	let constraints = $derived(param.constraints);
-	let readOnly = $derived(meta.tags.includes('read_only') ?? false);
-	let value = $derived(param.value.value ?? 0);
-	let type = $derived(param.value.kind);
+	let session = $derived(appState.session);
+	let liveNode = $derived(session?.graph.state.nodesById.get(node.node_id) ?? node);
+	let param = $derived(liveNode.data.kind === 'parameter' ? liveNode.data.param : null);
+	let constraints = $derived(param?.constraints);
+	let readOnly = $derived(Boolean(param?.read_only) || liveNode.meta.tags.includes('read_only'));
+	let enabled = $derived(liveNode.meta.enabled);
 
-	let min = $derived(constraints.min);
-	let max = $derived(constraints.max);
-	let step = $derived(constraints.step);
-	let stepBase = $derived(constraints.step_base);
+	let kind = $derived(param?.value.kind ?? 'float');
+	let isInteger = $derived(kind === 'int');
+	let value = $derived(
+		param && (param.value.kind === 'int' || param.value.kind === 'float') ? param.value.value : 0
+	);
 
+	let min = $derived(constraints?.min);
+	let max = $derived(constraints?.max);
+	let step = $derived(constraints?.step);
+	let stepBase = $derived(constraints?.step_base);
 	let hasRange = $derived(min !== undefined && max !== undefined);
-	let isInteger = $derived(type == 'int');
 
 	let numberInput = $state(null as HTMLInputElement | null);
+	let draftValue = $state(0);
+	let isEditing = $state(false);
+	let editSession = createUiEditSession('Edit number', 'param-number');
 
-	function setValueFromField() {
-		const newValue = parseFloat(numberInput!.value);
-		// console.log('Parsed value:', newValue);
-		if (!isNaN(newValue)) {
-			// onUpdate && onUpdate();
-			startEdit();
-			updateValue(newValue);
-			endEdit();
+	$effect(() => {
+		if (isEditing) {
+			return;
+		}
+		draftValue = value;
+	});
+
+	onDestroy(() => {
+		void editSession.end();
+	});
+
+	const normalizeValue = (candidate: number): number => {
+		let nextValue = candidate;
+		if (!Number.isFinite(nextValue)) {
+			return draftValue;
+		}
+		if (min !== undefined) {
+			nextValue = Math.max(min, nextValue);
+		}
+		if (max !== undefined) {
+			nextValue = Math.min(max, nextValue);
+		}
+		if (isInteger) {
+			nextValue = Math.round(nextValue);
+		}
+		return nextValue;
+	};
+
+	const commitValue = (candidate: number): void => {
+		if (!param || readOnly || !enabled) {
+			return;
+		}
+		if (param.value.kind !== 'int' && param.value.kind !== 'float') {
+			return;
+		}
+		const nextValue = normalizeValue(candidate);
+		draftValue = nextValue;
+		void sendSetParamIntent(
+			liveNode.node_id,
+			{ kind: param.value.kind, value: nextValue },
+			param.event_behaviour
+		);
+	};
+
+	function setValueFromField(): void {
+		if (!numberInput) {
+			return;
+		}
+		const parsedValue = Number(numberInput.value);
+		if (Number.isFinite(parsedValue)) {
+			commitValue(parsedValue);
+		} else {
+			numberInput.value = draftValue.toFixed(isInteger ? 0 : 3);
 		}
 	}
 
-	let startEdit = () => {
-		if (readOnly) return;
+	const startEdit = (): void => {
+		if (readOnly || !enabled) {
+			return;
+		}
+		isEditing = true;
+		void editSession.begin();
 	};
 
-	let updateValue = (newValue: number) => {
-		// console.log('Updating value to', newValue);
-		return null;
-		// to fill
-	};
-
-	let endEdit = () => {
-		if (readOnly) return;
+	const endEdit = (): void => {
+		if (!isEditing) {
+			return;
+		}
+		isEditing = false;
+		void editSession.end();
 	};
 </script>
 
 <div class="number-property-container" class:infinite={!hasRange}>
 	<div class="slider-wrapper">
 		<Slider
-			bind:value
+			bind:value={draftValue}
 			{min}
 			{max}
 			{step}
 			{stepBase}
 			{readOnly}
-			disabled={!node.meta.enabled}
-			onValueChange={(value: number) => {
-				updateValue(value);
+			disabled={!enabled}
+			onValueChange={(nextValue: number) => {
+				commitValue(nextValue);
 			}}
 			onStartEdit={startEdit}
 			onEndEdit={endEdit} />
@@ -69,17 +126,19 @@
 	<input
 		bind:this={numberInput}
 		type="number"
-		step="0.01"
+		step={isInteger ? 1 : 0.01}
 		class="number-field"
-		disabled={readOnly}
-		value={value.toFixed(isInteger ? 0 : 3)}
+		disabled={!enabled || readOnly}
+		value={draftValue.toFixed(isInteger ? 0 : 3)}
 		onblur={setValueFromField}
-		onkeydown={(e) => {
-			if (e.key === 'Enter') {
-				numberInput!.blur();
-			} else if (e.key === 'Escape') {
-				numberInput!.value = value.toFixed(isInteger ? 0 : 3);
-				numberInput!.blur();
+		onkeydown={(event) => {
+			if (event.key === 'Enter') {
+				numberInput?.blur();
+			} else if (event.key === 'Escape') {
+				if (numberInput) {
+					numberInput.value = value.toFixed(isInteger ? 0 : 3);
+					numberInput.blur();
+				}
 			}
 		}} />
 </div>
@@ -101,15 +160,6 @@
 		height: 1.2rem;
 	}
 
-	/* .expression {
-		font-style: italic;
-		color: var(--expression-color);
-	}
-
-	.expression.error {
-		color: var(--error-color);
-	} */
-
 	.number-field {
 		height: 100%;
 		box-sizing: border-box;
@@ -124,8 +174,7 @@
 
 	input::-webkit-outer-spin-button,
 	input::-webkit-inner-spin-button {
-		/* display: none; <- Crashes Chrome on hover */
 		-webkit-appearance: none;
-		margin: 0; /* <-- Apparently some margin are still there even though it's hidden */
+		margin: 0;
 	}
 </style>

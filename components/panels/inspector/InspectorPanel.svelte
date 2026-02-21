@@ -5,7 +5,7 @@
 	import { appState } from '../../../store/workbench.svelte.ts';
 	import type { PanelProps, PanelState } from '../../../dockview/panel-types.ts';
 	import { slide } from 'svelte/transition';
-	import { getIconURLForNode } from '$lib/golden_ui/store/node-types.ts';
+	import { getIconURLForNode } from '$lib/golden_ui/store/node-types';
 
 	const initialProps: PanelProps = $props();
 
