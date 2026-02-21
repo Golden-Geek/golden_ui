@@ -179,6 +179,7 @@
 		padding-left: 0.2rem;
 		padding-bottom: 0.2rem;
 		overflow: hidden;
+		padding-right:.25rem;
 	}
 
 	.parameter-inspector:not(.last):not(.solo):not(.level-0) {

@@ -8,6 +8,7 @@ import type {
 	UiEditIntent,
 	UiEventBatch,
 	UiEventDto,
+	UiLogRecord,
 	UiNodeDataDto,
 	UiNodeDto,
 	UiHistoryState,
@@ -70,6 +71,13 @@ interface RustUiParamDto {
 	};
 }
 
+interface RustUiLogRecord extends UiLogRecord {}
+
+interface RustUiLoggerState {
+	max_entries: number;
+	records?: RustUiLogRecord[];
+}
+
 interface RustUiNodeDto {
 	node_id: number;
 	uuid: string;
@@ -91,6 +99,7 @@ export interface RustUiSnapshot {
 	nodes: RustUiNodeDto[];
 	schema: Partial<UiSnapshot['schema']>;
 	history?: UiHistoryState;
+	logger?: RustUiLoggerState;
 }
 
 type RustUiEventDto =
@@ -394,6 +403,10 @@ export const fromRustSnapshot = (snapshot: RustUiSnapshot): UiSnapshot => ({
 		undo_len: 0,
 		redo_len: 0,
 		active_edit_session: false
+	},
+	logger: {
+		max_entries: snapshot.logger?.max_entries ?? 0,
+		records: [...(snapshot.logger?.records ?? [])]
 	}
 });
 

@@ -6,6 +6,7 @@ import type {
 	UiClient,
 	UiEditIntent,
 	UiEventBatch,
+	UiLogRecord,
 	UiHistoryState,
 	UiSubscriptionScope
 } from '../types';
@@ -24,6 +25,8 @@ export interface WorkbenchSessionOptions {
 export interface WorkbenchSession {
 	readonly graph: GraphStore;
 	readonly client: UiClient;
+	readonly logRecords: UiLogRecord[];
+	readonly logMaxEntries: number;
 	readonly selectedNodesIds: NodeId[];
 	readonly selectedNodeId: NodeId | null;
 	readonly status: string;
@@ -59,6 +62,42 @@ const isEditableTarget = (target: EventTarget | null): boolean => {
 	return tagName === 'INPUT' || tagName === 'TEXTAREA' || tagName === 'SELECT';
 };
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+	typeof value === 'object' && value !== null && !Array.isArray(value);
+
+const asUiLogRecord = (payload: unknown): UiLogRecord | null => {
+	if (!isRecord(payload)) {
+		return null;
+	}
+
+	const id = Number(payload.id);
+	const timestampMs = Number(payload.timestamp_ms);
+	const level = payload.level;
+	const tag = payload.tag;
+	const message = payload.message;
+	const originRaw = payload.origin;
+
+	if (
+		!Number.isFinite(id) ||
+		!Number.isFinite(timestampMs) ||
+		(level !== 'info' && level !== 'warning' && level !== 'error') ||
+		typeof tag !== 'string' ||
+		typeof message !== 'string'
+	) {
+		return null;
+	}
+
+	const origin = typeof originRaw === 'number' ? originRaw : undefined;
+	return {
+		id,
+		timestamp_ms: timestampMs,
+		level,
+		tag,
+		message,
+		origin
+	};
+};
+
 export const appState = $state({
 	session : null as WorkbenchSession | null
 });
@@ -74,6 +113,8 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 	let historyBusy = $state(false);
 	let canUndo = $state(false);
 	let canRedo = $state(false);
+	let logRecords = $state<UiLogRecord[]>([]);
+	let logMaxEntries = $state(0);
 
 	let mountedCleanup: (() => void) | null = null;
 	let resyncInFlight = false;
@@ -110,6 +151,13 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 
 	const reconcileSelection = (): void => {
 		selectedNodeIds = selectedNodeIds.filter((nodeId) => graph.state.nodesById.has(nodeId));
+	};
+
+	const trimLogRecords = (): void => {
+		if (logMaxEntries <= 0 || logRecords.length <= logMaxEntries) {
+			return;
+		}
+		logRecords = logRecords.slice(logRecords.length - logMaxEntries);
 	};
 
 	
@@ -202,6 +250,8 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 			graph.loadSnapshot(snapshot);
 			reconcileSelection();
 			applyHistoryState(snapshot.history);
+			logMaxEntries = snapshot.logger.max_entries;
+			logRecords = [...snapshot.logger.records];
 			status = successStatus;
 		} catch (error) {
 			const message = error instanceof Error ? error.message : 'unknown resync error';
@@ -212,6 +262,34 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 	};
 
 	const applyBatch = (batch: UiEventBatch): void => {
+		for (const event of batch.events) {
+			if (event.kind.kind !== 'custom') {
+				continue;
+			}
+
+			if (event.kind.topic === '__logger.record') {
+				const record = asUiLogRecord(event.kind.payload);
+				if (!record) {
+					continue;
+				}
+				logRecords = [...logRecords, record];
+				trimLogRecords();
+				continue;
+			}
+
+			if (event.kind.topic === '__logger.cleared') {
+				logRecords = [];
+				continue;
+			}
+
+			if (event.kind.topic === '__logger.max_entries') {
+				if (isRecord(event.kind.payload) && Number.isFinite(Number(event.kind.payload.max_entries))) {
+					logMaxEntries = Math.max(1, Math.round(Number(event.kind.payload.max_entries)));
+					trimLogRecords();
+				}
+			}
+		}
+
 		graph.applyBatch(batch);
 		reconcileSelection();
 		if (graph.state.requiresResync) {
@@ -327,6 +405,8 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 				graph.loadSnapshot(snapshot);
 				reconcileSelection();
 				applyHistoryState(snapshot.history);
+				logMaxEntries = snapshot.logger.max_entries;
+				logRecords = [...snapshot.logger.records];
 				status = 'Connected.';
 				unsubscribe = client.subscribe(scope, snapshot.at, applyBatch);
 				subscribed = true;
@@ -382,6 +462,8 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 			unsubscribe();
 			graph.reset();
 			clearSelection();
+			logRecords = [];
+			logMaxEntries = 0;
 			mountedCleanup = null;
 		};
 
@@ -394,6 +476,12 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 		},
 		get client(): UiClient {
 			return client;
+		},
+		get logRecords(): UiLogRecord[] {
+			return logRecords;
+		},
+		get logMaxEntries(): number {
+			return logMaxEntries;
 		},
 		get selectedNodesIds(): NodeId[] {
 			return selectedNodeIds;

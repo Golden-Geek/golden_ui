@@ -15,6 +15,7 @@ export { default as MainViewPanel } from './components/panels/MainViewPanel.svel
 export { default as UnknownPanel } from './components/panels/UnknownPanel.svelte';
 export { default as Outliner } from './components/panels/outliner/OutlinerPanel.svelte';
 export { default as Inspector } from './components/panels/inspector/InspectorPanel.svelte';
+export { default as LoggerPanel } from './components/panels/logger/LoggerPanel.svelte';
 
 export { goldenDockviewTheme } from './dockview/goldenDockviewTheme';
 export { createGoldenTabRenderer } from './dockview/createGoldenTabRenderer';

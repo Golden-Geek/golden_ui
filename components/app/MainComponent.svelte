@@ -33,6 +33,7 @@
 	import UnknownPanel from '../panels/UnknownPanel.svelte';
 	import Outliner from '../panels/outliner/OutlinerPanel.svelte';
 	import InspectorPanel from '../panels/inspector/InspectorPanel.svelte';
+	import LoggerPanel from '../panels/logger/LoggerPanel.svelte';
 
 	const props = $props<{
 		userPanels?: UserPanelDefinitionMap;
@@ -68,6 +69,12 @@
 			panelType: 'outliner',
 			title: 'Outliner',
 			component: Outliner,
+			origin: 'golden'
+		},
+		logger: {
+			panelType: 'logger',
+			title: 'Logger',
+			component: LoggerPanel,
 			origin: 'golden'
 		}
 	};
@@ -469,6 +476,16 @@
 				position: {
 					referencePanelId: 'outliner',
 					direction: 'right'
+				}
+			},
+			{
+				panelId: 'logger',
+				panelType: 'logger',
+				initialHeight: remToPx(12),
+				minimumHeight: remToPx(8),
+				position: {
+					referencePanelId: 'panel-main',
+					direction: 'below'
 				}
 			},
 			{

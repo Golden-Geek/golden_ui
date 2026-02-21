@@ -92,7 +92,7 @@
 		display: flex;
 		align-items: center;
 		gap: 0.5rem;
-		padding: 0.5rem;
+		padding: 0.3rem;
 	}
 
 	.inspector-header .header-icon img {
@@ -126,6 +126,7 @@
 		overflow: -moz-scrollbars-vertical;
 		overflow-y: auto;
 		scrollbar-gutter: stable;
+		padding-right:.3rem;
 	}
 
 	.data-inspector {

@@ -53,6 +53,17 @@ export const sendPatchMetaIntent = async (
 	});
 };
 
+export const sendClearLogsIntent = async (): Promise<boolean> => {
+	return sendUiIntent({ kind: 'clearLogs' });
+};
+
+export const sendSetLogMaxEntriesIntent = async (max_entries: number): Promise<boolean> => {
+	return sendUiIntent({
+		kind: 'setLogMaxEntries',
+		max_entries: Math.max(1, Math.round(max_entries))
+	});
+};
+
 export const createUiEditSession = (
 	label?: string,
 	prefix = 'ui-edit'

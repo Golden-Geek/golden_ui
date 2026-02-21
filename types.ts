@@ -3,6 +3,7 @@ export type NodeId = number;
 export type ParamEventBehaviour = 'Coalesce' | 'Append';
 export type ParamConstraintPolicy = 'ClampAdapt' | 'Reject';
 export type UiAckStatus = 'applied' | 'staged' | 'rejected';
+export type UiLogLevel = 'info' | 'warning' | 'error';
 
 export type ParamValue =
 	| { kind: 'trigger' }
@@ -108,6 +109,20 @@ export interface UiHistoryState {
 	active_edit_session: boolean;
 }
 
+export interface UiLogRecord {
+	id: number;
+	timestamp_ms: number;
+	level: UiLogLevel;
+	tag: string;
+	message: string;
+	origin?: NodeId;
+}
+
+export interface UiLoggerState {
+	max_entries: number;
+	records: UiLogRecord[];
+}
+
 export interface UiSnapshot {
 	protocol_version: string;
 	scope: UiSubscriptionScope;
@@ -115,6 +130,7 @@ export interface UiSnapshot {
 	nodes: UiNodeDto[];
 	schema: UiSchemaView;
 	history: UiHistoryState;
+	logger: UiLoggerState;
 }
 
 export type UiEventKind =
@@ -149,6 +165,8 @@ export type UiEditIntent =
 	| { kind: 'createUserItem'; parent: NodeId; node_type: string; label?: string }
 	| { kind: 'patchMeta'; node: NodeId; patch: Partial<UiNodeMetaDto> }
 	| { kind: 'reevaluateGraph' }
+	| { kind: 'clearLogs' }
+	| { kind: 'setLogMaxEntries'; max_entries: number }
 	| { kind: 'undo' }
 	| { kind: 'redo' };
 
