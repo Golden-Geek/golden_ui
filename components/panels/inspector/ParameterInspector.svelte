@@ -24,7 +24,7 @@
 	let canDisable = $derived(meta.can_be_disabled ?? false);
 	let enabled = $derived(meta.enabled ?? true);
 	let visible = $derived(!meta.tags.includes('hidden'));
-	let readOnly = $derived(Boolean(param?.read_only) || meta.tags.includes('read_only'));
+	let readOnly = $derived(Boolean(param?.read_only));
 	let isUserMade = $derived(meta.tags.includes('is_user_made'));
 
 	let editorInfos: any = $derived(
@@ -150,7 +150,8 @@
 							class="reset-value"
 							aria-label="Reset parameter value"
 							title="Reset to default value"
-							onclick={resetValue} transition:fade={{ duration: 100 }}>
+							onclick={resetValue}
+							transition:fade={{ duration: 100 }}>
 							<img src={resetIcon} alt="Reset Value" />
 						</button>
 					{/if}
@@ -179,7 +180,7 @@
 		padding-left: 0.2rem;
 		padding-bottom: 0.2rem;
 		overflow: hidden;
-		padding-right:.25rem;
+		padding-right: 0.25rem;
 	}
 
 	.parameter-inspector:not(.last):not(.solo):not(.level-0) {
@@ -194,9 +195,7 @@
 		gap: 0.25rem;
 	}
 
-	.parameter-inspector.disabled,
-	.parameter-inspector.readonly {
-		opacity: 0.5;
+	.parameter-inspector.disabled {
 		user-select: none;
 		touch-action: none;
 		pointer-events: none;
@@ -210,7 +209,6 @@
 	}
 
 	.parameter-wrapper.readonly {
-		opacity: 0.6;
 		pointer-events: none;
 		touch-action: none;
 	}
@@ -264,7 +262,7 @@
 		padding: 0;
 		opacity: 0.55;
 		transition: opacity 0.2s;
-		height:.8rem;
+		height: 0.8rem;
 	}
 
 	.reset-value img {

@@ -137,8 +137,34 @@ select:focus {
     outline: none !important;
     border-color: var(--gc-color-focus) !important;
     box-shadow: 0 0 0 0.1rem rgba(from var(--gc-color-focus) r g b / 20%);
-
 }
+
+
+input[type="text"]:disabled,
+input[type="number"]:disabled,
+input[type="password"]:disabled {
+    pointer-events: none;
+    touch-action: none;
+    background-color: var(--gc-color-input-disabled-bg);
+    color: rgba(from var(--gc-color-text) r g b / 50%);
+}
+
+input[type="text"].readonly,
+input[type="number"].readonly,
+input[type="password"].readonly,
+select.readonly {
+    pointer-events: none;
+    touch-action: none;
+    background-color: rgb(from var(--gc-color-readonly) r g b / 20%) !important;
+    color: rgba(from var(--gc-color-text) r g b / 50%);
+}
+
+select.readonly
+{
+    appearance: none;
+    -webkit-appearance: none;
+}
+
 
 /* Checkbox */
 input[type="checkbox"] {
@@ -194,6 +220,15 @@ input[type="checkbox"]:checked::after {
 input[type="checkbox"]:disabled {
     opacity: 0.3;
     border-color: var(--gc-color-checkbox-fg);
+}
+
+input[type="checkbox"].readonly {
+    border-color: rgb(from var(--gc-color-readonly) r g b / 40%) !important;
+    background-color: rgb(from var(--gc-color-readonly) r g b / 30%) !important;
+}
+
+input[type="checkbox"].readonly:checked::after {
+    border-color: rgb(from var(--gc-color-readonly) r g b / 50%) !important;
 }
 
 /* Select */

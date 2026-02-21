@@ -3,6 +3,7 @@
 	import { appState } from '$lib/golden_ui/store/workbench.svelte';
 	import { sendSetParamIntent } from '$lib/golden_ui/store/ui-intents';
 	import type { UiNodeDto } from '$lib/golden_ui/types';
+	import { read } from '$app/server';
 
 	let { node } = $props<{
 		node: UiNodeDto;
@@ -11,7 +12,7 @@
 	let session = $derived(appState.session);
 	let liveNode = $derived(session?.graph.state.nodesById.get(node.node_id) ?? node);
 	let param = $derived(liveNode.data.kind === 'parameter' ? liveNode.data.param : null);
-	let readOnly = $derived(Boolean(param?.read_only) || liveNode.meta.tags.includes('read_only'));
+	let readOnly = $derived(Boolean(param?.read_only));
 	let enabled = $derived(liveNode.meta.enabled);
 
 	let hitTimeout = $state<ReturnType<typeof setTimeout> | null>(null);
@@ -41,7 +42,8 @@
 	type="button"
 	class="trigger"
 	class:active={isHit}
-	disabled={!enabled || readOnly}
+	disabled={!enabled}
+	class:readonly={readOnly}
 	onclick={fireTrigger}
 	onkeydown={(event) => {
 		if (event.key === 'Enter' || event.key === ' ') {
@@ -83,6 +85,12 @@
 		cursor: default;
 	}
 
+	.trigger.readonly {
+		background-color: rgb(from var(--gc-color-readonly) r g b / 20%);
+		border-color: rgb(from var(--gc-color-readonly) r g b / 30%) !important;
+		cursor: default;
+	}
+
 	.trigger.active {
 		background: var(--gc-color-trigger-on);
 		border-color: hsl(from var(--gc-color-trigger-on) h s calc(l * 1.2)) !important;
@@ -92,5 +100,9 @@
 		padding: 0.25rem;
 		width: 0.8rem;
 		height: 0.8rem;
+	}
+
+	.trigger.trigger.readonly img {
+		filter: hue-rotate(160deg) saturate(80%) brightness(80%);
 	}
 </style>

@@ -10,7 +10,7 @@
 	let session = $derived(appState.session);
 	let liveNode = $derived(session?.graph.state.nodesById.get(node.node_id) ?? node);
 	let param = $derived(liveNode.data.kind === 'parameter' ? liveNode.data.param : null);
-	let readOnly = $derived(Boolean(param?.read_only) || liveNode.meta.tags.includes('read_only'));
+	let readOnly = $derived(Boolean(param?.read_only));
 	let enabled = $derived(liveNode.meta.enabled);
 	let value = $derived(param?.value.kind === 'str' ? param.value.value : '');
 
@@ -40,7 +40,8 @@
 	type="text"
 	class="string-editor"
 	value={draftValue}
-	disabled={readOnly || !enabled}
+	disabled={!enabled}
+	class:readonly={readOnly}
 	onchange={(event) => {
 		const nextValue = (event.target as HTMLInputElement).value;
 		commitValue(nextValue);

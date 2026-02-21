@@ -479,16 +479,6 @@
 				}
 			},
 			{
-				panelId: 'logger',
-				panelType: 'logger',
-				initialHeight: remToPx(12),
-				minimumHeight: remToPx(8),
-				position: {
-					referencePanelId: 'panel-main',
-					direction: 'below'
-				}
-			},
-			{
 				panelId: 'inspector',
 				panelType: 'inspector',
 				initialWidth: remToPx(25),
@@ -497,7 +487,17 @@
 					referencePanelId: 'panel-main',
 					direction: 'right'
 				}
-			}
+			},
+			{
+				panelId: 'logger',
+				panelType: 'logger',
+				initialHeight: remToPx(12),
+				minimumHeight: remToPx(8),
+				position: {
+					referencePanelId: 'inspector',
+					direction: 'below'
+				}
+			},
 		];
 	};
 

@@ -12,7 +12,7 @@
 	let session = $derived(appState.session);
 	let liveNode = $derived(session?.graph.state.nodesById.get(node.node_id) ?? node);
 	let param = $derived(liveNode.data.kind === 'parameter' ? liveNode.data.param : null);
-	let readOnly = $derived(Boolean(param?.read_only) || liveNode.meta.tags.includes('read_only'));
+	let readOnly = $derived(Boolean(param?.read_only));
 	let enabled = $derived(liveNode.meta.enabled);
 	let value = $derived(
 		param && (param.value.kind === 'vec2' || param.value.kind === 'vec3') ? param.value.value : []
@@ -90,7 +90,8 @@
 				<input
 					type="text"
 					class="number-field"
-					disabled={!enabled || readOnly}
+					disabled={!enabled}
+					class:readonly={readOnly}
 					value={item.toFixed(2)}
 					onchange={(event) => {
 						const nextValue = Number((event.target as HTMLInputElement).value);

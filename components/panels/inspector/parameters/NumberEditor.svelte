@@ -4,6 +4,7 @@
 	import { appState } from '$lib/golden_ui/store/workbench.svelte';
 	import { createUiEditSession, sendSetParamIntent } from '$lib/golden_ui/store/ui-intents';
 	import type { UiNodeDto } from '$lib/golden_ui/types';
+	import { read } from '$app/server';
 
 	let { node } = $props<{
 		node: UiNodeDto;
@@ -13,7 +14,7 @@
 	let liveNode = $derived(session?.graph.state.nodesById.get(node.node_id) ?? node);
 	let param = $derived(liveNode.data.kind === 'parameter' ? liveNode.data.param : null);
 	let constraints = $derived(param?.constraints);
-	let readOnly = $derived(Boolean(param?.read_only) || liveNode.meta.tags.includes('read_only'));
+	let readOnly = $derived(Boolean(param?.read_only));
 	let enabled = $derived(liveNode.meta.enabled);
 
 	let kind = $derived(param?.value.kind ?? 'float');
@@ -128,7 +129,8 @@
 		type="number"
 		step={isInteger ? 1 : 0.01}
 		class="number-field"
-		disabled={!enabled || readOnly}
+		disabled={!enabled}
+		class:readonly={readOnly}
 		value={draftValue.toFixed(isInteger ? 0 : 3)}
 		onblur={setValueFromField}
 		onkeydown={(event) => {
