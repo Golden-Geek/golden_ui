@@ -11,6 +11,7 @@
 	let liveNode = $derived(session?.graph.state.nodesById.get(node.node_id) ?? node);
 	let enabled = $derived(liveNode.meta.enabled);
 	let canBeDisabled = $derived(liveNode.meta.can_be_disabled);
+	let enabledInHierarchy = $derived(session?.isNodeEnabledInHierarchy(liveNode.node_id) ?? enabled);
 
 	const toggleEnabled = (): void => {
 		if (!canBeDisabled) {
@@ -25,9 +26,10 @@
 	class="enable-button"
 	role="switch"
 	aria-label="Toggle node enabled"
-	aria-checked={enabled}
-	disabled={!canBeDisabled}
-	class:enabled
+	aria-checked={enabledInHierarchy}
+	class:enabled={enabledInHierarchy}
+	class:parent-disabled={enabled && !enabledInHierarchy}
+	title={enabledInHierarchy ? 'Node enabled' : enabled ? 'Disabled by parent' : 'Node disabled'}
 	tabindex="0"
 	onmousedown={toggleEnabled}
 	onkeydown={(event) => {
@@ -48,18 +50,19 @@
 		vertical-align: text-top;
 		transition:
 			background-color 0.2s ease,
-			box-shadow 0.2s ease;
-		border: none;
+			box-shadow 0.2s ease,
+			border 0.2s ease;
+		border: solid 1px rgba(200, 200, 200, 0.5);
 		padding: 0;
-	}
-
-	.enable-button:disabled {
-		cursor: default;
-		opacity: 0.5;
 	}
 
 	.enable-button.enabled {
 		background-color: var(--gc-color-node-enabled);
 		box-shadow: 0 0 0.3rem var(--gc-color-node-enabled);
+	}
+
+	.enable-button.parent-disabled {
+		background-color: var(--gc-color-node-inactive);
+		box-shadow: 0 0 0.3rem var(--gc-color-node-inactive);
 	}
 </style>

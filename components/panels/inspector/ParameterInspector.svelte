@@ -181,7 +181,7 @@
 		transition: opacity 0.2s ease;
 		padding-left: 0.2rem;
 		padding-bottom: 0.2rem;
-		overflow: hidden;
+		overflow: visible;
 		padding-right: 0.25rem;
 	}
 

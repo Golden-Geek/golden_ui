@@ -17,6 +17,7 @@
 
 	/* NODES */
 	--gc-color-node-enabled: #54c30f;
+	--gc-color-node-inactive: #e3bc0a;
 
 	/* PARAMETERS */
 	--gc-color-readonly: rgb(22, 134, 226);

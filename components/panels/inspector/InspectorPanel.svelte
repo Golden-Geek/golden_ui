@@ -10,6 +10,7 @@
 	import type { PanelProps, PanelState } from '../../../dockview/panel-types.ts';
 	import { slide } from 'svelte/transition';
 	import { getIconURLForNode } from '$lib/golden_ui/store/node-types';
+	import EnableButton from '../../common/EnableButton.svelte';
 
 	const initialProps: PanelProps = $props();
 	const panelApi = initialProps.panelApi;
@@ -67,67 +68,76 @@
 </script>
 
 <div class="inspector">
-	<div class="inspector-header">
-		<span class="header-icon">
-			{#if iconURL}
-				<img src={iconURL} alt="" />
-			{/if}
-		</span>
-		<span class="target-id"
-			>{selectedNodes.length > 0
-				? selectedNodes.length === 1
-					? selectedNodes[0].meta.label
-					: selectedNodes.length + ' selected nodes'
-				: ''}
-			<!-- <NodeWarningBadge {warnings} /> -->
-			<button
-				class="copy-button"
-				title="Copy ID to Clipboard"
-				onclick={() => {
-					if (selectedNodes.length === 1) {
-						navigator.clipboard.writeText(selectedNodes[0].uuid);
-					}
-				}}>📋</button>
-		</span>
-	</div>
-
-	{#if warningCount > 0}
-		<div class="warning-info" transition:slide={{ duration: 200 }}>
-			{#each warnings as warning}
-				<div class="warning-item" transition:slide={{ duration: 200 }}>
-					{#if warning.sourceNodeId != selectedNodes[0].node_id}
-						<strong>{warning.sourceNodeLabel}:</strong>
-					{/if}
-					{warning.message}
-				</div>
-			{/each}
+	{#if selectedNodes.length === 0}
+		<div class="inspector-header">
+			<span>No node selected</span>
 		</div>
-	{/if}
+	{:else}
+		<div class="inspector-header">
+			<span class="header-icon">
+				{#if iconURL}
+					<img src={iconURL} alt="" />
+				{/if}
+			</span>
 
-	<div class="inspector-content">
-		<NodeInspector nodes={selectedNodes} level={0} />
-	</div>
+			<EnableButton node={selectedNodes[0]} />
 
-	<div class="data-inspector {dataInspectorCollapsed ? 'collapsed' : ''}">
-		<div
-			class="data-inspector-header"
-			role="button"
-			tabindex="0"
-			onclick={toggleDataInspector}
-			onkeydown={(e) => {
-				if (e.key !== 'Enter' && e.key !== ' ') return;
-				e.preventDefault();
-				toggleDataInspector();
-			}}>
-			<span>Raw Data</span>
-			<div class="arrow {dataInspectorCollapsed ? 'up' : 'down'}"></div>
+			<span class="target-id">
+				{selectedNodes.length > 0
+					? selectedNodes.length === 1
+						? selectedNodes[0].meta.label
+						: selectedNodes.length + ' selected nodes'
+					: ''}
+
+				<button
+					class="copy-button"
+					title="Copy ID to Clipboard"
+					onclick={() => {
+						if (selectedNodes.length === 1) {
+							navigator.clipboard.writeText(selectedNodes[0].uuid);
+						}
+					}}>📋</button>
+			</span>
 		</div>
-		{#if !dataInspectorCollapsed}
-			<div class="data-inspector-content" transition:slide|local={{ duration: 200 }}>
-				<NodeDataInspector nodes={selectedNodes} />
+
+		{#if warningCount > 0}
+			<div class="warning-info" transition:slide={{ duration: 200 }}>
+				{#each warnings as warning}
+					<div class="warning-item" transition:slide={{ duration: 200 }}>
+						{#if warning.sourceNodeId != selectedNodes[0].node_id}
+							<strong>{warning.sourceNodeLabel}:</strong>
+						{/if}
+						{warning.message}
+					</div>
+				{/each}
 			</div>
 		{/if}
-	</div>
+
+		<div class="inspector-content">
+			<NodeInspector nodes={selectedNodes} level={0} />
+		</div>
+
+		<div class="data-inspector {dataInspectorCollapsed ? 'collapsed' : ''}">
+			<div
+				class="data-inspector-header"
+				role="button"
+				tabindex="0"
+				onclick={toggleDataInspector}
+				onkeydown={(e) => {
+					if (e.key !== 'Enter' && e.key !== ' ') return;
+					e.preventDefault();
+					toggleDataInspector();
+				}}>
+				<span>Raw Data</span>
+				<div class="arrow {dataInspectorCollapsed ? 'up' : 'down'}"></div>
+			</div>
+			{#if !dataInspectorCollapsed}
+				<div class="data-inspector-content" transition:slide|local={{ duration: 200 }}>
+					<NodeDataInspector nodes={selectedNodes} />
+				</div>
+			{/if}
+		</div>
+	{/if}
 </div>
 
 <style>
@@ -155,7 +165,7 @@
 		display: inline-flex;
 		align-items: center;
 		gap: 0.35rem;
-		padding: 0.2rem 0.3rem;
+		padding: 0.2rem 0;
 		font-size: 0.9rem;
 		font-weight: bold;
 		border-radius: 0.5em;

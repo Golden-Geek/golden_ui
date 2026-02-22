@@ -84,9 +84,9 @@
 					<span class="title-text" bind:this={titleTextElem}>
 						{node.meta.label || 'Container'}
 					</span>
+
 					<NodeWarningBadge {warnings} />
 				</span>
-				
 			</div>
 		{/if}
 
@@ -123,6 +123,7 @@
 		flex-direction: column;
 		border-radius: 0.5rem;
 		font-size: 0.7rem;
+		overflow: hidden;
 	}
 
 	.node-inspector.nested {
@@ -139,15 +140,13 @@
 
 	.node-inspector.root {
 		padding-top: 0.2rem;
-
 	}
 
 	.node-inspector.nested {
 		padding-top: 0.5rem;
 	}
 
-	.node-inspector.nested:not(.parameter)
-	{
+	.node-inspector.nested:not(.parameter) {
 		padding-right: 0.2rem;
 	}
 

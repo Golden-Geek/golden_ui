@@ -13,6 +13,7 @@ export interface GraphState {
 	rootId: NodeId | null;
 	nodesById: Map<NodeId, UiNodeDto>;
 	childrenById: Map<NodeId, NodeId[]>;
+	parentById: Map<NodeId, NodeId>;
 	paramsById: Map<NodeId, UiParamDto>;
 	lastEventTime?: EventTime;
 	requiresResync: boolean;
@@ -30,6 +31,7 @@ const createEmptyState = (): GraphState => ({
 	rootId: null,
 	nodesById: new Map(),
 	childrenById: new Map(),
+	parentById: new Map(),
 	paramsById: new Map(),
 	lastEventTime: undefined,
 	requiresResync: false
@@ -55,11 +57,15 @@ const detectRoot = (nodesById: Map<NodeId, UiNodeDto>, childrenById: Map<NodeId,
 const stateFromSnapshot = (snapshot: UiSnapshot): GraphState => {
 	const nodesById = new Map<NodeId, UiNodeDto>();
 	const childrenById = new Map<NodeId, NodeId[]>();
+	const parentById = new Map<NodeId, NodeId>();
 	const paramsById = new Map<NodeId, UiParamDto>();
 
 	for (const node of snapshot.nodes) {
 		nodesById.set(node.node_id, node);
 		childrenById.set(node.node_id, [...node.children]);
+		for (const childId of node.children) {
+			parentById.set(childId, node.node_id);
+		}
 		if (node.data.kind === 'parameter') {
 			paramsById.set(node.node_id, node.data.param);
 		}
@@ -69,6 +75,7 @@ const stateFromSnapshot = (snapshot: UiSnapshot): GraphState => {
 		rootId: detectRoot(nodesById, childrenById),
 		nodesById,
 		childrenById,
+		parentById,
 		paramsById,
 		lastEventTime: snapshot.at,
 		requiresResync: false
@@ -116,6 +123,7 @@ const removeSubtree = (state: GraphState, nodeId: NodeId): void => {
 		removeSubtree(state, child);
 	}
 	state.childrenById.delete(nodeId);
+	state.parentById.delete(nodeId);
 	state.nodesById.delete(nodeId);
 	state.paramsById.delete(nodeId);
 };
@@ -133,6 +141,7 @@ const reduceEvent = (state: GraphState, event: UiEventDto): GraphState => {
 		...state,
 		nodesById: new Map(state.nodesById),
 		childrenById: new Map(state.childrenById),
+		parentById: new Map(state.parentById),
 		paramsById: new Map(state.paramsById),
 		lastEventTime: event.time
 	};
@@ -157,6 +166,7 @@ const reduceEvent = (state: GraphState, event: UiEventDto): GraphState => {
 		}
 		case 'childAdded': {
 			addToChildren(next.childrenById, event.kind.parent, event.kind.child);
+			next.parentById.set(event.kind.child, event.kind.parent);
 			if (!next.nodesById.has(event.kind.child)) {
 				next.requiresResync = true;
 			}
@@ -164,6 +174,7 @@ const reduceEvent = (state: GraphState, event: UiEventDto): GraphState => {
 		}
 		case 'childRemoved': {
 			removeFromChildren(next.childrenById, event.kind.parent, event.kind.child);
+			next.parentById.delete(event.kind.child);
 			if (next.nodesById.has(event.kind.child)) {
 				removeSubtree(next, event.kind.child);
 			}
@@ -171,6 +182,8 @@ const reduceEvent = (state: GraphState, event: UiEventDto): GraphState => {
 		}
 		case 'childReplaced': {
 			replaceInChildren(next.childrenById, event.kind.parent, event.kind.old, event.kind.new);
+			next.parentById.delete(event.kind.old);
+			next.parentById.set(event.kind.new, event.kind.parent);
 			if (next.nodesById.has(event.kind.old)) {
 				removeSubtree(next, event.kind.old);
 			}
@@ -182,6 +195,7 @@ const reduceEvent = (state: GraphState, event: UiEventDto): GraphState => {
 		case 'childMoved': {
 			removeFromChildren(next.childrenById, event.kind.old_parent, event.kind.child);
 			addToChildren(next.childrenById, event.kind.new_parent, event.kind.child);
+			next.parentById.set(event.kind.child, event.kind.new_parent);
 			break;
 		}
 		case 'childReordered': {

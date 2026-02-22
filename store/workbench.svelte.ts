@@ -56,6 +56,7 @@ export interface WorkbenchSession {
 	getNodeVisibleWarnings(nodeId: NodeId): NodeWarningRecord[];
 	getActiveWarnings(): NodeWarningRecord[];
 	hasNodeWarnings(nodeId: NodeId): boolean;
+	isNodeEnabledInHierarchy(nodeId: NodeId): boolean;
 	isNodeSelected(nodeId: NodeId): boolean;
 	selectNode(nodeId: NodeId | null, selectionMode?: SelectionMode): void;
 	selectNodes(nodeIds: NodeId[], selectionMode?: SelectionMode): void;
@@ -403,6 +404,21 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 
 	const hasNodeWarnings = (nodeId: NodeId): boolean => {
 		return getNodeVisibleWarnings(nodeId).length > 0;
+	};
+
+	const isNodeEnabledInHierarchy = (nodeId: NodeId): boolean => {
+		let current: NodeId | undefined = nodeId;
+		while (current !== undefined) {
+			const node = graph.state.nodesById.get(current);
+			if (!node) {
+				return false;
+			}
+			if (!node.meta.enabled) {
+				return false;
+			}
+			current = graph.state.parentById.get(current);
+		}
+		return true;
 	};
 
 	const persistSelection = (): void => {
@@ -800,6 +816,7 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 		getNodeVisibleWarnings,
 		getActiveWarnings,
 		hasNodeWarnings,
+		isNodeEnabledInHierarchy,
 		isNodeSelected,
 		selectNode,
 		selectNodes,

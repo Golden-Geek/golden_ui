@@ -9,6 +9,7 @@
 	import {
 		appState,
 		createWorkbenchSession,
+		type WorkbenchSession,
 	} from "../../store/workbench.svelte";
 	import AppFooter from "./AppFooter.svelte";
 	import type {
@@ -28,16 +29,30 @@
 		children?: Snippet;
 	}>();
 
-	const session = createWorkbenchSession({
-		wsUrl: props.wsUrl ?? "ws://localhost:7010/api/ui/ws",
-		httpBaseUrl: props.httpBaseUrl ?? "http://localhost:7010/api/ui",
-		pollIntervalMs: props.pollIntervalMs ?? 120,
-		bootstrapRetryMs: props.bootstrapRetryMs ?? 1000,
-	});
+	const createSession = (): WorkbenchSession =>
+		createWorkbenchSession({
+			wsUrl: props.wsUrl ?? "ws://localhost:7010/api/ui/ws",
+			httpBaseUrl: props.httpBaseUrl ?? "http://localhost:7010/api/ui",
+			pollIntervalMs: props.pollIntervalMs ?? 120,
+			bootstrapRetryMs: props.bootstrapRetryMs ?? 1000,
+		});
+
+	const session: WorkbenchSession =
+		import.meta.hot?.data.workbenchSession ?? createSession();
+	if (import.meta.hot) {
+		import.meta.hot.data.workbenchSession = session;
+	}
 
 	appState.session = session;
 	
-	onMount(() => session.mount());
+	onMount(() => {
+		const cleanup = session.mount();
+		return () => {
+			if (!import.meta.hot) {
+				cleanup();
+			}
+		};
+	});
 
 	let isWindowMaximized = $state(false);
 	let hasTauriWindowApi = $state(false);

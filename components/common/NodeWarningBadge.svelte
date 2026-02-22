@@ -32,7 +32,7 @@
 
 {#if safeCount > 0}
 	<button
-		transition:fade ={{ duration: 150 }}
+		transition:fade ={{ duration: 100 }}
 		class="warning-badge"
 		title={computedTitle}
 		aria-label={computedTitle}
@@ -68,7 +68,7 @@
 		font-weight: 700;
 		vertical-align: middle;
 		min-width: 1.5rem;
-		min-height: 1.5rem;
+		min-height: 1rem;
 		cursor: pointer;
 		color: var(--gc-color-warning);
 	}

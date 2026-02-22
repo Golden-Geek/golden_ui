@@ -131,10 +131,7 @@
 </div>
 
 <style>
-    .app-header
-    {
-    cursor: grab;
-    }
+    
 
 	.history-actions {
 		display: flex;
