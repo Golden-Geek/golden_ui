@@ -12,14 +12,22 @@
 		sendSetLogMaxEntriesIntent
 	} from '../../../store/ui-intents';
 
-	const initialProps: PanelProps = $props();
-	const panelApi = initialProps.panelApi;
+	let { panelApi, panelId, panelType, title, params }: PanelProps = $props();
 
 	let panel = $state<PanelState>({
-		panelId: initialProps.panelId,
-		panelType: initialProps.panelType,
-		title: initialProps.title,
-		params: initialProps.params
+		panelId: '',
+		panelType: '',
+		title: '',
+		params: {}
+	});
+
+	$effect(() => {
+		panel = {
+			panelId,
+			panelType,
+			title,
+			params
+		};
 	});
 
 	export const setPanelState = (next: PanelState): void => {

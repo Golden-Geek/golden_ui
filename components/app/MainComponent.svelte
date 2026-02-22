@@ -46,14 +46,14 @@
 	import LoggerPanel from '../panels/logger/LoggerPanel.svelte';
 	import WarningsPanel from '../panels/warnings/WarningsPanel.svelte';
 
-	const props = $props<{
+	let { userPanels, initialPanels, nodeIcons } = $props<{
 		userPanels?: UserPanelDefinitionMap;
 		initialPanels?: PanelSpawnRequest[];
 		nodeIcons?: NodeIconSet;
 	}>();
 
 	$effect(() => {
-		configureNodeIcons(props.nodeIcons);
+		configureNodeIcons(nodeIcons);
 	});
 
 	type MountedPanel = PanelExports & Record<string, unknown>;
@@ -143,12 +143,14 @@
 		);
 	};
 
-	const panelDefinitions: Record<string, PanelDefinition> = {
+	const panelDefinitions = $derived<Record<string, PanelDefinition>>({
 		...goldenPanelDefinitions,
-		...normalizeUserPanels(props.userPanels)
-	};
-	const availablePanelDefinitions = Object.values(panelDefinitions).sort((first, second) =>
-		first.title.localeCompare(second.title)
+		...normalizeUserPanels(userPanels)
+	});
+	const availablePanelDefinitions = $derived(
+		Object.values(panelDefinitions).sort((first, second) =>
+			first.title.localeCompare(second.title)
+		)
 	);
 
 	let containerElement: HTMLDivElement | undefined;
@@ -352,14 +354,15 @@
 	});
 
 	const defaultPanelRequestFor = (request: PanelSpawnRequest): PanelSpawnRequest | undefined => {
-		const initialPanels: PanelSpawnRequest[] = props.initialPanels ?? createDefaultInitialPanels();
+		const initialPanelRequests: PanelSpawnRequest[] =
+			initialPanels ?? createDefaultInitialPanels();
 		if (request.panelId) {
-			const panelById = initialPanels.find((panel) => panel.panelId === request.panelId);
+			const panelById = initialPanelRequests.find((panel) => panel.panelId === request.panelId);
 			if (panelById) {
 				return panelById;
 			}
 		}
-		return initialPanels.find((panel) => panel.panelType === request.panelType);
+		return initialPanelRequests.find((panel) => panel.panelType === request.panelType);
 	};
 
 	const withPanelDefaults = (request: PanelSpawnRequest): PanelSpawnRequest => {
@@ -804,8 +807,8 @@
 
 			const didRestorePersistedLayout = restorePersistedLayout();
 			if (!didRestorePersistedLayout) {
-				const initialPanels = props.initialPanels ?? createDefaultInitialPanels();
-				for (const panel of initialPanels) {
+				const initialPanelRequests = initialPanels ?? createDefaultInitialPanels();
+				for (const panel of initialPanelRequests) {
 					addPanel(panel);
 				}
 			}

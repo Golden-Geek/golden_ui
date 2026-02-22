@@ -12,14 +12,13 @@
 	import { getIconURLForNode } from '$lib/golden_ui/store/node-types';
 	import EnableButton from '../../common/EnableButton.svelte';
 
-	const initialProps: PanelProps = $props();
-	const panelApi = initialProps.panelApi;
+	let { panelApi, panelId, panelType, title, params }: PanelProps = $props();
 
 	let panel = $state<PanelState>({
-		panelId: initialProps.panelId,
-		panelType: initialProps.panelType,
-		title: initialProps.title,
-		params: initialProps.params
+		panelId: '',
+		panelType: '',
+		title: '',
+		params: {}
 	});
 
 	export const setPanelState = (next: PanelState): void => {
@@ -64,7 +63,15 @@
 		persistState({ dataInspectorCollapsed });
 	};
 
-	applyPersistedState(initialProps.params);
+	$effect(() => {
+		panel = {
+			panelId,
+			panelType,
+			title,
+			params
+		};
+		applyPersistedState(params);
+	});
 </script>
 
 <div class="inspector">
@@ -84,22 +91,24 @@
 				<EnableButton {node} />
 			{/if}
 
-			<span class="target-id">
+			<span class="title-text">
 				{selectedNodes.length > 0
 					? selectedNodes.length === 1
 						? node.meta.label
 						: selectedNodes.length + ' selected nodes'
 					: ''}
-
+			</span>
+			<div class="node-id-badge">
+				<span class="node-id">{node.decl_id}</span>
 				<button
 					class="copy-button"
-					title="Copy ID to Clipboard"
+					title="Copy path to Clipboard"
 					onclick={() => {
 						if (node) {
 							navigator.clipboard.writeText(node.uuid);
 						}
 					}}>📋</button>
-			</span>
+			</div>
 		</div>
 
 		{#if warningCount > 0}
@@ -163,15 +172,19 @@
 		vertical-align: middle;
 	}
 
-	.inspector-header .target-id {
+	.inspector-header .title-text {
+		font-weight: 600;
+	}
+
+	.inspector-header .node-id-badge {
 		display: inline-flex;
 		align-items: center;
 		gap: 0.35rem;
-		padding: 0.2rem 0;
-		font-size: 0.9rem;
-		font-weight: bold;
-		border-radius: 0.5em;
-		background-color: rgba(from var(--panel-bg-color) r g b / 6%);
+		font-size: 0.8rem;
+		border-radius: 1rem;
+		padding: 0.2rem 0.5rem;
+		background-color: rgb(255, 255, 255, 0.1);
+		border: solid 1px rgba(255, 255, 255, 0.07);
 		color: var(--text-color);
 	}
 
@@ -180,6 +193,7 @@
 		opacity: 0.5;
 		transition: opacity 0.2s ease;
 		cursor: pointer;
+		padding: 0;
 	}
 
 	.inspector-header .copy-button:hover {

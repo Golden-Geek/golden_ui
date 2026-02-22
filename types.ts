@@ -15,7 +15,23 @@ export type ParamValue =
 	| { kind: 'vec2'; value: [number, number] }
 	| { kind: 'vec3'; value: [number, number, number] }
 	| { kind: 'color'; value: [number, number, number, number] }
-	| { kind: 'reference'; uuid: string; cached_id?: NodeId };
+	| { kind: 'reference'; uuid: string; cached_id?: NodeId; relative_path_from_root?: string[] };
+
+export type UiReferenceRoot =
+	| { kind: 'engineRoot' }
+	| { kind: 'uuid'; uuid: string }
+	| { kind: 'relativeToOwner'; path: string[] };
+
+export type UiReferenceTargetKind = 'anyNode' | 'parameterOnly';
+
+export interface UiReferenceConstraints {
+	root: UiReferenceRoot;
+	target_kind: UiReferenceTargetKind;
+	allowed_node_types: string[];
+	allowed_parameter_types: string[];
+	custom_filter_key?: string;
+	default_search_filter?: string;
+}
 
 export type UiSubscriptionScope =
 	| { kind: 'wholeGraph' }
@@ -75,6 +91,7 @@ export interface UiParamConstraints {
 	step_base?: number;
 	enum_options: ParamEnumOption[];
 	policy: ParamConstraintPolicy;
+	reference?: UiReferenceConstraints;
 }
 
 export interface UiParamHints {
@@ -89,6 +106,8 @@ export interface UiParamDto {
 	read_only: boolean;
 	constraints: UiParamConstraints;
 	ui_hints: UiParamHints;
+	reference_allowed_targets: NodeId[];
+	reference_visible_nodes: NodeId[];
 }
 
 export type UiNodeDataDto =

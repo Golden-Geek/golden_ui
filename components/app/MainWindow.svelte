@@ -12,6 +12,7 @@
 		type WorkbenchSession,
 	} from "../../store/workbench.svelte";
 	import AppFooter from "./AppFooter.svelte";
+	import NodePickerModalHost from "../common/NodePickerModalHost.svelte";
 	import type {
 		PanelSpawnRequest,
 		UserPanelDefinitionMap,
@@ -135,4 +136,5 @@
 		nodeIcons={props.nodeIcons}
 	/>
 	<AppFooter />
+	<NodePickerModalHost />
 </div>

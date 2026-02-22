@@ -3,13 +3,22 @@
 	import { appState } from '../../../store/workbench.svelte';
 	import type { NodeId } from '../../../types';
 
-	const initialProps: PanelProps = $props();
+	let { panelId, panelType, title, params }: PanelProps = $props();
 
 	let panel = $state<PanelState>({
-		panelId: initialProps.panelId,
-		panelType: initialProps.panelType,
-		title: initialProps.title,
-		params: initialProps.params
+		panelId: '',
+		panelType: '',
+		title: '',
+		params: {}
+	});
+
+	$effect(() => {
+		panel = {
+			panelId,
+			panelType,
+			title,
+			params
+		};
 	});
 
 	export const setPanelState = (next: PanelState): void => {

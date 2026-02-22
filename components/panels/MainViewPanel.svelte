@@ -6,14 +6,13 @@
 	} from "../../dockview/panel-persistence";
 	import type { PanelProps, PanelState } from "../../dockview/panel-types";
 
-	const initialProps: PanelProps = $props();
-	const panelApi = initialProps.panelApi;
+	let { panelApi, panelId, panelType, title, params }: PanelProps = $props();
 
 	let panel = $state<PanelState>({
-		panelId: initialProps.panelId,
-		panelType: initialProps.panelType,
-		title: initialProps.title,
-		params: initialProps.params
+		panelId: "",
+		panelType: "",
+		title: "",
+		params: {}
 	});
 	let baseTitle = $state("");
 	let mode = $state("graph");
@@ -67,8 +66,16 @@
 		scheduleViewportRestore(normalizeScrollTop(persisted.viewportScrollTop));
 	};
 
-	baseTitle = normalizeBaseTitle(initialProps.title);
-	applyParams(initialProps.params);
+	$effect(() => {
+		panel = {
+			panelId,
+			panelType,
+			title,
+			params
+		};
+		baseTitle = normalizeBaseTitle(title);
+		applyParams(params);
+	});
 
 	const dynamicTitle = $derived(`${baseTitle} ${mode} (${nodeCount})`);
 	const nodes = $derived(

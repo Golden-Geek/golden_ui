@@ -15,6 +15,8 @@ import type {
 	UiNodeMetaDto,
 	UiParamConstraints,
 	UiParamDto,
+	UiReferenceConstraints,
+	UiReferenceRoot,
 	UiSnapshot,
 	UiSubscriptionScope
 } from '../types';
@@ -64,7 +66,17 @@ interface RustUiParamDto {
 			ordering?: number;
 		}>;
 		policy: ParamConstraintPolicy;
+		reference?: {
+			root?: unknown;
+			target_kind?: string;
+			allowed_node_types?: string[];
+			allowed_parameter_types?: string[];
+			custom_filter_key?: string;
+			default_search_filter?: string;
+		};
 	};
+	reference_allowed_targets?: number[];
+	reference_visible_nodes?: number[];
 	ui_hints?: {
 		widget?: string;
 		unit?: string;
@@ -176,7 +188,7 @@ export const fromRustScope = (scope: unknown): UiSubscriptionScope => {
 	return { kind: 'wholeGraph' };
 };
 
-const fromRustReferencePayload = (payload: unknown): { uuid: string; cached_id?: number } => {
+const fromRustReferencePayload = (payload: unknown): { uuid: string; cached_id?: number; relative_path_from_root?: string[] } => {
 	if (typeof payload === 'string') {
 		return { uuid: payload };
 	}
@@ -192,7 +204,11 @@ const fromRustReferencePayload = (payload: unknown): { uuid: string; cached_id?:
 
 		const cached = payload.cached_id;
 		const cached_id = typeof cached === 'number' ? cached : undefined;
-		return { uuid, cached_id };
+		const relativePathRaw = payload.relative_path_from_root;
+		const relative_path_from_root = Array.isArray(relativePathRaw)
+			? relativePathRaw.filter((segment): segment is string => typeof segment === 'string')
+			: undefined;
+		return { uuid, cached_id, relative_path_from_root };
 	}
 
 	return { uuid: '' };
@@ -259,7 +275,8 @@ const fromRustParamValue = (value: unknown): ParamValue => {
 		return {
 			kind: 'reference',
 			uuid: reference.uuid,
-			cached_id: reference.cached_id
+			cached_id: reference.cached_id,
+			relative_path_from_root: reference.relative_path_from_root
 		};
 	}
 	if ('Trigger' in value) {
@@ -290,8 +307,67 @@ const toRustParamValue = (value: ParamValue): RustParamValue => {
 		case 'color':
 			return { Color: value.value };
 		case 'reference':
-			return { Reference: { uuid: value.uuid } };
+			return {
+				Reference: {
+					uuid: value.uuid,
+					relative_path_from_root: value.relative_path_from_root ?? []
+				}
+			};
 	}
+};
+
+const fromRustReferenceRoot = (root: unknown): UiReferenceRoot => {
+	if (typeof root === 'string') {
+		if (root === 'EngineRoot' || root === 'engineRoot') {
+			return { kind: 'engineRoot' };
+		}
+	}
+
+	if (isRecord(root)) {
+		if ('Uuid' in root) {
+			const uuid = root.Uuid;
+			return { kind: 'uuid', uuid: typeof uuid === 'string' ? uuid : '' };
+		}
+		if ('RelativeToOwner' in root) {
+			const payload = root.RelativeToOwner;
+			const path = isRecord(payload) && Array.isArray(payload.path) ? payload.path.filter((segment): segment is string => typeof segment === 'string') : [];
+			return { kind: 'relativeToOwner', path };
+		}
+		if (root.kind === 'uuid') {
+			return { kind: 'uuid', uuid: String(root.uuid ?? '') };
+		}
+		if (root.kind === 'relativeToOwner') {
+			const rawPath = root.path;
+			const path = Array.isArray(rawPath) ? rawPath.filter((segment): segment is string => typeof segment === 'string') : [];
+			return { kind: 'relativeToOwner', path };
+		}
+	}
+
+	return { kind: 'engineRoot' };
+};
+
+const fromRustReferenceConstraints = (reference: RustUiParamDto['constraints']['reference']): UiReferenceConstraints | undefined => {
+	if (!reference) {
+		return undefined;
+	}
+
+	const target_kind =
+		reference.target_kind === 'ParameterOnly' || reference.target_kind === 'parameterOnly'
+			? 'parameterOnly'
+			: 'anyNode';
+
+	return {
+		root: fromRustReferenceRoot(reference.root),
+		target_kind,
+		allowed_node_types: [...(reference.allowed_node_types ?? [])],
+		allowed_parameter_types: [...(reference.allowed_parameter_types ?? [])],
+		custom_filter_key:
+			typeof reference.custom_filter_key === 'string' ? reference.custom_filter_key : undefined,
+		default_search_filter:
+			typeof reference.default_search_filter === 'string'
+				? reference.default_search_filter
+				: undefined
+	};
 };
 
 const fromRustConstraints = (constraints: RustUiParamDto['constraints']): UiParamConstraints => ({
@@ -306,7 +382,8 @@ const fromRustConstraints = (constraints: RustUiParamDto['constraints']): UiPara
 		tags: [...(option.tags ?? [])],
 		ordering: option.ordering
 	})),
-	policy: constraints.policy
+	policy: constraints.policy,
+	reference: fromRustReferenceConstraints(constraints.reference)
 });
 
 const fromRustParam = (param: RustUiParamDto): UiParamDto => ({
@@ -315,7 +392,9 @@ const fromRustParam = (param: RustUiParamDto): UiParamDto => ({
 	event_behaviour: param.event_behaviour,
 	read_only: param.read_only,
 	constraints: fromRustConstraints(param.constraints),
-	ui_hints: { ...(param.ui_hints ?? {}) }
+	ui_hints: { ...(param.ui_hints ?? {}) },
+	reference_allowed_targets: [...(param.reference_allowed_targets ?? [])],
+	reference_visible_nodes: [...(param.reference_visible_nodes ?? [])]
 });
 
 const fromRustNodeData = (data: RustUiNodeDto['data']): UiNodeDataDto => {

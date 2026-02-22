@@ -10,20 +10,43 @@
 	let {
 		node,
 		level = 0,
-		maxLevels = undefined
+		maxLevels = undefined,
+		mode = 'outliner',
+		initiallyExpandedDepth = 5,
+		transitionDurationMs = 150,
+		focusedNodeId = null,
+		autoExpandToNodeId = null,
+		nodeFilter = (_candidate: UiNodeDto) => true,
+		nodeSelectable = (_candidate: UiNodeDto) => true,
+		onSelectNode = null
 	} = $props<{
 		node: UiNodeDto | null;
 		level?: number;
 		maxLevels?: number;
+		mode?: 'outliner' | 'tree';
+		initiallyExpandedDepth?: number;
+		transitionDurationMs?: number;
+		focusedNodeId?: number | null;
+		autoExpandToNodeId?: number | null;
+		nodeFilter?: (candidate: UiNodeDto) => boolean;
+		nodeSelectable?: (candidate: UiNodeDto) => boolean;
+		onSelectNode?: ((next: UiNodeDto, event: MouseEvent) => void) | null;
 	}>();
 
 	let session = $derived(appState.session);
-	let mainGraphState = $derived(session?.graph.state);
-	let meta = $derived(node.meta);
-
+	let mainGraphState = $derived(session?.graph.state ?? null);
+	let meta = $derived(node?.meta ?? null);
+	let isOutlinerMode = $derived(mode === 'outliner');
 	let iconURL = $derived(getIconURLForNode(node));
 
 	const selectNode = (next: UiNodeDto, event: MouseEvent): void => {
+		if (!nodeSelectable(next)) {
+			return;
+		}
+		if (onSelectNode) {
+			onSelectNode(next, event);
+			return;
+		}
 		session?.selectNode(
 			next.node_id,
 			event.ctrlKey || event.metaKey
@@ -36,40 +59,133 @@
 		);
 	};
 
-	let isExpanded = $state(level < 5); // auto-expand first 2 levels
+	const subtreeContainsNodeId = (candidate: UiNodeDto | null, targetNodeId: number): boolean => {
+		if (!candidate) {
+			return false;
+		}
+		if (candidate.node_id === targetNodeId) {
+			return true;
+		}
+		for (const childId of candidate.children ?? []) {
+			const childNode = mainGraphState?.nodesById.get(childId) ?? null;
+			if (subtreeContainsNodeId(childNode, targetNodeId)) {
+				return true;
+			}
+		}
+		return false;
+	};
+
+	let isExpanded = $state(false);
+	let didInitExpanded = $state(false);
+
+	$effect.pre(() => {
+		if (didInitExpanded) {
+			return;
+		}
+		const shouldAutoExpandToTarget =
+			autoExpandToNodeId !== null &&
+			node !== null &&
+			node.node_id !== autoExpandToNodeId &&
+			subtreeContainsNodeId(node, autoExpandToNodeId);
+		isExpanded = level < initiallyExpandedDepth || shouldAutoExpandToTarget;
+		didInitExpanded = true;
+	});
 
 	let isSelected = $derived(session?.isNodeSelected(node?.node_id ?? -1) ?? false);
+	let hasArrow = $derived(Boolean(node?.children && node.children.length > 0));
+	let warnings = $derived(node ? session?.getNodeVisibleWarnings(node.node_id) ?? [] : []);
 
-	let hasArrow = $derived(node.children && node.children.length > 0);
-	let warnings = $derived(session?.getNodeVisibleWarnings(node.node_id));
-	let warningCount = $derived(node ? (warnings?.length ?? 0) : 0);
+	const passesFilter = (candidate: UiNodeDto | null): boolean => {
+		if (!candidate) {
+			return false;
+		}
+		return nodeFilter(candidate);
+	};
+
+	const isSelectable = (candidate: UiNodeDto | null): boolean => {
+		if (!candidate) {
+			return false;
+		}
+		return nodeSelectable(candidate);
+	};
+
+	const subtreeHasVisibleNode = (candidate: UiNodeDto | null): boolean => {
+		if (!candidate) {
+			return false;
+		}
+		if (passesFilter(candidate)) {
+			return true;
+		}
+		for (const childId of candidate.children ?? []) {
+			const childNode = mainGraphState?.nodesById.get(childId) ?? null;
+			if (subtreeHasVisibleNode(childNode)) {
+				return true;
+			}
+		}
+		return false;
+	};
+
+	let isVisible = $derived(subtreeHasVisibleNode(node));
+	let showRow = $derived(node !== null);
+	let rowSelectable = $derived(isSelectable(node));
+	let isCurrentReference = $derived(
+		focusedNodeId !== null && node !== null && node.node_id === focusedNodeId
+	);
 </script>
 
-{#if node}
+{#if node && isVisible}
 	<div class="outliner-item">
-		<div class="outliner-item-content" class:selected={isSelected} class:has-arrow={hasArrow}>
-			{#if hasArrow}
-				<div
-					class="outliner-expand arrow {isExpanded ? 'down' : ''}"
-					aria-hidden="true"
-					onclick={() => (isExpanded = !isExpanded)}>
-				</div>
-			{/if}
-			<img class="outliner-item-icon" src={iconURL} alt="" aria-hidden="true" />
-			{#if meta.can_be_disabled}
-				<EnableButton {node} />
-			{/if}
-			<button class="outliner-item-label" type="button" onclick={(event) => selectNode(node, event)}
-				>{meta.label}</button>
-			<NodeWarningBadge {warnings} />
-			<span class="outliner-item-spacer"></span>
-			<span class="outliner-item-type">{node.node_type}</span>
-		</div>
+		{#if showRow}
+			<div
+				class="outliner-item-content"
+				class:selected={!onSelectNode && isSelected}
+				class:has-arrow={hasArrow}
+				class:current-reference={isCurrentReference}
+				data-node-id={node.node_id}
+				class:non-selectable={!rowSelectable}>
+				{#if hasArrow}
+					<div
+						class="outliner-expand arrow {isExpanded ? 'down' : ''}"
+						aria-hidden="true"
+						onclick={() => (isExpanded = !isExpanded)}>
+					</div>
+				{/if}
+				<img class="outliner-item-icon" src={iconURL} alt="" aria-hidden="true" />
+				{#if isOutlinerMode && meta?.can_be_disabled}
+					<EnableButton {node} />
+				{/if}
+				<button
+					class="outliner-item-label"
+					class:non-selectable={!rowSelectable}
+					type="button"
+					disabled={!rowSelectable}
+					onclick={(event) => selectNode(node, event)}
+					>{meta?.label ?? ''}</button>
+				{#if isOutlinerMode}
+					<NodeWarningBadge {warnings} />
+				{/if}
+				<span class="outliner-item-spacer"></span>
+				{#if isOutlinerMode}
+					<span class="outliner-item-type">{node.node_type}</span>
+				{/if}
+			</div>
+		{/if}
 
 		{#if isExpanded && hasArrow && (maxLevels == undefined || level < maxLevels)}
-			<div class="outliner-children" transition:slide|local={{ duration: 200 }}>
+			<div class="outliner-children" transition:slide|local={{ duration: transitionDurationMs }}>
 				{#each node.children as child}
-					<Self node={mainGraphState?.nodesById.get(child) ?? null} level={level + 1} {maxLevels} />
+					<Self
+						node={mainGraphState?.nodesById.get(child) ?? null}
+						level={level + 1}
+						{maxLevels}
+						{mode}
+						{initiallyExpandedDepth}
+						{transitionDurationMs}
+						{focusedNodeId}
+						{autoExpandToNodeId}
+						{nodeFilter}
+						{nodeSelectable}
+						{onSelectNode} />
 				{/each}
 			</div>
 		{/if}
@@ -88,6 +204,16 @@
 		display: flex;
 		align-items: center;
 		gap: 0.25rem;
+	}
+
+	.outliner-item-content.non-selectable {
+		opacity: 0.55;
+	}
+
+	.outliner-item-content.current-reference .outliner-item-label {
+		outline: solid 0.08rem color-mix(in srgb, var(--gc-color-selection) 82%, white 18%);
+		background-color: color-mix(in srgb, var(--gc-color-selection) 16%, transparent);
+		border-radius: 0.3rem;
 	}
 
 	.outliner-item-content.has-arrow {
@@ -118,6 +244,10 @@
 		transition:
 			background-color 0.1s ease,
 			outline 0.1s ease;
+	}
+
+	.outliner-item-label.non-selectable {
+		cursor: default;
 	}
 
 	.outliner-item-label:hover {
