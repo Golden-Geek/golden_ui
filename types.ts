@@ -110,6 +110,11 @@ export interface UiParamDto {
 	reference_visible_nodes: NodeId[];
 }
 
+export interface UiReferenceTargets {
+	allowed_target_ids: NodeId[];
+	visible_node_ids: NodeId[];
+}
+
 export type UiNodeDataDto =
 	| { kind: 'parameter'; param: UiParamDto }
 	| { kind: 'node'; node_type: string };
@@ -229,6 +234,7 @@ export interface UiClient {
 	): () => void;
 	sendIntent(intent: UiEditIntent): Promise<UiAck>;
 	replay(scope: UiSubscriptionScope, from?: EventTime): Promise<UiEventBatch>;
+	referenceTargets(paramNodeId: NodeId): Promise<UiReferenceTargets>;
 }
 
 export const wholeGraphScope: UiSubscriptionScope = { kind: 'wholeGraph' };

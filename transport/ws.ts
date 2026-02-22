@@ -538,6 +538,10 @@ export const createWebSocketUiClient = (options: WebSocketUiClientOptions = {}):
 
 		async replay(scope: UiSubscriptionScope, from?: EventTime) {
 			return httpClient.replay(scope, from);
+		},
+
+		async referenceTargets(paramNodeId: number) {
+			return httpClient.referenceTargets(paramNodeId);
 		}
 	};
 

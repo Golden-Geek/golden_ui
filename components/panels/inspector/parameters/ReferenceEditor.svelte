@@ -18,9 +18,11 @@
 	let value = $derived(param?.value.kind === 'reference' ? param.value : null);
 	let enabled = $derived(liveNode.meta.enabled);
 	let readOnly = $derived(Boolean(param?.read_only));
-	let allowedTargetIds = $derived(param?.reference_allowed_targets ?? []);
-	let visibleNodeIds = $derived(param?.reference_visible_nodes ?? []);
 	let hasCustomReferenceFilter = $derived(Boolean(constraints?.custom_filter_key));
+	let customAllowedTargetIds = $state<NodeId[]>([]);
+	let customVisibleNodeIds = $state<NodeId[]>([]);
+	let customAllowedTargetIdSet = $derived.by(() => new Set(customAllowedTargetIds));
+	let customVisibleNodeIdSet = $derived.by(() => new Set(customVisibleNodeIds));
 
 	const getNodeByUuid = (uuid: string): UiNodeDto | null => {
 		if (!graph || uuid.length === 0) {
@@ -125,7 +127,7 @@
 		referenceConstraints: UiReferenceConstraints | undefined
 	): boolean => {
 		if (hasCustomReferenceFilter) {
-			return allowedTargetIds.includes(candidate.node_id);
+			return customAllowedTargetIdSet.has(candidate.node_id);
 		}
 		if (!referenceConstraints) {
 			return true;
@@ -155,9 +157,40 @@
 
 	const candidateVisibleInPicker = (candidate: UiNodeDto): boolean => {
 		if (hasCustomReferenceFilter) {
-			return visibleNodeIds.includes(candidate.node_id);
+			return customVisibleNodeIdSet.has(candidate.node_id);
 		}
 		return candidateAllowedByConstraints(candidate, constraints);
+	};
+
+	const applyLegacySnapshotTargets = (): boolean => {
+		const fallbackAllowed = param?.reference_allowed_targets ?? [];
+		const fallbackVisible = param?.reference_visible_nodes ?? [];
+		if (fallbackAllowed.length === 0 && fallbackVisible.length === 0) {
+			return false;
+		}
+		customAllowedTargetIds = [...fallbackAllowed];
+		customVisibleNodeIds = [...fallbackVisible];
+		return true;
+	};
+
+	const loadCustomReferenceTargets = async (): Promise<boolean> => {
+		if (!hasCustomReferenceFilter) {
+			customAllowedTargetIds = [];
+			customVisibleNodeIds = [];
+			return true;
+		}
+		if (!session) {
+			return applyLegacySnapshotTargets();
+		}
+		try {
+			const targets = await session.client.referenceTargets(liveNode.node_id);
+			customAllowedTargetIds = [...targets.allowed_target_ids];
+			customVisibleNodeIds = [...targets.visible_node_ids];
+			return true;
+		} catch (error) {
+			console.error('Failed to load reference picker targets', error);
+			return applyLegacySnapshotTargets();
+		}
 	};
 
 	let rootNodeId = $derived(resolveRootNodeId(constraints));
@@ -217,6 +250,16 @@
 		if (!enabled || readOnly || !graph) {
 			return;
 		}
+		if (hasCustomReferenceFilter) {
+			const loadedTargets = await loadCustomReferenceTargets();
+			if (!loadedTargets) {
+				return;
+			}
+		} else {
+			customAllowedTargetIds = [];
+			customVisibleNodeIds = [];
+		}
+
 		const result = await openNodePickerModal({
 			rootNode,
 			selectedNodeId: selectedNode?.node_id ?? null,

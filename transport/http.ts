@@ -16,6 +16,7 @@ import type {
 	UiParamConstraints,
 	UiParamDto,
 	UiReferenceConstraints,
+	UiReferenceTargets,
 	UiReferenceRoot,
 	UiSnapshot,
 	UiSubscriptionScope
@@ -40,6 +41,15 @@ export interface RustSnapshotRequest {
 export interface RustReplayRequest {
 	scope: RustScope;
 	from?: EventTime;
+}
+
+export interface RustReferenceTargetsRequest {
+	param: number;
+}
+
+export interface RustReferenceTargetsResponse {
+	allowed_targets?: number[];
+	visible_nodes?: number[];
 }
 
 export type RustParamValue =
@@ -495,6 +505,13 @@ export const fromRustEventBatch = (batch: RustUiEventBatch): UiEventBatch => ({
 	events: batch.events.map(fromRustEvent)
 });
 
+export const fromRustReferenceTargets = (
+	payload: RustReferenceTargetsResponse
+): UiReferenceTargets => ({
+	allowed_target_ids: [...(payload.allowed_targets ?? [])],
+	visible_node_ids: [...(payload.visible_nodes ?? [])]
+});
+
 export const toRustIntent = (intent: UiEditIntent): unknown => {
 	if (intent.kind === 'setParam') {
 		return {
@@ -600,6 +617,15 @@ export const createHttpUiClient = (options: HttpClientOptions = {}): UiClient =>
 			const request: RustReplayRequest = { scope: toRustScope(scope), from };
 			const batch = await postJson<RustUiEventBatch>('/replay', request);
 			return fromRustEventBatch(batch);
+		},
+
+		async referenceTargets(paramNodeId: number): Promise<UiReferenceTargets> {
+			const request: RustReferenceTargetsRequest = { param: paramNodeId };
+			const response = await postJson<RustReferenceTargetsResponse>(
+				'/reference-targets',
+				request
+			);
+			return fromRustReferenceTargets(response);
 		}
 	};
 
