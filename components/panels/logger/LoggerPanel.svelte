@@ -1,5 +1,10 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import type { NodeId } from '$lib/golden_ui/types';
+	import {
+		readPanelPersistedState,
+		writePanelPersistedState
+	} from '$lib/golden_ui/dockview/panel-persistence';
 	import type { PanelProps, PanelState } from '../../../dockview/panel-types';
 	import { appState } from '../../../store/workbench.svelte';
 	import {
@@ -8,6 +13,7 @@
 	} from '../../../store/ui-intents';
 
 	const initialProps: PanelProps = $props();
+	const panelApi = initialProps.panelApi;
 
 	let panel = $state<PanelState>({
 		panelId: initialProps.panelId,
@@ -18,6 +24,7 @@
 
 	export const setPanelState = (next: PanelState): void => {
 		panel = next;
+		restoreListScroll(next.params);
 	};
 
 	let session = $derived(appState.session);
@@ -25,6 +32,41 @@
 	let orderedRecords = $derived([...records].reverse());
 	let maxEntries = $derived(session?.logMaxEntries ?? 0);
 	let desiredMaxEntries = $state(128);
+	let loggerList = $state<HTMLDivElement | null>(null);
+	let listRestoreRaf = $state<number | null>(null);
+	let listPersistRaf = $state<number | null>(null);
+
+	interface LoggerPersistedState {
+		listScrollTop?: number;
+	}
+
+	const normalizeScrollTop = (value: unknown): number | undefined => {
+		if (typeof value !== 'number' || !Number.isFinite(value)) {
+			return undefined;
+		}
+		return Math.max(0, value);
+	};
+
+	const restoreListScroll = (params: PanelState['params']): void => {
+		if (listRestoreRaf !== null) {
+			cancelAnimationFrame(listRestoreRaf);
+		}
+
+		const persistedState = readPanelPersistedState<LoggerPersistedState>(params);
+		const listScrollTop = normalizeScrollTop(persistedState.listScrollTop);
+		if (listScrollTop === undefined) {
+			listRestoreRaf = null;
+			return;
+		}
+
+		listRestoreRaf = requestAnimationFrame(() => {
+			listRestoreRaf = null;
+			if (!loggerList) {
+				return;
+			}
+			loggerList.scrollTop = listScrollTop;
+		});
+	};
 
 	$effect(() => {
 		if (maxEntries > 0) {
@@ -47,6 +89,22 @@
 		void sendClearLogsIntent();
 	};
 
+	const persistListScroll = (): void => {
+		if (listPersistRaf !== null) {
+			return;
+		}
+
+		listPersistRaf = requestAnimationFrame(() => {
+			listPersistRaf = null;
+			if (!loggerList) {
+				return;
+			}
+			writePanelPersistedState(panelApi, {
+				listScrollTop: loggerList.scrollTop
+			});
+		});
+	};
+
 	const formatTimestamp = (timestampMs: number): string => {
 		const date = new Date(timestampMs);
 		return date.toLocaleTimeString([], {
@@ -56,6 +114,23 @@
 			second: '2-digit'
 		});
 	};
+
+	$effect(() => {
+		orderedRecords.length;
+		restoreListScroll(panel.params);
+	});
+
+	onMount(() => {
+		restoreListScroll(panel.params);
+		return () => {
+			if (listRestoreRaf !== null) {
+				cancelAnimationFrame(listRestoreRaf);
+			}
+			if (listPersistRaf !== null) {
+				cancelAnimationFrame(listPersistRaf);
+			}
+		};
+	});
 </script>
 
 <section class="logger-panel">
@@ -77,7 +152,7 @@
 		<button type="button" class="clear-button" onclick={clearLogs}>Clear</button>
 	</header>
 
-	<div class="logger-list">
+	<div class="logger-list" bind:this={loggerList} onscroll={persistListScroll}>
 		{#if orderedRecords.length === 0}
 			<div class="empty-state">No logs yet.</div>
 		{:else}

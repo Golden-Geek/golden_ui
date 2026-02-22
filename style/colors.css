@@ -31,6 +31,9 @@
 
 	--gc-color-dropdown-bg: #131313f0;
 
+	/* META */
+	--gc-color-warning: #e4901c;
+
 
 	/* DOCKVIEW COLORS */
 	--gc-color-dock-surface: transparent;

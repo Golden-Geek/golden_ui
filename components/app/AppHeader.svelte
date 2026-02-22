@@ -1,6 +1,7 @@
 <script lang="ts">
     import type { WorkbenchSession } from "$lib/golden_ui/store/workbench.svelte";
     import { onMount } from "svelte";
+    import { clearPersistedUiState } from "../../store/ui-persistence";
 
     let isWindowMaximized = $state(false);
     let hasTauriWindowApi = $state(false);
@@ -60,6 +61,13 @@
         }
     };
 
+    const clearUiStorage = (): void => {
+        clearPersistedUiState();
+        if (typeof window !== "undefined") {
+            window.location.reload();
+        }
+    };
+
     onMount(() => {
         hasTauriWindowApi = Boolean(window.__TAURI_INTERNALS__?.invoke);
         if (!hasTauriWindowApi) {
@@ -84,6 +92,14 @@
     <div class="spacer"></div>
     <div class="controls">
         <div class="history-actions">
+            <button
+                type="button"
+                class="history-button"
+                title="Clear persisted UI state and reload"
+                onclick={clearUiStorage}
+            >
+                Clear UI
+            </button>
             <button
                 type="button"
                 class="history-button"

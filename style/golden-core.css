@@ -114,6 +114,7 @@ button {
     display: inline-block;
     align-items: center;
     justify-content: center;
+    color: rgba(var(--gc-color-text));
 }
 
 input,
@@ -159,8 +160,7 @@ select.readonly {
     color: rgba(from var(--gc-color-text) r g b / 50%);
 }
 
-select.readonly
-{
+select.readonly {
     appearance: none;
     -webkit-appearance: none;
 }
@@ -301,6 +301,14 @@ select {
     background-position: center center;
     background-image: var(--icon);
 }
+
+.warning-icon {
+    width: 1rem;
+    height: 1rem;
+    background: url('icons/warning.svg') center center no-repeat;
+    background-size: contain;
+}
+
 
 
 /* DOCKVIEW STYLING */

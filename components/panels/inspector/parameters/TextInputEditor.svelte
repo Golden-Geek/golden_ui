@@ -65,8 +65,4 @@
 		font-size: 0.75rem;
 	}
 
-	.string-editor:disabled {
-		background-color: var(--inspector-input-disabled-bg);
-		color: rgba(from var(--text-color) r g b / 50%);
-	}
 </style>

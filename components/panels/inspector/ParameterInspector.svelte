@@ -3,6 +3,7 @@
 	import { appState } from '../../../store/workbench.svelte';
 	import { sendPatchMetaIntent, sendSetParamIntent } from '../../../store/ui-intents';
 	import EnableButton from '../../common/EnableButton.svelte';
+	import NodeWarningBadge from '../../common/NodeWarningBadge.svelte';
 	import { propertiesInspectorClass } from './inspector.svelte';
 	import resetIcon from '../../../style/icons/reset.svg';
 	import { fade } from 'svelte/transition';
@@ -26,7 +27,7 @@
 	let visible = $derived(!meta.tags.includes('hidden'));
 	let readOnly = $derived(Boolean(param?.read_only));
 	let isUserMade = $derived(meta.tags.includes('is_user_made'));
-
+	let warnings = $derived(node ? session?.getNodeVisibleWarnings(liveNode.node_id) : null);
 	let editorInfos: any = $derived(
 		type.length > 0 ? (propertiesInspectorClass[type] ?? null) : null
 	);
@@ -144,6 +145,7 @@
 					{:else}
 						{liveNode.meta.label}
 					{/if}
+					<NodeWarningBadge {warnings} />
 					{#if !readOnly && enabled && isValueOverridden}
 						<button
 							type="button"

@@ -15,6 +15,8 @@ export interface PanelState {
 export interface PanelApi {
 	setTitle: (title: string) => void;
 	close: () => void;
+	updateParams: (params: PanelParams) => void;
+	getParams: <T extends PanelParams = PanelParams>() => T;
 }
 
 export interface PanelProps extends PanelState {
@@ -66,6 +68,30 @@ export interface PanelSpawnRequest {
 	minimumHeight?: number;
 	maximumHeight?: number;
 	inactive?: boolean;
+}
+
+export interface PanelQuery {
+	panelId?: string;
+	panelType?: string;
+}
+
+export interface PanelHandle {
+	readonly panelId: string;
+	readonly panelType: string;
+	getTitle: () => string;
+	isActive: () => boolean;
+	setActive: () => void;
+	close: () => void;
+	setTitle: (title: string) => void;
+	updateParams: (params: PanelParams) => void;
+	getParams: <T extends PanelParams = PanelParams>() => T;
+}
+
+export interface PanelController {
+	accessPanel: (query: PanelQuery) => PanelHandle | null;
+	getPanelById: (panelId: string) => PanelHandle | null;
+	getPanelByType: (panelType: string) => PanelHandle | null;
+	showPanel: (request: PanelSpawnRequest) => PanelHandle | null;
 }
 
 // Backward-compatible aliases while callers migrate off Dock-specific naming.

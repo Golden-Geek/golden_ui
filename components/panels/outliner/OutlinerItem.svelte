@@ -4,6 +4,7 @@
 	import Self from './OutlinerItem.svelte';
 	import { getIconURLForNode } from '$lib/golden_ui/store/node-types';
 	import { slide } from 'svelte/transition';
+	import NodeWarningBadge from '$lib/golden_ui/components/common/NodeWarningBadge.svelte';
 
 	let {
 		node,
@@ -39,6 +40,8 @@
 	let isSelected = $derived(session?.isNodeSelected(node?.node_id ?? -1) ?? false);
 
 	let hasArrow = $derived(node.children && node.children.length > 0);
+	let warnings = $derived(session?.getNodeVisibleWarnings(node.node_id));
+	let warningCount = $derived(node ? (warnings?.length ?? 0) : 0);
 </script>
 
 {#if node}
@@ -54,6 +57,7 @@
 			<img class="outliner-item-icon" src={iconURL} alt="" aria-hidden="true" />
 			<button class="outliner-item-label" type="button" onclick={(event) => selectNode(node, event)}
 				>{meta.label}</button>
+			<NodeWarningBadge {warnings} />
 			<span class="outliner-item-spacer"></span>
 			<span class="outliner-item-type">{node.node_type}</span>
 		</div>
@@ -82,9 +86,9 @@
 		gap: 0.25rem;
 	}
 
-    .outliner-item-content.has-arrow {
-        margin-left: -0.5rem;
-    }
+	.outliner-item-content.has-arrow {
+		margin-left: -0.5rem;
+	}
 
 	.outliner-expand {
 		width: 1rem;

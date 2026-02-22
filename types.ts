@@ -29,6 +29,27 @@ export interface EventTime {
 	seq: number;
 }
 
+export interface UiNodeWarningDto {
+	id?: string;
+	message: string;
+	detail?: string;
+}
+
+export interface UiColorDto {
+	r: number;
+	g: number;
+	b: number;
+	a: number;
+}
+
+export interface UiNodePresentationHintsDto {
+	color?: UiColorDto;
+	// Warnings that belong to this node.
+	warnings?: UiNodeWarningDto[];
+	// If > 0, this node also surfaces warnings from descendants up to this depth.
+	show_child_warnings_max_depth?: number;
+}
+
 export interface UiNodeMetaDto {
 	short_name: string;
 	label: string;
@@ -36,6 +57,7 @@ export interface UiNodeMetaDto {
 	can_be_disabled: boolean;
 	description?: string;
 	tags: string[];
+	presentation?: UiNodePresentationHintsDto;
 }
 
 export interface ParamEnumOption {

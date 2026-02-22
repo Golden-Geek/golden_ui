@@ -2,6 +2,7 @@ import { createGraphStore, type GraphStore } from './graph.svelte';
 import { createWebSocketUiClient } from '../transport/ws';
 import type {
 	NodeId,
+	UiNodeWarningDto,
 	UiNodeDto,
 	UiClient,
 	UiEditIntent,
@@ -11,6 +12,11 @@ import type {
 	UiSubscriptionScope
 } from '../types';
 import { wholeGraphScope } from '../types';
+import type { PanelController } from '../dockview/panel-types';
+import {
+	loadPersistedSelection,
+	savePersistedSelection
+} from './ui-persistence';
 
 export type SelectionMode = 'REPLACE' | 'ADD' | 'REMOVE' | 'TOGGLE';
 
@@ -20,6 +26,17 @@ export interface WorkbenchSessionOptions {
 	pollIntervalMs?: number;
 	scope?: UiSubscriptionScope;
 	bootstrapRetryMs?: number;
+}
+
+export interface NodeWarningRecord {
+	targetNodeId: NodeId;
+	targetNodeLabel: string;
+	sourceNodeId: NodeId;
+	sourceNodeLabel: string;
+	warningId: string;
+	message: string;
+	detail?: string;
+	distance: number;
 }
 
 export interface WorkbenchSession {
@@ -36,6 +53,9 @@ export interface WorkbenchSession {
 	getNodeData(nodeId: NodeId): UiNodeDto | null;
 	getSelectedNodes(): UiNodeDto[];
 	getFirstSelectedNode(): UiNodeDto | null;
+	getNodeVisibleWarnings(nodeId: NodeId): NodeWarningRecord[];
+	getActiveWarnings(): NodeWarningRecord[];
+	hasNodeWarnings(nodeId: NodeId): boolean;
 	isNodeSelected(nodeId: NodeId): boolean;
 	selectNode(nodeId: NodeId | null, selectionMode?: SelectionMode): void;
 	selectNodes(nodeIds: NodeId[], selectionMode?: SelectionMode): void;
@@ -47,6 +67,7 @@ export interface WorkbenchSession {
 }
 
 const DEFAULT_RETRY_MS = 1000;
+const DEFAULT_WARNING_ID = '';
 
 const formatEventTime = (value: { tick: number; micro: number; seq: number }): string =>
 	`${value.tick}:${value.micro}:${value.seq}`;
@@ -98,8 +119,45 @@ const asUiLogRecord = (payload: unknown): UiLogRecord | null => {
 	};
 };
 
+interface NormalizedNodeWarning {
+	id: string;
+	message: string;
+	detail?: string;
+}
+
+interface VisibleWarningCacheEntry {
+	version: number;
+	warnings: NodeWarningRecord[];
+}
+
+const normalizeWarningId = (warningId: string | undefined): string =>
+	typeof warningId === 'string' ? warningId : DEFAULT_WARNING_ID;
+
+const normalizeNodeWarning = (warning: UiNodeWarningDto): NormalizedNodeWarning | null => {
+	const message = String(warning.message ?? '').trim();
+	if (message.length === 0) {
+		return null;
+	}
+
+	const detailText = typeof warning.detail === 'string' ? warning.detail.trim() : '';
+	return {
+		id: normalizeWarningId(warning.id),
+		message,
+		detail: detailText.length > 0 ? detailText : undefined
+	};
+};
+
+const normalizeWarningDepth = (value: unknown): number => {
+	const rawDepth = Number(value);
+	if (!Number.isFinite(rawDepth)) {
+		return 0;
+	}
+	return Math.max(0, Math.floor(rawDepth));
+};
+
 export const appState = $state({
-	session : null as WorkbenchSession | null
+	session: null as WorkbenchSession | null,
+	panels: null as PanelController | null
 });
 
 
@@ -110,6 +168,8 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 
 	let status = $state('Connecting to engine...');
 	let selectedNodeIds = $state<NodeId[]>([]);
+	const persistedSelection = loadPersistedSelection();
+	let shouldRestorePersistedSelection = persistedSelection.length > 0;
 	let historyBusy = $state(false);
 	let canUndo = $state(false);
 	let canRedo = $state(false);
@@ -145,12 +205,235 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 		}
 	});
 
+	let warningCacheVersion = 0;
+	let activeWarningsCacheVersion = -1;
+	let activeWarningsCache: NodeWarningRecord[] = [];
+	const visibleWarningsCache = new Map<NodeId, VisibleWarningCacheEntry>();
+
+	const invalidateWarningCaches = (): void => {
+		warningCacheVersion += 1;
+		activeWarningsCacheVersion = -1;
+		activeWarningsCache = [];
+		visibleWarningsCache.clear();
+	};
+
+	const batchAffectsWarnings = (batch: UiEventBatch): boolean => {
+		for (const event of batch.events) {
+			switch (event.kind.kind) {
+				case 'metaChanged':
+				case 'childAdded':
+				case 'childRemoved':
+				case 'childReplaced':
+				case 'childMoved':
+				case 'childReordered':
+				case 'nodeCreated':
+				case 'nodeDeleted':
+					return true;
+				default:
+					break;
+			}
+		}
+		return false;
+	};
+
 	const getNodeData = (nodeId: NodeId): UiNodeDto | null => {
 		return graph.state.nodesById.get(nodeId) ?? null;
 	};
 
+	const getMetaWarningsForNode = (node: UiNodeDto): Map<string, NormalizedNodeWarning> => {
+		const rawEntries = node.meta.presentation?.warnings;
+		const entries = Array.isArray(rawEntries) ? rawEntries : [];
+		const warningsById = new Map<string, NormalizedNodeWarning>();
+		for (const rawWarning of entries) {
+			const normalized = normalizeNodeWarning(rawWarning);
+			if (!normalized) {
+				continue;
+			}
+			warningsById.set(normalized.id, normalized);
+		}
+		return warningsById;
+	};
+
+	const getNodeOwnWarnings = (nodeId: NodeId): NormalizedNodeWarning[] => {
+		const node = graph.state.nodesById.get(nodeId);
+		if (!node) {
+			return [];
+		}
+		return [...getMetaWarningsForNode(node).values()];
+	};
+
+	const getNodeWarningChildDepth = (nodeId: NodeId): number => {
+		const node = graph.state.nodesById.get(nodeId);
+		if (!node) {
+			return 0;
+		}
+		return normalizeWarningDepth(node.meta.presentation?.show_child_warnings_max_depth ?? 0);
+	};
+
+	const labelForNode = (nodeId: NodeId): string => {
+		return graph.state.nodesById.get(nodeId)?.meta.label ?? `Node ${nodeId}`;
+	};
+
+	const computeNodeVisibleWarnings = (nodeId: NodeId): NodeWarningRecord[] => {
+		const targetNode = graph.state.nodesById.get(nodeId);
+		if (!targetNode) {
+			return [];
+		}
+
+		const maxDepth = getNodeWarningChildDepth(nodeId);
+		const pending: Array<{ nodeId: NodeId; depth: number }> = [{ nodeId, depth: 0 }];
+		const seenMinDepth = new Map<NodeId, number>();
+		const warningRecordsByKey = new Map<string, NodeWarningRecord>();
+
+		while (pending.length > 0) {
+			const current = pending.shift();
+			if (!current) {
+				continue;
+			}
+
+			const knownDepth = seenMinDepth.get(current.nodeId);
+			if (knownDepth !== undefined && knownDepth <= current.depth) {
+				continue;
+			}
+			seenMinDepth.set(current.nodeId, current.depth);
+
+			const ownWarnings = getNodeOwnWarnings(current.nodeId);
+			for (const warning of ownWarnings) {
+				const key = `${current.nodeId}:${warning.id}`;
+				if (warningRecordsByKey.has(key)) {
+					continue;
+				}
+				warningRecordsByKey.set(key, {
+					targetNodeId: nodeId,
+					targetNodeLabel: targetNode.meta.label,
+					sourceNodeId: current.nodeId,
+					sourceNodeLabel: labelForNode(current.nodeId),
+					warningId: warning.id,
+					message: warning.message,
+					detail: warning.detail,
+					distance: current.depth
+				});
+			}
+
+			if (current.depth >= maxDepth) {
+				continue;
+			}
+
+			const children = graph.state.childrenById.get(current.nodeId) ?? [];
+			for (const childNodeId of children) {
+				pending.push({ nodeId: childNodeId, depth: current.depth + 1 });
+			}
+		}
+
+		return [...warningRecordsByKey.values()].sort((left, right) => {
+			if (left.distance !== right.distance) {
+				return left.distance - right.distance;
+			}
+			const byLabel = left.sourceNodeLabel.localeCompare(right.sourceNodeLabel);
+			if (byLabel !== 0) {
+				return byLabel;
+			}
+			const byWarningId = left.warningId.localeCompare(right.warningId);
+			if (byWarningId !== 0) {
+				return byWarningId;
+			}
+			return left.message.localeCompare(right.message);
+		});
+	};
+
+	const getNodeVisibleWarnings = (nodeId: NodeId): NodeWarningRecord[] => {
+		// Keep Svelte dependency on graph state even when serving from cache.
+		void graph.state.lastEventTime;
+
+		const cached = visibleWarningsCache.get(nodeId);
+		if (cached && cached.version === warningCacheVersion) {
+			return cached.warnings;
+		}
+
+		const warnings = computeNodeVisibleWarnings(nodeId);
+		visibleWarningsCache.set(nodeId, {
+			version: warningCacheVersion,
+			warnings
+		});
+		return warnings;
+	};
+
+	const computeActiveWarnings = (): NodeWarningRecord[] => {
+		const allWarnings: NodeWarningRecord[] = [];
+		for (const node of graph.state.nodesById.values()) {
+			for (const warning of getNodeOwnWarnings(node.node_id)) {
+				allWarnings.push({
+					targetNodeId: node.node_id,
+					targetNodeLabel: node.meta.label,
+					sourceNodeId: node.node_id,
+					sourceNodeLabel: node.meta.label,
+					warningId: warning.id,
+					message: warning.message,
+					detail: warning.detail,
+					distance: 0
+				});
+			}
+		}
+
+		return allWarnings.sort((left, right) => {
+			const byLabel = left.sourceNodeLabel.localeCompare(right.sourceNodeLabel);
+			if (byLabel !== 0) {
+				return byLabel;
+			}
+			const byWarningId = left.warningId.localeCompare(right.warningId);
+			if (byWarningId !== 0) {
+				return byWarningId;
+			}
+			return left.message.localeCompare(right.message);
+		});
+	};
+
+	const getActiveWarnings = (): NodeWarningRecord[] => {
+		// Keep Svelte dependency on graph state even when serving from cache.
+		void graph.state.lastEventTime;
+
+		if (activeWarningsCacheVersion === warningCacheVersion) {
+			return activeWarningsCache;
+		}
+
+		activeWarningsCache = computeActiveWarnings();
+		activeWarningsCacheVersion = warningCacheVersion;
+		return activeWarningsCache;
+	};
+
+	const hasNodeWarnings = (nodeId: NodeId): boolean => {
+		return getNodeVisibleWarnings(nodeId).length > 0;
+	};
+
+	const persistSelection = (): void => {
+		savePersistedSelection(selectedNodeIds);
+	};
+
+	const setSelection = (nextSelection: NodeId[]): void => {
+		selectedNodeIds = nextSelection;
+		persistSelection();
+	};
+
+	const restorePersistedSelection = (): void => {
+		if (!shouldRestorePersistedSelection) {
+			return;
+		}
+
+		shouldRestorePersistedSelection = false;
+		const validSelection = persistedSelection.filter((nodeId) => graph.state.nodesById.has(nodeId));
+		setSelection(validSelection);
+	};
+
 	const reconcileSelection = (): void => {
-		selectedNodeIds = selectedNodeIds.filter((nodeId) => graph.state.nodesById.has(nodeId));
+		const nextSelection = selectedNodeIds.filter((nodeId) => graph.state.nodesById.has(nodeId));
+		if (
+			nextSelection.length === selectedNodeIds.length &&
+			nextSelection.every((nodeId, index) => nodeId === selectedNodeIds[index])
+		) {
+			return;
+		}
+
+		setSelection(nextSelection);
 	};
 
 	const trimLogRecords = (): void => {
@@ -177,7 +460,7 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 	const isNodeSelected = (nodeId: NodeId): boolean => selectedNodeIds.includes(nodeId);
 
 	const clearSelection = (): void => {
-		selectedNodeIds = [];
+		setSelection([]);
 	};
 
 	const selectNodes = (nodeIds: NodeId[], selectionMode: SelectionMode = 'REPLACE'): void => {
@@ -193,12 +476,12 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 		}
 
 		if (selectionMode === 'REPLACE') {
-			selectedNodeIds = validUniqueIds;
+			setSelection(validUniqueIds);
 			return;
 		}
 
 		if(selectionMode === 'REMOVE') {
-			selectedNodeIds = selectedNodeIds.filter((id) => !validUniqueIds.includes(id));
+			setSelection(selectedNodeIds.filter((id) => !validUniqueIds.includes(id)));
 			return;
 		}
 
@@ -211,7 +494,7 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 					toggled.add(nodeId);
 				}
 			}
-			selectedNodeIds = Array.from(toggled);
+			setSelection(Array.from(toggled));
 			return;
 		}
 
@@ -221,7 +504,7 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 				merged.push(nodeId);
 			}
 		}
-		selectedNodeIds = merged;
+		setSelection(merged);
 	};
 
 	const selectNode = (nodeId: NodeId | null, selectionMode: SelectionMode = 'REPLACE'): void => {
@@ -248,6 +531,8 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 		try {
 			const snapshot = await client.snapshot(scope);
 			graph.loadSnapshot(snapshot);
+			invalidateWarningCaches();
+			restorePersistedSelection();
 			reconcileSelection();
 			applyHistoryState(snapshot.history);
 			logMaxEntries = snapshot.logger.max_entries;
@@ -262,6 +547,8 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 	};
 
 	const applyBatch = (batch: UiEventBatch): void => {
+		const warningDataChanged = batchAffectsWarnings(batch);
+
 		for (const event of batch.events) {
 			if (event.kind.kind !== 'custom') {
 				continue;
@@ -291,6 +578,9 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 		}
 
 		graph.applyBatch(batch);
+		if (warningDataChanged) {
+			invalidateWarningCaches();
+		}
 		reconcileSelection();
 		if (graph.state.requiresResync) {
 			void resyncSnapshot('Snapshot resynced.');
@@ -403,6 +693,8 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 					return;
 				}
 				graph.loadSnapshot(snapshot);
+				invalidateWarningCaches();
+				restorePersistedSelection();
 				reconcileSelection();
 				applyHistoryState(snapshot.history);
 				logMaxEntries = snapshot.logger.max_entries;
@@ -461,7 +753,8 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 			}
 			unsubscribe();
 			graph.reset();
-			clearSelection();
+			invalidateWarningCaches();
+			selectedNodeIds = [];
 			logRecords = [];
 			logMaxEntries = 0;
 			mountedCleanup = null;
@@ -504,6 +797,9 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 		getNodeData,
 		getSelectedNodes,
 		getFirstSelectedNode,
+		getNodeVisibleWarnings,
+		getActiveWarnings,
+		hasNodeWarnings,
 		isNodeSelected,
 		selectNode,
 		selectNodes,

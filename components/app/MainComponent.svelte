@@ -10,6 +10,7 @@
 		type IContentRenderer,
 		type IGroupHeaderProps,
 		type IHeaderActionsRenderer,
+		type IDockviewPanel,
 		type PanelUpdateEvent
 	} from 'dockview-core';
 
@@ -19,8 +20,12 @@
 
 	import type {
 		PanelApi,
+		PanelController,
 		PanelDefinition,
 		PanelExports,
+		PanelHandle,
+		PanelParams,
+		PanelQuery,
 		PanelSpawnPosition,
 		PanelSpawnRequest,
 		PanelState,
@@ -28,12 +33,18 @@
 		UserPanelDefinitionMap
 	} from '$lib/golden_ui/dockview/panel-types';
 	import { configureNodeIcons, type NodeIconSet } from '../../store/node-types';
+	import {
+		loadPersistedDockLayout,
+		savePersistedDockLayout
+	} from '../../store/ui-persistence';
+	import { appState } from '../../store/workbench.svelte';
 
 	import MainViewPanel from '../panels/MainViewPanel.svelte';
 	import UnknownPanel from '../panels/UnknownPanel.svelte';
 	import Outliner from '../panels/outliner/OutlinerPanel.svelte';
 	import InspectorPanel from '../panels/inspector/InspectorPanel.svelte';
 	import LoggerPanel from '../panels/logger/LoggerPanel.svelte';
+	import WarningsPanel from '../panels/warnings/WarningsPanel.svelte';
 
 	const props = $props<{
 		userPanels?: UserPanelDefinitionMap;
@@ -75,6 +86,12 @@
 			panelType: 'logger',
 			title: 'Logger',
 			component: LoggerPanel,
+			origin: 'golden'
+		},
+		warnings: {
+			panelType: 'warnings',
+			title: 'Warnings',
+			component: WarningsPanel,
 			origin: 'golden'
 		}
 	};
@@ -136,6 +153,7 @@
 
 	let containerElement: HTMLDivElement | undefined;
 	let dockview: DockviewComponent | undefined;
+	let isRestoringPersistedLayout = false;
 
 	const panelInstanceCounters = new Map<string, number>();
 
@@ -143,7 +161,7 @@
 		let nextIndex = panelInstanceCounters.get(panelType) ?? 1;
 		let panelId = `${panelType}-${nextIndex}`;
 
-		while (dockview?.getPanel(panelId)) {
+		while (dockview?.getGroupPanel(panelId)) {
 			nextIndex += 1;
 			panelId = `${panelType}-${nextIndex}`;
 		}
@@ -185,17 +203,29 @@
 		let panelState: PanelState = {
 			panelId: options.id,
 			panelType: options.name,
-			title: panelDefinition?.title ?? options.name,
+			title: panelDefinition?.title ?? formatPanelTypeTitle(options.name),
 			params: {}
 		};
 
 		return {
 			element: hostElement,
 			init: (parameters: GroupPanelPartInitParameters): void => {
+				const generatedTitle = panelDefinition?.title ?? formatPanelTypeTitle(options.name);
+				const rawTitle = typeof parameters.title === 'string' ? parameters.title.trim() : '';
+				const isLikelyDockviewFallback =
+					rawTitle.length > 0 &&
+					rawTitle.toLowerCase() === options.name.toLowerCase() &&
+					rawTitle === rawTitle.toLowerCase();
+				const resolvedTitle =
+					rawTitle.length === 0 || isLikelyDockviewFallback ? generatedTitle : rawTitle;
+				if (parameters.title !== resolvedTitle) {
+					parameters.api.setTitle(resolvedTitle);
+				}
+
 				panelState = {
 					panelId: parameters.api.id,
 					panelType: options.name,
-					title: parameters.title ?? panelDefinition?.title ?? options.name,
+					title: resolvedTitle,
 					params: parameters.params ?? {}
 				};
 
@@ -205,6 +235,12 @@
 					},
 					close: (): void => {
 						parameters.api.close();
+					},
+					updateParams: (params: PanelParams): void => {
+						parameters.api.updateParameters(params);
+					},
+					getParams: <T extends PanelParams = PanelParams>(): T => {
+						return parameters.api.getParameters<T>();
 					}
 				};
 
@@ -278,6 +314,137 @@
 
 		dockview.addPanel(options);
 		return panelId;
+	};
+
+	const findPanelByType = (panelType: string): IDockviewPanel | undefined => {
+		return dockview?.panels.find((panel) => panel.api.component === panelType);
+	};
+
+	const resolvePanelFromQuery = (query: PanelQuery): IDockviewPanel | undefined => {
+		if (!dockview) {
+			return undefined;
+		}
+
+		if (query.panelId) {
+			const panelById = dockview.getGroupPanel(query.panelId);
+			if (panelById) {
+				return panelById;
+			}
+		}
+
+		if (query.panelType) {
+			return findPanelByType(query.panelType);
+		}
+
+		return undefined;
+	};
+
+	const asPanelHandle = (panel: IDockviewPanel): PanelHandle => ({
+		panelId: panel.id,
+		panelType: panel.api.component,
+		getTitle: (): string => panel.title ?? panel.api.component,
+		isActive: (): boolean => panel.api.isActive,
+		setActive: (): void => panel.api.setActive(),
+		close: (): void => panel.api.close(),
+		setTitle: (title: string): void => panel.setTitle(title),
+		updateParams: (params: PanelParams): void => panel.api.updateParameters(params),
+		getParams: <T extends PanelParams = PanelParams>(): T => panel.api.getParameters<T>()
+	});
+
+	const defaultPanelRequestFor = (request: PanelSpawnRequest): PanelSpawnRequest | undefined => {
+		const initialPanels: PanelSpawnRequest[] = props.initialPanels ?? createDefaultInitialPanels();
+		if (request.panelId) {
+			const panelById = initialPanels.find((panel) => panel.panelId === request.panelId);
+			if (panelById) {
+				return panelById;
+			}
+		}
+		return initialPanels.find((panel) => panel.panelType === request.panelType);
+	};
+
+	const withPanelDefaults = (request: PanelSpawnRequest): PanelSpawnRequest => {
+		const defaults = defaultPanelRequestFor(request);
+		if (!defaults) {
+			return {
+				...request,
+				inactive: request.inactive ?? false
+			};
+		}
+
+		return {
+			panelType: request.panelType,
+			panelId: request.panelId ?? defaults.panelId,
+			title: request.title ?? defaults.title,
+			params: {
+				...(defaults.params ?? {}),
+				...(request.params ?? {})
+			},
+			renderPolicy: request.renderPolicy ?? defaults.renderPolicy,
+			position: request.position ?? defaults.position,
+			initialWidth: request.initialWidth ?? defaults.initialWidth,
+			initialHeight: request.initialHeight ?? defaults.initialHeight,
+			minimumWidth: request.minimumWidth ?? defaults.minimumWidth,
+			maximumWidth: request.maximumWidth ?? defaults.maximumWidth,
+			minimumHeight: request.minimumHeight ?? defaults.minimumHeight,
+			maximumHeight: request.maximumHeight ?? defaults.maximumHeight,
+			inactive: request.inactive ?? false
+		};
+	};
+
+	const accessPanel = (query: PanelQuery): PanelHandle | null => {
+		const panel = resolvePanelFromQuery(query);
+		return panel ? asPanelHandle(panel) : null;
+	};
+
+	const getPanelById = (panelId: string): PanelHandle | null => {
+		const panel = resolvePanelFromQuery({ panelId });
+		return panel ? asPanelHandle(panel) : null;
+	};
+
+	const getPanelByType = (panelType: string): PanelHandle | null => {
+		const panel = resolvePanelFromQuery({ panelType });
+		return panel ? asPanelHandle(panel) : null;
+	};
+
+	const showPanel = (request: PanelSpawnRequest): PanelHandle | null => {
+		const existingPanel = resolvePanelFromQuery({
+			panelId: request.panelId,
+			panelType: request.panelType
+		});
+		if (existingPanel) {
+			if (request.title) {
+				existingPanel.setTitle(request.title);
+			}
+			if (request.params) {
+				existingPanel.api.updateParameters(request.params);
+			}
+			if (request.inactive !== true) {
+				existingPanel.api.setActive();
+			}
+			return asPanelHandle(existingPanel);
+		}
+
+		const mergedRequest = withPanelDefaults(request);
+		const createdPanelId = addPanel(mergedRequest);
+		if (!createdPanelId) {
+			return null;
+		}
+
+		const createdPanel = dockview?.getGroupPanel(createdPanelId);
+		if (!createdPanel) {
+			return null;
+		}
+		if (mergedRequest.inactive !== true) {
+			createdPanel.api.setActive();
+		}
+		return asPanelHandle(createdPanel);
+	};
+
+	const panelController: PanelController = {
+		accessPanel,
+		getPanelById,
+		getPanelByType,
+		showPanel
 	};
 
 	const createGroupAddRenderer = (group: DockviewGroupPanel): IHeaderActionsRenderer => {
@@ -481,7 +648,7 @@
 			{
 				panelId: 'inspector',
 				panelType: 'inspector',
-				initialWidth: remToPx(25),
+				initialWidth: remToPx(35),
 				minimumWidth: remToPx(22),
 				position: {
 					referencePanelId: 'panel-main',
@@ -491,12 +658,21 @@
 			{
 				panelId: 'logger',
 				panelType: 'logger',
-				initialHeight: remToPx(12),
+				initialHeight: remToPx(20),
 				minimumHeight: remToPx(8),
 				position: {
 					referencePanelId: 'inspector',
 					direction: 'below'
 				}
+			},
+			{
+				panelId: 'warnings',
+				panelType: 'warnings',
+				position: {
+					referencePanelId: 'logger',
+					direction: 'within'
+				},
+				inactive: true
 			},
 		];
 	};
@@ -522,6 +698,76 @@
 		}
 
 		let isUnmounted = false;
+		let persistLayoutTimer: ReturnType<typeof setTimeout> | null = null;
+		const panelPersistenceDisposables = new Map<string, DockviewIDisposable>();
+		const dockviewDisposables: DockviewIDisposable[] = [];
+
+		const clearPersistLayoutTimer = (): void => {
+			if (persistLayoutTimer === null) {
+				return;
+			}
+			clearTimeout(persistLayoutTimer);
+			persistLayoutTimer = null;
+		};
+
+		const persistLayoutNow = (): void => {
+			if (!dockview || isUnmounted || isRestoringPersistedLayout) {
+				return;
+			}
+			savePersistedDockLayout(dockview.toJSON());
+		};
+
+		const schedulePersistLayout = (): void => {
+			if (!dockview || isUnmounted || isRestoringPersistedLayout) {
+				return;
+			}
+			clearPersistLayoutTimer();
+			persistLayoutTimer = setTimeout(() => {
+				persistLayoutTimer = null;
+				persistLayoutNow();
+			}, 120);
+		};
+
+		const registerPanelPersistenceTracking = (panel: IDockviewPanel): void => {
+			panelPersistenceDisposables.get(panel.id)?.dispose();
+
+			const paramsDisposable = panel.api.onDidParametersChange(() => {
+				schedulePersistLayout();
+			});
+			const titleDisposable = panel.api.onDidTitleChange(() => {
+				schedulePersistLayout();
+			});
+
+			panelPersistenceDisposables.set(panel.id, {
+				dispose: () => {
+					paramsDisposable.dispose();
+					titleDisposable.dispose();
+				}
+			});
+		};
+
+		const restorePersistedLayout = (): boolean => {
+			if (!dockview) {
+				return false;
+			}
+
+			const persistedLayout = loadPersistedDockLayout();
+			if (!persistedLayout) {
+				return false;
+			}
+
+			try {
+				isRestoringPersistedLayout = true;
+				dockview.fromJSON(persistedLayout);
+				return true;
+			} catch (error) {
+				dockview.clear();
+				console.warn('[ui-persistence] Failed to restore dock layout from storage.', error);
+				return false;
+			} finally {
+				isRestoringPersistedLayout = false;
+			}
+		};
 
 		dockview = new DockviewComponent(containerElement, {
 			createComponent: createPanelRenderer,
@@ -531,18 +777,45 @@
 			createLeftHeaderActionComponent: (group) => createGroupAddRenderer(group),
 			theme: goldenDockviewTheme
 		});
+		appState.panels = panelController;
+
+		dockviewDisposables.push(
+			dockview.onDidLayoutChange(() => {
+				schedulePersistLayout();
+			}),
+			dockview.onDidActivePanelChange(() => {
+				schedulePersistLayout();
+			}),
+			dockview.onDidAddPanel((panel) => {
+				registerPanelPersistenceTracking(panel);
+				schedulePersistLayout();
+			}),
+			dockview.onDidRemovePanel((panel) => {
+				panelPersistenceDisposables.get(panel.id)?.dispose();
+				panelPersistenceDisposables.delete(panel.id);
+				schedulePersistLayout();
+			})
+		);
 
 		const initializePanels = (): void => {
-			if (isUnmounted) {
+			if (isUnmounted || !dockview) {
 				return;
 			}
 
-			const initialPanels = props.initialPanels ?? createDefaultInitialPanels();
-			for (const panel of initialPanels) {
-				addPanel(panel);
+			const didRestorePersistedLayout = restorePersistedLayout();
+			if (!didRestorePersistedLayout) {
+				const initialPanels = props.initialPanels ?? createDefaultInitialPanels();
+				for (const panel of initialPanels) {
+					addPanel(panel);
+				}
+			}
+
+			for (const panel of dockview.panels) {
+				registerPanelPersistenceTracking(panel);
 			}
 
 			void applyLayoutFromContainer();
+			schedulePersistLayout();
 		};
 
 		let layoutRetryCount = 0;
@@ -565,6 +838,17 @@
 
 		return () => {
 			isUnmounted = true;
+			clearPersistLayoutTimer();
+			for (const disposable of dockviewDisposables) {
+				disposable.dispose();
+			}
+			for (const disposable of panelPersistenceDisposables.values()) {
+				disposable.dispose();
+			}
+			panelPersistenceDisposables.clear();
+			if (appState.panels === panelController) {
+				appState.panels = null;
+			}
 			dockview?.dispose();
 			dockview = undefined;
 		};

@@ -1,11 +1,9 @@
 <script lang="ts">
-    import { onMount } from "svelte";
     import type { PanelProps, PanelState } from "../../../dockview/panel-types";
     import { appState } from "$lib/golden_ui/store/workbench.svelte";
     import OutlinerItem from "./OutlinerItem.svelte";
 
     const initialProps: PanelProps = $props();
-
     let panel = $state<PanelState>({
         panelId: initialProps.panelId,
         panelType: initialProps.panelType,

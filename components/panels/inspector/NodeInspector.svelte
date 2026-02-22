@@ -6,6 +6,7 @@
 	import ParameterInspector from './ParameterInspector.svelte';
 	import { getIconURLForNode } from '$lib/golden_ui/store/node-types';
 	import EnableButton from '../../common/EnableButton.svelte';
+	import NodeWarningBadge from '../../common/NodeWarningBadge.svelte';
 
 	let {
 		nodes = [],
@@ -41,6 +42,8 @@
 	let hasChildren = $derived(children.length > 0);
 	let canBeDisabled = $derived(node?.meta?.can_be_disabled ?? false);
 	let iconURL = $derived(getIconURLForNode(node));
+	let warnings = $derived(node ? session?.getNodeVisibleWarnings(node.node_id) : null);
+	let warningCount = $derived(warnings?.length ?? 0);
 
 	let titleTextElem: HTMLSpanElement | null = $state(null as HTMLSpanElement | null);
 	let arrowElem: HTMLSpanElement | null = $state(null as HTMLSpanElement | null);
@@ -81,7 +84,9 @@
 					<span class="title-text" bind:this={titleTextElem}>
 						{node.meta.label || 'Container'}
 					</span>
+					<NodeWarningBadge {warnings} />
 				</span>
+				
 			</div>
 		{/if}
 
@@ -167,13 +172,15 @@
 
 	.node-inspector:not(.root) {
 		.node-title {
-			display: inline-block;
-			background: linear-gradient(
+			display: inline-flex;
+			align-items: center;
+			gap: 0.25rem;
+			/* background: linear-gradient(
 				to bottom,
 				rgb(from var(--container-color) r g b / 40%),
 				rgb(from var(--container-color) r g b / 5%)
-			);
-			/* background-color: rgb(from var(--container-color) r g b / 30%); */
+			); */
+			background-color: rgb(from var(--container-color) r g b / 30%);
 			border-radius: 0.5rem 0.5rem 0 0;
 			padding: 0.25rem;
 			box-sizing: border-box;

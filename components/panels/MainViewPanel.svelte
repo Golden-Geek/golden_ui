@@ -1,4 +1,9 @@
 <script lang="ts">
+	import { onMount } from "svelte";
+	import {
+		readPanelPersistedState,
+		writePanelPersistedState
+	} from "../../dockview/panel-persistence";
 	import type { PanelProps, PanelState } from "../../dockview/panel-types";
 
 	const initialProps: PanelProps = $props();
@@ -10,11 +15,38 @@
 		title: initialProps.title,
 		params: initialProps.params
 	});
+	let baseTitle = $state("");
 	let mode = $state("graph");
 	let nodeCount = $state(3);
 	let publishedTitle = $state("");
+	let viewportElement = $state<HTMLDivElement | null>(null);
+	let viewportRestoreRaf = $state<number | null>(null);
+	let viewportPersistRaf = $state<number | null>(null);
 
 	const availableModes = ["graph", "timeline", "mix"];
+
+	const escapeRegex = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+	const titleSuffixPattern = new RegExp(
+		`\\s(?:${availableModes.map((modeName) => escapeRegex(modeName)).join("|")})\\s\\(\\d+\\)$`,
+		"i"
+	);
+
+	const normalizeBaseTitle = (value: string): string => {
+		const stripped = value.replace(titleSuffixPattern, "").trim();
+		return stripped.length > 0 ? stripped : "Main View";
+	};
+
+	interface MainViewPersistedState {
+		viewportScrollTop?: number;
+	}
+
+	const normalizeScrollTop = (value: unknown): number | undefined => {
+		if (typeof value !== "number" || !Number.isFinite(value)) {
+			return undefined;
+		}
+		return Math.max(0, value);
+	};
 
 	const normalizeCount = (value: unknown): number => {
 		if (typeof value !== "number" || !Number.isFinite(value)) {
@@ -31,25 +63,66 @@
 		}
 
 		nodeCount = normalizeCount(nextParams.nodeCount);
+		const persisted = readPanelPersistedState<MainViewPersistedState>(nextParams);
+		scheduleViewportRestore(normalizeScrollTop(persisted.viewportScrollTop));
 	};
 
+	baseTitle = normalizeBaseTitle(initialProps.title);
 	applyParams(initialProps.params);
 
-	const dynamicTitle = $derived(`${panel.title} ${mode} (${nodeCount})`);
+	const dynamicTitle = $derived(`${baseTitle} ${mode} (${nodeCount})`);
 	const nodes = $derived(
 		Array.from({ length: nodeCount }, (_, index) => `${mode}-node-${index + 1}`)
 	);
 
 	const setMode = (nextMode: string): void => {
 		mode = nextMode;
+		panelApi.updateParams({ mode: nextMode });
 	};
 
 	const addNode = (): void => {
 		nodeCount += 1;
+		panelApi.updateParams({ nodeCount });
 	};
 
 	const removeNode = (): void => {
 		nodeCount = Math.max(1, nodeCount - 1);
+		panelApi.updateParams({ nodeCount });
+	};
+
+	function scheduleViewportRestore(scrollTop: number | undefined): void {
+		if (viewportRestoreRaf !== null) {
+			cancelAnimationFrame(viewportRestoreRaf);
+		}
+
+		if (scrollTop === undefined) {
+			viewportRestoreRaf = null;
+			return;
+		}
+
+		viewportRestoreRaf = requestAnimationFrame(() => {
+			viewportRestoreRaf = null;
+			if (!viewportElement) {
+				return;
+			}
+			viewportElement.scrollTop = scrollTop;
+		});
+	}
+
+	const persistViewportState = (): void => {
+		if (viewportPersistRaf !== null) {
+			return;
+		}
+
+		viewportPersistRaf = requestAnimationFrame(() => {
+			viewportPersistRaf = null;
+			if (!viewportElement) {
+				return;
+			}
+			writePanelPersistedState(panelApi, {
+				viewportScrollTop: viewportElement.scrollTop
+			});
+		});
 	};
 
 	$effect(() => {
@@ -63,8 +136,20 @@
 
 	export function setPanelState(next: PanelState): void {
 		panel = next;
+		baseTitle = normalizeBaseTitle(next.title);
 		applyParams(next.params);
 	}
+
+	onMount(() => {
+		return () => {
+			if (viewportRestoreRaf !== null) {
+				cancelAnimationFrame(viewportRestoreRaf);
+			}
+			if (viewportPersistRaf !== null) {
+				cancelAnimationFrame(viewportPersistRaf);
+			}
+		};
+	});
 </script>
 
 <section class="panel main-view">
@@ -92,7 +177,7 @@
 		</div>
 	</div>
 
-	<div class="viewport">
+	<div class="viewport" bind:this={viewportElement} onscroll={persistViewportState}>
 		{#each nodes as node}
 			<div class="node">{node}</div>
 		{/each}
