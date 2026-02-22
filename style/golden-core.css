@@ -36,7 +36,6 @@ html {
     display: flex;
     align-items: center;
     background-color: var(--gc-color-header);
-    cursor: grab;
     user-select: none;
     -webkit-user-select: none;
     app-region: drag;
@@ -46,8 +45,10 @@ html {
 
     box-shadow: 0 .05rem .6rem rgba(0, 0, 0, .6);
     border-bottom: solid .05rem rgba(255, 255, 255, 0.05);
+}
 
-
+.gc-header.tauri {
+    cursor: grab;
 }
 
 .gc-header:active {
@@ -114,7 +115,13 @@ button {
     display: inline-block;
     align-items: center;
     justify-content: center;
+    cursor: pointer;
     color: rgba(var(--gc-color-text));
+    transition: filter 0.2s ease;
+}
+
+button:hover:not(:disabled) {
+    filter: brightness(1.2);
 }
 
 input,

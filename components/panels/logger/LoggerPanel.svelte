@@ -279,7 +279,6 @@
 		background: transparent;
 		color: color-mix(in srgb, var(--gc-color-focus) 85%, white 15%);
 		font-size: 0.66rem;
-		cursor: pointer;
 	}
 
 	.message {

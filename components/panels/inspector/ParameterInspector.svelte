@@ -227,19 +227,6 @@
 		min-width: max-content;
 	}
 
-	.parameter-label.error {
-		color: var(--error-color);
-		font-weight: bold;
-	}
-
-	.enable-property {
-		font-size: 0.5rem;
-		padding: 0.2rem 0.2rem 0.1rem;
-		vertical-align: middle;
-		cursor: pointer;
-		pointer-events: all;
-	}
-
 	.custom-prop-name-text {
 		cursor: text;
 	}
