@@ -30,6 +30,18 @@
 	let session = $derived(appState.session);
 	let records = $derived(session?.logRecords ?? []);
 	let orderedRecords = $derived([...records].reverse());
+	let recordEntries = $derived.by(() => {
+		const seenByBaseKey = new Map<string, number>();
+		return orderedRecords.map((record) => {
+			const baseKey = `${record.id}:${record.timestamp_ms}:${record.level}:${record.tag}`;
+			const seenCount = seenByBaseKey.get(baseKey) ?? 0;
+			seenByBaseKey.set(baseKey, seenCount + 1);
+			return {
+				key: `${baseKey}:${seenCount}`,
+				record
+			};
+		});
+	});
 	let maxEntries = $derived(session?.logMaxEntries ?? 0);
 	let desiredMaxEntries = $state(128);
 	let loggerList = $state<HTMLDivElement | null>(null);
@@ -156,7 +168,8 @@
 		{#if orderedRecords.length === 0}
 			<div class="empty-state">No logs yet.</div>
 		{:else}
-			{#each orderedRecords as record (record.id)}
+			{#each recordEntries as entry (entry.key)}
+				{@const record = entry.record}
 				{@const nodeLabel = session?.graph.state.nodesById.get(record.origin ?? -1)?.meta.label ?? 'unknown node'}
 				<article class={`record level-${record.level}`}>
 					<div class="record-head">

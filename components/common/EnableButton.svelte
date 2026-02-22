@@ -29,7 +29,7 @@
 	disabled={!canBeDisabled}
 	class:enabled
 	tabindex="0"
-	onclick={toggleEnabled}
+	onmousedown={toggleEnabled}
 	onkeydown={(event) => {
 		if (event.key === 'Enter' || event.key === ' ') {
 			event.preventDefault();

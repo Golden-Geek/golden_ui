@@ -5,6 +5,7 @@
 	import { getIconURLForNode } from '$lib/golden_ui/store/node-types';
 	import { slide } from 'svelte/transition';
 	import NodeWarningBadge from '$lib/golden_ui/components/common/NodeWarningBadge.svelte';
+	import EnableButton from '../../common/EnableButton.svelte';
 
 	let {
 		node,
@@ -55,6 +56,9 @@
 				</div>
 			{/if}
 			<img class="outliner-item-icon" src={iconURL} alt="" aria-hidden="true" />
+			{#if meta.can_be_disabled}
+				<EnableButton {node} />
+			{/if}
 			<button class="outliner-item-label" type="button" onclick={(event) => selectNode(node, event)}
 				>{meta.label}</button>
 			<NodeWarningBadge {warnings} />
