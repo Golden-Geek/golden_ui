@@ -30,7 +30,7 @@
 	let session = $derived(appState.session);
 
 	let selectedNodes = $derived(session?.getSelectedNodes() ?? []);
-
+	let node = $derived(selectedNodes.length === 1 ? selectedNodes[0] : null);
 	let iconURL = $derived(selectedNodes.length === 1 ? getIconURLForNode(selectedNodes[0]) : null);
 	let warnings = $derived(
 		selectedNodes.length === 1 ? session?.getNodeVisibleWarnings(selectedNodes[0].node_id) : null
@@ -68,7 +68,7 @@
 </script>
 
 <div class="inspector">
-	{#if selectedNodes.length === 0}
+	{#if node == null}
 		<div class="inspector-header">
 			<span>No node selected</span>
 		</div>
@@ -80,12 +80,14 @@
 				{/if}
 			</span>
 
-			<EnableButton node={selectedNodes[0]} />
+			{#if node.meta.can_be_disabled}
+				<EnableButton {node} />
+			{/if}
 
 			<span class="target-id">
 				{selectedNodes.length > 0
 					? selectedNodes.length === 1
-						? selectedNodes[0].meta.label
+						? node.meta.label
 						: selectedNodes.length + ' selected nodes'
 					: ''}
 
@@ -93,8 +95,8 @@
 					class="copy-button"
 					title="Copy ID to Clipboard"
 					onclick={() => {
-						if (selectedNodes.length === 1) {
-							navigator.clipboard.writeText(selectedNodes[0].uuid);
+						if (node) {
+							navigator.clipboard.writeText(node.uuid);
 						}
 					}}>📋</button>
 			</span>
@@ -104,7 +106,7 @@
 			<div class="warning-info" transition:slide={{ duration: 200 }}>
 				{#each warnings as warning}
 					<div class="warning-item" transition:slide={{ duration: 200 }}>
-						{#if warning.sourceNodeId != selectedNodes[0].node_id}
+						{#if warning.sourceNodeId != node.node_id}
 							<strong>{warning.sourceNodeLabel}:</strong>
 						{/if}
 						{warning.message}

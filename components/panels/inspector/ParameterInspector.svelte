@@ -104,11 +104,11 @@
 
 {#if visible}
 	<div
-		class="parameter-inspector {order} {'level-' + level} {enabled ? '' : 'disabled'}
+		class="parameter-inspector {order} {'level-' + level} 
 		{readOnly ? 'readonly' : ''}">
 		{#if param}
 			<div class="firstline">
-				<div class="parameter-label">
+				<div class="parameter-info">
 					{#if canDisable}
 						<EnableButton node={liveNode} />
 					{/if}
@@ -143,7 +143,7 @@
 							</span>
 						{/if}
 					{:else}
-						{liveNode.meta.label}
+						<span class="parameter-label">{liveNode.meta.label}</span>
 					{/if}
 					<NodeWarningBadge {warnings} />
 					{#if !readOnly && enabled && isValueOverridden}
@@ -158,9 +158,8 @@
 						</button>
 					{/if}
 				</div>
-
 				{#if EditorComponent}
-					<div class="parameter-wrapper {readOnly ? 'readonly' : ''}">
+					<div class="parameter-wrapper {readOnly ? 'readonly' : ''} {enabled ? '' : 'disabled'}">
 						<EditorComponent node={liveNode} />
 					</div>
 				{/if}
@@ -197,12 +196,6 @@
 		gap: 0.25rem;
 	}
 
-	.parameter-inspector.disabled {
-		user-select: none;
-		touch-action: none;
-		pointer-events: none;
-	}
-
 	.parameter-wrapper {
 		display: flex;
 		align-items: center;
@@ -210,7 +203,7 @@
 		flex-basis: 50%;
 	}
 
-	.parameter-wrapper.readonly {
+	.parameter-wrapper.readonly, .parameter-wrapper.disabled {
 		pointer-events: none;
 		touch-action: none;
 	}
@@ -221,10 +214,11 @@
 		min-height: 1.5rem;
 	}
 
-	.parameter-label {
+	.parameter-info {
 		display: flex;
 		align-items: center;
 		min-width: max-content;
+		gap: 0.25rem;
 	}
 
 	.custom-prop-name-text {
@@ -246,7 +240,6 @@
 		border: none;
 		cursor: pointer;
 		font-size: 0.7rem;
-		margin-left: 0.4rem;
 		color: var(--text-color);
 		padding: 0;
 		opacity: 0.55;
