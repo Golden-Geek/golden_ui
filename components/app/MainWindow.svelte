@@ -18,6 +18,7 @@
 		UserPanelDefinitionMap,
 	} from "../../dockview/panel-types";
 	import type { NodeIconSet } from "../../store/node-types";
+	import { platform } from "$lib/golden_ui/store/platform.svelte";
 
 	const props = $props<{
 		wsUrl?: string;
@@ -128,7 +129,7 @@
 	});
 </script>
 
-<div class="gc-main">
+<div class="gc-main os-{platform.name}">
 	<AppHeader {session}/>
 	<MainComponent
 		userPanels={props.userPanels}
