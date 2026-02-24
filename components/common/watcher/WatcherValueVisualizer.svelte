@@ -6,17 +6,19 @@
 		formatWatcherNumber,
 		getFixedRange,
 		getNowMs,
+		type WatcherDecimationMode,
 		type WatcherRangeMode,
 		watcherSeriesColor
 	} from './watcher-utils';
 
-	let { sampleValue, constraints, timeWindowMs, rangeMode, unit, streamKey } = $props<{
+	let { sampleValue, constraints, timeWindowMs, rangeMode, unit, streamKey, decimationMode } = $props<{
 		sampleValue: ParamValue;
 		constraints: UiParamConstraints;
 		timeWindowMs: number;
 		rangeMode: WatcherRangeMode;
 		unit: string;
 		streamKey: string;
+		decimationMode: WatcherDecimationMode;
 	}>();
 
 	const FRAME_INTERVAL_MS = 32;
@@ -50,6 +52,7 @@
 		rangeMode;
 		constraints.min;
 		constraints.max;
+		decimationMode;
 	});
 
 	$effect(() => {
@@ -187,8 +190,62 @@
 				return height - normalized * height;
 			};
 			const latestIndexBeforeWindow = buffer.findLatestIndexAtOrBefore(windowStartMs);
+			const visibleSamples = buffer.countSince(windowStartMs);
+			const shouldDecimate =
+				decimationMode === 'minmax' ||
+				(decimationMode === 'auto' && visibleSamples > Math.max(64, Math.floor(width) * 4));
 
 			for (let channelIndex = 0; channelIndex < buffer.seriesCount; channelIndex += 1) {
+				if (shouldDecimate) {
+					const bucketCount = Math.max(1, Math.floor(width));
+					const bucketMin = new Float64Array(bucketCount);
+					const bucketMax = new Float64Array(bucketCount);
+					const bucketHasSample = new Uint8Array(bucketCount);
+					for (let bucketIndex = 0; bucketIndex < bucketCount; bucketIndex += 1) {
+						bucketMin[bucketIndex] = Number.POSITIVE_INFINITY;
+						bucketMax[bucketIndex] = Number.NEGATIVE_INFINITY;
+					}
+
+					const updateBucket = (bucketIndex: number, sampleValue: number): void => {
+						if (bucketIndex < 0 || bucketIndex >= bucketCount) {
+							return;
+						}
+						bucketHasSample[bucketIndex] = 1;
+						bucketMin[bucketIndex] = Math.min(bucketMin[bucketIndex] ?? sampleValue, sampleValue);
+						bucketMax[bucketIndex] = Math.max(bucketMax[bucketIndex] ?? sampleValue, sampleValue);
+					};
+
+					if (latestIndexBeforeWindow !== null) {
+						updateBucket(0, buffer.valueAt(channelIndex, latestIndexBeforeWindow));
+					}
+
+					buffer.forEachSince(windowStartMs, (sampleIndex, sampleTimeMs) => {
+						const x = ((sampleTimeMs - windowStartMs) / safeWindowMs) * width;
+						const bucketIndex = Math.max(
+							0,
+							Math.min(bucketCount - 1, Math.floor((x / Math.max(1, width)) * bucketCount))
+						);
+						updateBucket(bucketIndex, buffer?.valueAt(channelIndex, sampleIndex) ?? 0);
+					});
+
+					const bucketWidth = width / bucketCount;
+					context.strokeStyle = watcherSeriesColor(channelIndex);
+					context.lineWidth = 1;
+					context.beginPath();
+					for (let bucketIndex = 0; bucketIndex < bucketCount; bucketIndex += 1) {
+						if (!bucketHasSample[bucketIndex]) {
+							continue;
+						}
+						const x = bucketIndex * bucketWidth + bucketWidth * 0.5;
+						const yMin = valueToY(bucketMin[bucketIndex]);
+						const yMax = valueToY(bucketMax[bucketIndex]);
+						context.moveTo(x, yMin);
+						context.lineTo(x, yMax);
+					}
+					context.stroke();
+					continue;
+				}
+
 				context.strokeStyle = watcherSeriesColor(channelIndex);
 				context.lineWidth = 1.2;
 				context.beginPath();

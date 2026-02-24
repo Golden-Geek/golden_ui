@@ -13,6 +13,7 @@
 	import { sendPatchMetaIntent } from '$lib/golden_ui/store/ui-intents';
 	import EnableButton from '../../common/EnableButton.svelte';
 	import Watcher from '../../common/Watcher.svelte';
+	import type { WatcherUiSettings } from '../../common/watcher/watcher-utils';
 
 	let { panelApi, panelId, panelType, title, params }: PanelProps = $props();
 
@@ -46,9 +47,30 @@
 	});
 
 	let dataInspectorCollapsed = $state(true);
+	let watcherSettingsByParam = $state<Record<string, Partial<WatcherUiSettings>>>({});
+
+	const WATCHER_SETTINGS_CACHE_LIMIT = 256;
+	const isRecord = (value: unknown): value is Record<string, unknown> =>
+		typeof value === 'object' && value !== null && !Array.isArray(value);
+	const sanitizeWatcherSettingsMap = (
+		value: unknown
+	): Record<string, Partial<WatcherUiSettings>> => {
+		if (!isRecord(value)) {
+			return {};
+		}
+		const entries: Array<[string, Partial<WatcherUiSettings>]> = [];
+		for (const [paramKey, rawSettings] of Object.entries(value)) {
+			if (!isRecord(rawSettings)) {
+				continue;
+			}
+			entries.push([paramKey, rawSettings as Partial<WatcherUiSettings>]);
+		}
+		return Object.fromEntries(entries);
+	};
 
 	interface InspectorPersistedState {
 		dataInspectorCollapsed?: boolean;
+		watcherSettingsByParam?: Record<string, Partial<WatcherUiSettings>>;
 	}
 
 	const applyPersistedState = (params: PanelState['params']): void => {
@@ -60,6 +82,8 @@
 		) {
 			dataInspectorCollapsed = persistedState.dataInspectorCollapsed;
 		}
+
+		watcherSettingsByParam = sanitizeWatcherSettingsMap(persistedState.watcherSettingsByParam);
 	};
 
 	const persistState = (nextState: Partial<InspectorPersistedState>): void => {
@@ -69,6 +93,51 @@
 	const toggleDataInspector = (): void => {
 		dataInspectorCollapsed = !dataInspectorCollapsed;
 		persistState({ dataInspectorCollapsed });
+	};
+
+	let selectedWatcherParamKey = $derived(node && node.data.kind === 'parameter' ? node.uuid : null);
+	let selectedWatcherSettings = $derived(
+		selectedWatcherParamKey ? (watcherSettingsByParam[selectedWatcherParamKey] ?? {}) : {}
+	);
+
+	const persistWatcherSettingsForSelectedParam = (
+		nextPatch: Partial<WatcherUiSettings>
+	): void => {
+		if (!selectedWatcherParamKey) {
+			return;
+		}
+
+		const currentSettings = watcherSettingsByParam[selectedWatcherParamKey] ?? {};
+		const mergedSettings = {
+			...currentSettings,
+			...nextPatch
+		};
+
+		let didChange = false;
+		for (const [key, value] of Object.entries(nextPatch)) {
+			if ((currentSettings as Record<string, unknown>)[key] !== value) {
+				didChange = true;
+				break;
+			}
+		}
+		if (!didChange) {
+			return;
+		}
+
+		let nextMap: Record<string, Partial<WatcherUiSettings>> = {
+			...watcherSettingsByParam,
+			[selectedWatcherParamKey]: mergedSettings
+		};
+
+		const keys = Object.keys(nextMap);
+		if (keys.length > WATCHER_SETTINGS_CACHE_LIMIT) {
+			nextMap = Object.fromEntries(
+				Object.entries(nextMap).slice(keys.length - WATCHER_SETTINGS_CACHE_LIMIT)
+			);
+		}
+
+		watcherSettingsByParam = nextMap;
+		persistState({ watcherSettingsByParam: nextMap });
 	};
 
 	$effect(() => {
@@ -200,7 +269,10 @@
 
 			{#if node && node.data.kind === 'parameter'}
 				<div class="watcher-wrapper">
-					<Watcher {node} />
+					<Watcher
+						{node}
+						persistedSettings={selectedWatcherSettings}
+						onSettingsChange={persistWatcherSettingsForSelectedParam} />
 				</div>
 			{/if}
 			<NodeInspector nodes={selectedNodes} level={0} />

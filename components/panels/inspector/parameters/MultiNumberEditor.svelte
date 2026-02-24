@@ -22,6 +22,7 @@
 	let isEditing = $state(false);
 	let editSession = createUiEditSession('Edit vector', 'param-vector');
 
+	
 	$effect(() => {
 		if (isEditing) {
 			return;

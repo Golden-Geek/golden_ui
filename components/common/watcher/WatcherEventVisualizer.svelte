@@ -4,6 +4,7 @@
 	import {
 		extractEventLabel,
 		getNowMs,
+		type WatcherDecimationMode,
 		type WatcherRangeMode,
 		watcherEventColor
 	} from './watcher-utils';
@@ -14,7 +15,8 @@
 		timeWindowMs,
 		rangeMode: _rangeMode,
 		unit: _unit,
-		streamKey
+		streamKey,
+		decimationMode: _decimationMode
 	} = $props<{
 		sampleValue: ParamValue;
 		constraints: UiParamConstraints;
@@ -22,6 +24,7 @@
 		rangeMode: WatcherRangeMode;
 		unit: string;
 		streamKey: string;
+		decimationMode: WatcherDecimationMode;
 	}>();
 
 	const FRAME_INTERVAL_MS = 32;

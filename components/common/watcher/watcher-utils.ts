@@ -1,6 +1,15 @@
 import type { ParamValue, UiParamConstraints } from '$lib/golden_ui/types';
 
 export type WatcherRangeMode = 'adaptive' | 'fixed';
+export type WatcherDecimationMode = 'off' | 'auto' | 'minmax';
+export type WatcherVectorViewMode = 'phase' | 'curves';
+
+export interface WatcherUiSettings {
+	timeWindowSec: number;
+	rangeMode: WatcherRangeMode;
+	decimationMode: WatcherDecimationMode;
+	vectorViewMode: WatcherVectorViewMode;
+}
 
 export interface NumericSample {
 	labels: string[];
@@ -8,6 +17,15 @@ export interface NumericSample {
 }
 
 const CURVE_COLORS = ['#6fd9ff', '#ffa26d', '#96e77d', '#f9da63'];
+export const WATCHER_WINDOW_OPTIONS_SEC = [2, 5, 10, 20, 40] as const;
+const WATCHER_DECIMATION_OPTIONS: WatcherDecimationMode[] = ['off', 'auto', 'minmax'];
+
+export const WATCHER_DEFAULT_SETTINGS: WatcherUiSettings = {
+	timeWindowSec: 10,
+	rangeMode: 'adaptive',
+	decimationMode: 'auto',
+	vectorViewMode: 'phase'
+};
 
 const clamp01 = (value: number): number => {
 	if (!Number.isFinite(value)) {
@@ -25,6 +43,29 @@ const shorten = (value: string, maxLength = 24): string => {
 
 export const getNowMs = (): number =>
 	typeof performance !== 'undefined' ? performance.now() : Date.now();
+
+export const sanitizeWatcherUiSettings = (
+	value: Partial<WatcherUiSettings> | null | undefined
+): WatcherUiSettings => {
+	const safeTimeWindow = Number(value?.timeWindowSec);
+	const safeRangeMode = value?.rangeMode;
+	const safeDecimationMode = value?.decimationMode;
+	const safeVectorViewMode = value?.vectorViewMode;
+	const nextDecimationMode: WatcherDecimationMode = WATCHER_DECIMATION_OPTIONS.includes(
+		safeDecimationMode as WatcherDecimationMode
+	)
+		? (safeDecimationMode as WatcherDecimationMode)
+		: WATCHER_DEFAULT_SETTINGS.decimationMode;
+
+	return {
+		timeWindowSec: WATCHER_WINDOW_OPTIONS_SEC.includes(safeTimeWindow as (typeof WATCHER_WINDOW_OPTIONS_SEC)[number])
+			? safeTimeWindow
+			: WATCHER_DEFAULT_SETTINGS.timeWindowSec,
+		rangeMode: safeRangeMode === 'fixed' ? 'fixed' : WATCHER_DEFAULT_SETTINGS.rangeMode,
+		decimationMode: nextDecimationMode,
+		vectorViewMode: safeVectorViewMode === 'curves' ? 'curves' : WATCHER_DEFAULT_SETTINGS.vectorViewMode
+	};
+};
 
 export const getFixedRange = (
 	constraints: UiParamConstraints | undefined
