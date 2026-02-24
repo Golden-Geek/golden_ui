@@ -14,6 +14,7 @@ export { createWebSocketUiClient } from './transport/ws';
 export { default as MainWindow } from './components/app/MainWindow.svelte';
 export { default as MainComponent } from './components/app/MainComponent.svelte';
 export { default as AppHeader } from './components/app/AppHeader.svelte';
+export { default as WorkbenchOverlayHost } from './components/app/WorkbenchOverlayHost.svelte';
 
 export { default as MainViewPanel } from './components/panels/MainViewPanel.svelte';
 export { default as UnknownPanel } from './components/panels/UnknownPanel.svelte';

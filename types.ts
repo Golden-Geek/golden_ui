@@ -66,11 +66,20 @@ export interface UiNodePresentationHintsDto {
 	show_child_warnings_max_depth?: number;
 }
 
+export interface UiNodeUserPermissionsDto {
+	can_edit_name: boolean;
+	can_remove_and_duplicate: boolean;
+	can_edit_constraints: boolean;
+	can_edit_tags: boolean;
+	can_edit_color: boolean;
+}
+
 export interface UiNodeMetaDto {
 	short_name: string;
 	label: string;
 	enabled: boolean;
 	can_be_disabled: boolean;
+	user_permissions: UiNodeUserPermissionsDto;
 	description?: string;
 	tags: string[];
 	presentation?: UiNodePresentationHintsDto;

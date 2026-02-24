@@ -26,7 +26,7 @@
 	let enabled = $derived(meta.enabled ?? true);
 	let visible = $derived(!meta.tags.includes('hidden'));
 	let readOnly = $derived(Boolean(param?.read_only));
-	let isUserMade = $derived(meta.tags.includes('is_user_made'));
+	let isNameChangeable = $derived(Boolean(meta.user_permissions.can_edit_name));
 	let warnings = $derived(node ? session?.getNodeVisibleWarnings(liveNode.node_id) : null);
 	let editorInfos: any = $derived(
 		type.length > 0 ? (propertiesInspectorClass[type] ?? null) : null
@@ -45,7 +45,7 @@
 	});
 
 	async function commitRename(): Promise<void> {
-		if (!isUserMade) {
+		if (!isNameChangeable) {
 			return;
 		}
 		const nextName = String(renamingState.renameDraft ?? '').trim();
@@ -105,14 +105,15 @@
 {#if visible}
 	<div
 		class="parameter-inspector {order} {'level-' + level} 
-		{readOnly ? 'readonly' : ''}">
+		{readOnly ? 'readonly' : ''}"
+		data-node-id={liveNode.node_id}>
 		{#if param}
 			<div class="firstline">
 				<div class="parameter-info">
 					{#if canDisable}
 						<EnableButton node={liveNode} />
 					{/if}
-					{#if isUserMade}
+					{#if isNameChangeable}
 						{#if renamingState.isRenaming}
 							<input
 								class="custom-prop-name"

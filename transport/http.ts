@@ -105,7 +105,10 @@ interface RustUiNodeDto {
 	uuid: string;
 	decl_id: string;
 	node_type: string;
-	meta: Omit<UiNodeMetaDto, 'tags'> & { tags?: string[] };
+	meta: Omit<UiNodeMetaDto, 'tags' | 'user_permissions'> & {
+		tags?: string[];
+		user_permissions?: Partial<UiNodeMetaDto['user_permissions']>;
+	};
 	data: { kind: 'parameter'; param: RustUiParamDto } | { kind: 'node'; node_type: string };
 	user_role?: 'regular' | 'itemRoot';
 	user_item_kind?: string;
@@ -419,7 +422,19 @@ const fromRustNode = (node: RustUiNodeDto): UiNodeDto => ({
 	uuid: node.uuid,
 	decl_id: node.decl_id,
 	node_type: node.node_type,
-	meta: { ...node.meta, tags: [...(node.meta.tags ?? [])] },
+	meta: {
+		...node.meta,
+		user_permissions: {
+			can_edit_name: Boolean(node.meta.user_permissions?.can_edit_name),
+			can_remove_and_duplicate: Boolean(
+				node.meta.user_permissions?.can_remove_and_duplicate
+			),
+			can_edit_constraints: Boolean(node.meta.user_permissions?.can_edit_constraints),
+			can_edit_tags: Boolean(node.meta.user_permissions?.can_edit_tags),
+			can_edit_color: Boolean(node.meta.user_permissions?.can_edit_color)
+		},
+		tags: [...(node.meta.tags ?? [])]
+	},
 	data: fromRustNodeData(node.data),
 	user_role: node.user_role ?? 'regular',
 	user_item_kind: node.user_item_kind ?? node.node_type,

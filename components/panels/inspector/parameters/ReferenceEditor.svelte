@@ -24,6 +24,26 @@
 	let customAllowedTargetIdSet = $derived.by(() => new Set(customAllowedTargetIds));
 	let customVisibleNodeIdSet = $derived.by(() => new Set(customVisibleNodeIds));
 
+	let linkStatus = $derived.by(() => {
+		if (!value || value.uuid.length === 0 || value.uuid === NIL_UUID) {
+			return 'empty';
+		}
+		if (selectedNode) {
+			return 'linked';
+		}
+		return 'missing';
+	});
+
+	let ghostReferenceName = $derived.by(() => {
+		if (value?.uuid === NIL_UUID) {
+			return 'Empty reference';
+		}
+		if (value) {
+			return `Missing reference (${value.uuid.slice(0, 8)})`;
+		}
+		return 'No reference';
+	});
+
 	const getNodeByUuid = (uuid: string): UiNodeDto | null => {
 		if (!graph || uuid.length === 0) {
 			return null;
@@ -195,7 +215,7 @@
 
 	let rootNodeId = $derived(resolveRootNodeId(constraints));
 	let rootNode = $derived(
-		rootNodeId !== null && graph ? graph.nodesById.get(rootNodeId) ?? null : null
+		rootNodeId !== null && graph ? (graph.nodesById.get(rootNodeId) ?? null) : null
 	);
 	let selectedNode = $derived.by(() => {
 		if (!value || !graph) {
@@ -300,10 +320,9 @@
 		const pathLabel = labelPathFromRoot(rootNodeId, candidate.node_id);
 		return `${candidate.meta.label} ${candidate.meta.short_name} ${candidate.node_type} ${pathLabel}`;
 	};
-
 </script>
 
-<div class="reference-editor">
+<div class="reference-editor link-{linkStatus}">
 	<button
 		type="button"
 		class="picker-trigger"
@@ -317,26 +336,26 @@
 		{#if selectedNode}
 			{selectedNode.meta.label}
 		{:else}
-			<span class="placeholder">No reference</span>
+			<span class="placeholder">{ghostReferenceName}</span>
 		{/if}
 	</button>
 </div>
-
-{#if value && value.uuid.length > 0 && value.uuid !== NIL_UUID && !selectedNode}
-	<div class="status missing">Missing target for uuid {value.uuid}</div>
-{:else if value && value.uuid.length > 0 && value.uuid !== NIL_UUID && selectedNode}
-	<div class="status linked">Linked to {selectedNode.meta.label}</div>
-{:else}
-	<div class="status empty-status">No target linked</div>
-{/if}
 
 <style>
 	.reference-editor {
 		display: flex;
 		flex-direction: column;
 		gap: 0.35rem;
-		min-width: 14rem;
-		max-width: 22rem;
+	}
+
+	.reference-editor.link-missing {
+		color: var(--gc-color-warning);
+	}
+	.reference-editor.link-linked {
+		color: var(--gc-color-success);
+	}
+	.reference-editor.link-empty {
+		opacity: 0.6;
 	}
 
 	.picker-trigger {
@@ -346,7 +365,7 @@
 	}
 
 	.picker-trigger.readonly {
-		opacity: 0.7;
+		color: var(--gc-color-readonly);
 	}
 
 	.picker-trigger.selected {
@@ -354,22 +373,6 @@
 	}
 
 	.placeholder {
-		opacity: 0.6;
-	}
-
-	.status {
-		font-size: 0.68rem;
-	}
-
-	.missing {
-		color: color-mix(in srgb, var(--warning-color) 80%, var(--text-color));
-	}
-
-	.linked {
-		opacity: 0.72;
-	}
-
-	.empty-status {
 		opacity: 0.6;
 	}
 </style>

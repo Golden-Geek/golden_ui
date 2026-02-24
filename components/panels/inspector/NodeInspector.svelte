@@ -1,8 +1,9 @@
 <script lang="ts">
 	import { slide } from 'svelte/transition';
-	import type { NodeId, UiNodeDto } from '$lib/golden_ui/types';
+	import type { UiNodeDto } from '$lib/golden_ui/types';
 	import Self from './NodeInspector.svelte';
 	import { appState } from '$lib/golden_ui/store/workbench.svelte';
+	import { sendPatchMetaIntent } from '$lib/golden_ui/store/ui-intents';
 	import ParameterInspector from './ParameterInspector.svelte';
 	import { getIconURLForNode } from '$lib/golden_ui/store/node-types';
 	import EnableButton from '../../common/EnableButton.svelte';
@@ -19,7 +20,7 @@
 	}>();
 
 	let session = $derived(appState.session);
-	let node = $derived(nodes.length > 0 ? nodes[0] : null);
+	let node = $derived(nodes.length > 0 ? (session?.graph.state.nodesById.get(nodes[0].node_id) ?? nodes[0]) : null);
 
 	let isRoot = $derived(level === 0);
 	let isFirstLevel = $derived(level === 1);
@@ -41,12 +42,59 @@
 	let showAsContainer = $derived(!isParameter);
 	let hasChildren = $derived(children.length > 0);
 	let canBeDisabled = $derived(node?.meta?.can_be_disabled ?? false);
+	let isNameChangeable = $derived(node?.meta?.user_permissions.can_edit_name ?? false);
 	let iconURL = $derived(getIconURLForNode(node));
 	let warnings = $derived(node ? session?.getNodeVisibleWarnings(node.node_id) : null);
-	let warningCount = $derived(warnings?.length ?? 0);
 
 	let titleTextElem: HTMLSpanElement | null = $state(null as HTMLSpanElement | null);
 	let arrowElem: HTMLSpanElement | null = $state(null as HTMLSpanElement | null);
+	let renameInputElem: HTMLInputElement | null = $state(null as HTMLInputElement | null);
+	let renamingState = $state({
+		isRenaming: false,
+		renameDraft: ''
+	});
+
+	$effect(() => {
+		if (!renamingState.isRenaming || !renameInputElem) {
+			return;
+		}
+
+		renameInputElem.focus();
+		renameInputElem.select();
+	});
+
+	const startRename = (): void => {
+		if (!node || !isNameChangeable) {
+			return;
+		}
+		renamingState.renameDraft = node.meta.label;
+		renamingState.isRenaming = true;
+	};
+
+	const cancelRename = (): void => {
+		if (!node) {
+			renamingState.isRenaming = false;
+			return;
+		}
+		renamingState.renameDraft = node.meta.label;
+		renamingState.isRenaming = false;
+	};
+
+	const commitRename = async (): Promise<void> => {
+		if (!node || !isNameChangeable) {
+			renamingState.isRenaming = false;
+			return;
+		}
+
+		const nextName = String(renamingState.renameDraft ?? '').trim();
+		if (!nextName || nextName === node.meta.label) {
+			renamingState.isRenaming = false;
+			return;
+		}
+
+		await sendPatchMetaIntent(node.node_id, { label: nextName });
+		renamingState.isRenaming = false;
+	};
 </script>
 
 {#if node}
@@ -54,18 +102,31 @@
 		class="node-inspector {node?.data.kind} 
 			{isRoot ? 'root' : !isFirstLevel ? 'nested' : ''}
 		{isParameter ? 'parameter' : 'container'}"
+		data-node-id={node.node_id}
 		style="--container-color: {color}">
 		{#if showAsContainer && !isRoot}
 			<div class="node-header">
 				<span
 					class="node-title"
 					role="switch"
+					class:name-changeable={isNameChangeable}
 					aria-checked={!collapsed}
 					tabindex="0"
 					onclick={(e) => {
-						if (e.target == arrowElem || e.target == titleTextElem) collapsed = !collapsed;
+						if (renamingState.isRenaming) {
+							return;
+						}
+						
+						const target = e.target as HTMLElement;
+						const clickedTitle = Boolean(titleTextElem && target && titleTextElem.contains(target));
+						if (!isNameChangeable || !clickedTitle) {
+							collapsed = !collapsed;
+						}
 					}}
 					onkeydown={(e) => {
+						if (renamingState.isRenaming) {
+							return;
+						}
 						if (e.key === 'Enter' || e.key === ' ') {
 							collapsed = !collapsed;
 						}
@@ -81,9 +142,43 @@
 						<EnableButton {node} />
 					{/if}
 
-					<span class="title-text" bind:this={titleTextElem}>
-						{node.meta.label || 'Container'}
-					</span>
+					{#if renamingState.isRenaming}
+						<input
+							class="node-title-input"
+							bind:this={renameInputElem}
+							bind:value={renamingState.renameDraft}
+							onclick={(e) => {
+								e.stopPropagation();
+							}}
+							onblur={() => {
+								void commitRename();
+							}}
+							onkeydown={(e) => {
+								if (e.key === 'Enter') {
+									void commitRename();
+									return;
+								}
+								if (e.key === 'Escape') {
+									cancelRename();
+								}
+							}} />
+					{:else}
+						<span
+							class="title-text"
+							bind:this={titleTextElem}
+							role="textbox"
+							tabindex="-1"
+							ondblclick={(e) => {
+								if (!isNameChangeable) {
+									return;
+								}
+								e.stopPropagation();
+								startRename();
+							}}
+							title={isNameChangeable ? 'Double-click to rename' : undefined}>
+							{node.meta.label || 'Container'}
+						</span>
+					{/if}
 
 					<NodeWarningBadge {warnings} />
 				</span>
@@ -185,6 +280,7 @@
 			box-sizing: border-box;
 			border-left: solid 2px var(--container-color);
 			vertical-align: middle;
+			cursor:pointer;
 		}
 
 		.node-title .title-text {
@@ -216,5 +312,22 @@
 		cursor: pointer;
 		color: var(--panel-accent-text-color);
 		font-weight: bold;
+	}
+
+	.name-changeable .title-text {
+		cursor: text;
+	}
+
+	.node-title-input {
+		height: .9rem;
+		min-width: 8rem;
+		background-color: var(--bg-color);
+		color: var(--text-color);
+		font-size: 0.7rem;
+		outline: 1px solid rgba(255,255,255,.2);
+		/* border-radius: 0.25rem; */
+		padding: 0 0.15rem;
+		box-sizing: border-box;
+		margin:0;
 	}
 </style>

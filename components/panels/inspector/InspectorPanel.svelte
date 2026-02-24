@@ -10,6 +10,7 @@
 	import type { PanelProps, PanelState } from '../../../dockview/panel-types.ts';
 	import { slide } from 'svelte/transition';
 	import { getIconURLForNode } from '$lib/golden_ui/store/node-types';
+	import { sendPatchMetaIntent } from '$lib/golden_ui/store/ui-intents';
 	import EnableButton from '../../common/EnableButton.svelte';
 
 	let { panelApi, panelId, panelType, title, params }: PanelProps = $props();
@@ -31,11 +32,17 @@
 	let selectedNodes = $derived(session?.getSelectedNodes() ?? []);
 	let node = $derived(selectedNodes.length === 1 ? selectedNodes[0] : null);
 	let iconURL = $derived(selectedNodes.length === 1 ? getIconURLForNode(selectedNodes[0]) : null);
+	let isNameChangeable = $derived(node?.meta.user_permissions.can_edit_name ?? false);
 	let warnings = $derived(
 		selectedNodes.length === 1 ? session?.getNodeVisibleWarnings(selectedNodes[0].node_id) : null
 	);
 
 	let warningCount = $derived(warnings ? warnings.length : 0);
+	let renameInputElem: HTMLInputElement | null = $state(null as HTMLInputElement | null);
+	let renamingState = $state({
+		isRenaming: false,
+		renameDraft: ''
+	});
 
 	let dataInspectorCollapsed = $state(true);
 
@@ -64,6 +71,48 @@
 	};
 
 	$effect(() => {
+		if (!renamingState.isRenaming || !renameInputElem) {
+			return;
+		}
+
+		renameInputElem.focus();
+		renameInputElem.select();
+	});
+
+	const startRename = (): void => {
+		if (!node || !isNameChangeable) {
+			return;
+		}
+		renamingState.renameDraft = node.meta.label;
+		renamingState.isRenaming = true;
+	};
+
+	const cancelRename = (): void => {
+		if (!node) {
+			renamingState.isRenaming = false;
+			return;
+		}
+		renamingState.renameDraft = node.meta.label;
+		renamingState.isRenaming = false;
+	};
+
+	const commitRename = async (): Promise<void> => {
+		if (!node || !isNameChangeable) {
+			renamingState.isRenaming = false;
+			return;
+		}
+
+		const nextName = String(renamingState.renameDraft ?? '').trim();
+		if (!nextName || nextName === node.meta.label) {
+			renamingState.isRenaming = false;
+			return;
+		}
+
+		await sendPatchMetaIntent(node.node_id, { label: nextName });
+		renamingState.isRenaming = false;
+	};
+
+	$effect(() => {
 		panel = {
 			panelId,
 			panelType,
@@ -80,7 +129,7 @@
 			<span>No node selected</span>
 		</div>
 	{:else}
-		<div class="inspector-header">
+		<div class="inspector-header" data-node-id={node.node_id}>
 			<span class="header-icon">
 				{#if iconURL}
 					<img src={iconURL} alt="" />
@@ -91,13 +140,35 @@
 				<EnableButton {node} />
 			{/if}
 
-			<span class="title-text">
-				{selectedNodes.length > 0
-					? selectedNodes.length === 1
-						? node.meta.label
-						: selectedNodes.length + ' selected nodes'
-					: ''}
-			</span>
+			{#if renamingState.isRenaming}
+				<input
+					class="title-input"
+					bind:this={renameInputElem}
+					bind:value={renamingState.renameDraft}
+					onblur={() => {
+						void commitRename();
+					}}
+					onkeydown={(e) => {
+						if (e.key === 'Enter') {
+							void commitRename();
+							return;
+						}
+						if (e.key === 'Escape') {
+							cancelRename();
+						}
+					}} />
+			{:else}
+				<span
+					class="title-text {isNameChangeable ? 'name-changeable' : ''}"
+					role="textbox"
+					tabindex="-1"
+					ondblclick={() => {
+						startRename();
+					}}
+					title={isNameChangeable ? 'Double-click to rename' : undefined}>
+					{node.meta.label}
+				</span>
+			{/if}
 			<div class="node-id-badge">
 				<span class="node-id">{node.decl_id}</span>
 				<button
@@ -109,7 +180,7 @@
 						}
 					}}>📋</button>
 			</div>
-		</div>
+			</div>
 
 		{#if warningCount > 0}
 			<div class="warning-info" transition:slide={{ duration: 200 }}>
@@ -174,6 +245,21 @@
 
 	.inspector-header .title-text {
 		font-weight: 600;
+	}
+
+	.inspector-header .title-text.name-changeable {
+		cursor: text;
+	}
+
+	.inspector-header .title-input {
+		height: 1.5rem;
+		min-width: 10rem;
+		background-color: var(--bg-color);
+		color: var(--text-color);
+		font-size: 0.8rem;
+		outline: 1px solid rgba(255,255,255,.2);
+		border-radius: 0.25rem;
+		padding: 0 0.35rem;
 	}
 
 	.inspector-header .node-id-badge {
@@ -272,3 +358,5 @@
 		height: 100%;
 	}
 </style>
+
+

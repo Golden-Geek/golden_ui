@@ -1,24 +1,20 @@
 <script lang="ts">
-	import "../../style/golden-core.css";
+	import '../../style/golden-core.css';
 
-	import MainComponent from "./MainComponent.svelte";
-	import { onMount } from "svelte";
+	import MainComponent from './MainComponent.svelte';
+	import { onMount } from 'svelte';
 
-	import type { Snippet } from "svelte";
-	import AppHeader from "./AppHeader.svelte";
+	import type { Snippet } from 'svelte';
+	import AppHeader from './AppHeader.svelte';
 	import {
 		appState,
 		createWorkbenchSession,
-		type WorkbenchSession,
-	} from "../../store/workbench.svelte";
-	import AppFooter from "./AppFooter.svelte";
-	import NodePickerModalHost from "../common/NodePickerModalHost.svelte";
-	import type {
-		PanelSpawnRequest,
-		UserPanelDefinitionMap,
-	} from "../../dockview/panel-types";
-	import type { NodeIconSet } from "../../store/node-types";
-	import { platform } from "$lib/golden_ui/store/platform.svelte";
+		type WorkbenchSession
+	} from '../../store/workbench.svelte';
+	import AppFooter from './AppFooter.svelte';
+	import type { PanelSpawnRequest, UserPanelDefinitionMap } from '../../dockview/panel-types';
+	import type { NodeIconSet } from '../../store/node-types';
+	import { platform } from '$lib/golden_ui/store/platform.svelte';
 
 	const props = $props<{
 		wsUrl?: string;
@@ -33,20 +29,19 @@
 
 	const createSession = (): WorkbenchSession =>
 		createWorkbenchSession({
-			wsUrl: props.wsUrl ?? "ws://localhost:7010/api/ui/ws",
-			httpBaseUrl: props.httpBaseUrl ?? "http://localhost:7010/api/ui",
+			wsUrl: props.wsUrl ?? 'ws://localhost:7010/api/ui/ws',
+			httpBaseUrl: props.httpBaseUrl ?? 'http://localhost:7010/api/ui',
 			pollIntervalMs: props.pollIntervalMs ?? 120,
-			bootstrapRetryMs: props.bootstrapRetryMs ?? 1000,
+			bootstrapRetryMs: props.bootstrapRetryMs ?? 1000
 		});
 
-	const session: WorkbenchSession =
-		import.meta.hot?.data.workbenchSession ?? createSession();
+	const session: WorkbenchSession = import.meta.hot?.data.workbenchSession ?? createSession();
 	if (import.meta.hot) {
 		import.meta.hot.data.workbenchSession = session;
 	}
 
 	appState.session = session;
-	
+
 	onMount(() => {
 		const cleanup = session.mount();
 		return () => {
@@ -61,7 +56,7 @@
 
 	const invokeAppCommand = async (
 		command: string,
-		args?: Record<string, unknown>,
+		args?: Record<string, unknown>
 	): Promise<unknown | undefined> => {
 		const invoke = window.__TAURI_INTERNALS__?.invoke;
 		if (!invoke) {
@@ -77,36 +72,30 @@
 	};
 
 	const refreshMaximizeState = async (): Promise<void> => {
-		const maximized = await invokeAppCommand("window_is_maximized");
+		const maximized = await invokeAppCommand('window_is_maximized');
 		isWindowMaximized = Boolean(maximized);
 	};
 
 	const minimizeWindow = async (): Promise<void> => {
-		const result = await invokeAppCommand("window_minimize");
+		const result = await invokeAppCommand('window_minimize');
 		if (result === undefined) {
-			console.error(
-				"[window-controls] Tauri window API unavailable (minimize).",
-			);
+			console.error('[window-controls] Tauri window API unavailable (minimize).');
 		}
 	};
 
 	const toggleWindowMaximize = async (): Promise<void> => {
-		const result = await invokeAppCommand("window_toggle_maximize");
+		const result = await invokeAppCommand('window_toggle_maximize');
 		if (result === undefined) {
-			console.error(
-				"[window-controls] Tauri window API unavailable (toggle maximize).",
-			);
+			console.error('[window-controls] Tauri window API unavailable (toggle maximize).');
 			return;
 		}
 		await refreshMaximizeState();
 	};
 
 	const closeWindow = async (): Promise<void> => {
-		const result = await invokeAppCommand("window_close");
+		const result = await invokeAppCommand('window_close');
 		if (result === undefined) {
-			console.error(
-				"[window-controls] Tauri window API unavailable (close).",
-			);
+			console.error('[window-controls] Tauri window API unavailable (close).');
 		}
 	};
 
@@ -121,21 +110,19 @@
 		const onResize = () => {
 			void refreshMaximizeState();
 		};
-		window.addEventListener("resize", onResize);
+		window.addEventListener('resize', onResize);
 
 		return () => {
-			window.removeEventListener("resize", onResize);
+			window.removeEventListener('resize', onResize);
 		};
 	});
 </script>
 
 <div class="gc-main os-{platform.name}">
-	<AppHeader {session}/>
+	<AppHeader {session} />
 	<MainComponent
 		userPanels={props.userPanels}
 		initialPanels={props.initialPanels}
-		nodeIcons={props.nodeIcons}
-	/>
+		nodeIcons={props.nodeIcons} />
 	<AppFooter />
-	<NodePickerModalHost />
 </div>

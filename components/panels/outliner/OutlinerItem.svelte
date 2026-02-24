@@ -93,7 +93,7 @@
 
 	let isSelected = $derived(session?.isNodeSelected(node?.node_id ?? -1) ?? false);
 	let hasArrow = $derived(Boolean(node?.children && node.children.length > 0));
-	let warnings = $derived(node ? session?.getNodeVisibleWarnings(node.node_id) ?? [] : []);
+	let warnings = $derived(node ? (session?.getNodeVisibleWarnings(node.node_id) ?? []) : []);
 
 	const passesFilter = (candidate: UiNodeDto | null): boolean => {
 		if (!candidate) {
@@ -159,8 +159,7 @@
 					class:non-selectable={!rowSelectable}
 					type="button"
 					disabled={!rowSelectable}
-					onclick={(event) => selectNode(node, event)}
-					>{meta?.label ?? ''}</button>
+					onclick={(event) => selectNode(node, event)}>{meta?.label ?? ''}</button>
 				{#if isOutlinerMode}
 					<NodeWarningBadge {warnings} />
 				{/if}
@@ -195,7 +194,7 @@
 <style>
 	.outliner-item {
 		padding-left: 0rem;
-		padding-top: 0.25rem;
+		/* padding-top: 0.25rem; */
 		font-size: 0.8rem;
 		width: 100%;
 	}
@@ -203,6 +202,7 @@
 	.outliner-item-content {
 		display: flex;
 		align-items: center;
+		padding: 0.05rem 0rem;
 		gap: 0.25rem;
 	}
 
@@ -241,6 +241,8 @@
 		font: inherit;
 		text-align: left;
 		cursor: pointer;
+		outline: solid 1px transparent;
+		border-radius: 0.3rem;
 		transition:
 			background-color 0.1s ease,
 			outline 0.1s ease;
@@ -251,13 +253,12 @@
 	}
 
 	.outliner-item-label:hover {
-		background-color: rgba(200, 200, 200, 0.2);
-		border-radius: 0.3rem;
+		background-color: rgba(200, 200, 200, 0.15);
 	}
 
 	.selected .outliner-item-label {
-		background-color: rgba(200, 200, 200, 0.2);
-		outline: solid 1px var(--gc-color-selection);
+		background-color: rgba(from var(--gc-color-selection) r g b / 0.2);
+		outline: solid 1px rgba(from var(--gc-color-selection) r g b / 0.6);
 		border-radius: 0.3rem;
 	}
 

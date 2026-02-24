@@ -5,11 +5,15 @@
 	import {
 		closeNodePickerModal,
 		nodePickerModalState,
-		resolveNodePickerModal,
-		type ViewportAnchorRect
+		resolveNodePickerModal
 	} from '$lib/golden_ui/store/node-picker-modal.svelte';
 	import type { UiNodeDto } from '$lib/golden_ui/types';
 	import { fade, slide } from 'svelte/transition';
+	import {
+		computeAnchoredModalPlacement,
+		getMainViewportBounds,
+		type ViewportRect
+	} from '$lib/golden_ui/components/common/floating-panel';
 
 	let request = $derived(nodePickerModalState.request);
 	let options = $derived(request?.options ?? null);
@@ -23,12 +27,7 @@
 	let panelResizeObserver = $state<ResizeObserver | null>(null);
 	let graphState = $derived(appState.session?.graph.state ?? null);
 
-	const remPx = (valueRem: number): number => {
-		const rootFontSize = Number.parseFloat(getComputedStyle(document.documentElement).fontSize);
-		return valueRem * (Number.isFinite(rootFontSize) ? rootFontSize : 16);
-	};
-
-	const getLiveAnchorRect = (): ViewportAnchorRect | null => {
+	const getLiveAnchorRect = (): ViewportRect | null => {
 		if (!options) {
 			return null;
 		}
@@ -50,42 +49,19 @@
 		if (!panelElement || !isOpen) {
 			return;
 		}
-		const marginXPx = remPx((0.75));
-		const marginYPx = remPx((2));
-		const minHeightPx = remPx(15);
-		const preferredHeightPx = remPx(26);
-		const viewportWidth = window.innerWidth;
 		const panelRect = panelElement.getBoundingClientRect();
-		const appRect = document.querySelector('.gc-main')?.getBoundingClientRect() ?? null;
-		const boundsTop = Math.max(0, appRect?.top ?? 0);
-		const boundsBottom = Math.min(window.innerHeight, appRect?.bottom ?? window.innerHeight);
-		const boundsHeight = Math.max(remPx(12), boundsBottom - boundsTop);
-		const anchorRect = getLiveAnchorRect();
-		const maxPanelHeightPx = Math.max(minHeightPx, boundsBottom - boundsTop - marginYPx * 2);
-
-		let nextLeft = (viewportWidth - panelRect.width) / 2;
-		let nextTop = boundsTop + (boundsHeight - Math.min(preferredHeightPx, maxPanelHeightPx)) / 2;
-		let nextHeight = Math.min(preferredHeightPx, maxPanelHeightPx);
-
-		
-		if (anchorRect) {
-			const spaceBelow = boundsBottom - anchorRect.bottom - marginYPx;
-			const spaceAbove = anchorRect.top - boundsTop - marginYPx;
-			const shouldOpenBelow = spaceBelow >= minHeightPx || spaceBelow >= spaceAbove;
-			const preferredSpace = shouldOpenBelow ? spaceBelow : spaceAbove;
-			nextHeight = Math.min(preferredHeightPx, Math.max(minHeightPx, preferredSpace));
-			nextTop = shouldOpenBelow
-				? anchorRect.bottom + marginYPx
-				: anchorRect.top - nextHeight - marginYPx;
-			nextLeft = anchorRect.left;
-		}
-
-		const maxLeft = Math.max(marginXPx, viewportWidth - panelRect.width - marginXPx);
-		const minTop = boundsTop + marginYPx;
-		const maxTop = Math.max(minTop, boundsBottom - nextHeight - marginYPx);
-		leftPx = Math.min(Math.max(nextLeft, marginXPx), maxLeft);
-		topPx = Math.min(Math.max(nextTop, minTop), maxTop);
-		modalHeightPx = Math.min(nextHeight, Math.max(minHeightPx, boundsBottom - topPx - marginYPx));
+		const placement = computeAnchoredModalPlacement({
+			bounds: getMainViewportBounds(),
+			panelWidth: panelRect.width,
+			anchorRect: getLiveAnchorRect(),
+			marginXRem: 0.75,
+			marginYRem: 2,
+			minHeightRem: 15,
+			preferredHeightRem: 26
+		});
+		leftPx = placement.left;
+		topPx = placement.top;
+		modalHeightPx = placement.height;
 	};
 
 	const scrollToSelectedNode = (): void => {
