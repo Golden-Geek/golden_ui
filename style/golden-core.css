@@ -47,14 +47,6 @@ html {
     border-bottom: solid .05rem rgba(255, 255, 255, 0.05);
 }
 
-.gc-header.tauri {
-    cursor: grab;
-}
-
-.gc-header:active {
-    cursor: grabbing;
-}
-
 .gc-header :is(button, input, textarea, select, a, [data-no-drag]) {
     app-region: no-drag;
     -webkit-app-region: no-drag;
@@ -62,8 +54,16 @@ html {
 
 .gc-header .spacer {
     flex: 1 1 auto;
+    height:100%;
 }
 
+.gc-header.tauri {
+    cursor: grab;
+}
+
+.gc-header:active {
+    cursor: grabbing;
+}
 
 .gc-header .app-buttons button {
     background: transparent;

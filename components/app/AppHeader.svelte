@@ -2,6 +2,7 @@
 	import type { WorkbenchSession } from '$lib/golden_ui/store/workbench.svelte';
 	import { onMount } from 'svelte';
 	import { clearPersistedUiState } from '../../store/ui-persistence';
+	import { platform } from '../../store/platform.svelte';
 
 	let isWindowMaximized = $state(false);
 	let hasTauriWindowApi = $state(false);
@@ -55,12 +56,21 @@
 		}
 	};
 
+	const startDrag = async (): Promise<void> => {
+		if(platform.isWindows) return; //handle natively
+		const result = await invokeAppCommand('start_drag');
+		if(result === undefined)  {
+			console.error('[window-controls] Tauri window API unavailable (start drag)')
+		}
+	}
+
 	const clearUiStorage = (): void => {
 		clearPersistedUiState();
 		if (typeof window !== 'undefined') {
 			window.location.reload();
 		}
 	};
+	
 
 	onMount(() => {
 		hasTauriWindowApi = Boolean(window.__TAURI_INTERNALS__?.invoke);
@@ -81,9 +91,9 @@
 	});
 </script>
 
-<div class="gc-header {hasTauriWindowApi ? 'tauri' : ''}" data-tauri-drag-region>
+<div class="gc-header {hasTauriWindowApi ? 'tauri' : ''}" >
 	<div class="app-title">Chataigne 2.0.0</div>
-	<div class="spacer"></div>
+	<div class="spacer" data-tauri-drag-region role="button" tabindex="-1" onmousedown={startDrag} onkeydown={()=>{}}> </div>
 	<div class="controls">
 		<div class="history-actions">
 			<button
@@ -109,7 +119,7 @@
 			</button>
 		</div>
 	</div>
-	<div class="spacer"></div>
+	<div class="spacer" data-tauri-drag-region role="button" tabindex="-1" onmousedown={startDrag} onkeydown={()=>{}}> </div>
 	{#if hasTauriWindowApi}
 		<div class="app-buttons">
 			<button
