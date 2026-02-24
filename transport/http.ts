@@ -201,7 +201,9 @@ export const fromRustScope = (scope: unknown): UiSubscriptionScope => {
 	return { kind: 'wholeGraph' };
 };
 
-const fromRustReferencePayload = (payload: unknown): { uuid: string; cached_id?: number; relative_path_from_root?: string[] } => {
+const fromRustReferencePayload = (
+	payload: unknown
+): { uuid: string; cached_id?: number; cached_name?: string; relative_path_from_root?: string[] } => {
 	if (typeof payload === 'string') {
 		return { uuid: payload };
 	}
@@ -217,11 +219,13 @@ const fromRustReferencePayload = (payload: unknown): { uuid: string; cached_id?:
 
 		const cached = payload.cached_id;
 		const cached_id = typeof cached === 'number' ? cached : undefined;
+		const cachedName = payload.cached_name;
+		const cached_name = typeof cachedName === 'string' ? cachedName : undefined;
 		const relativePathRaw = payload.relative_path_from_root;
 		const relative_path_from_root = Array.isArray(relativePathRaw)
 			? relativePathRaw.filter((segment): segment is string => typeof segment === 'string')
 			: undefined;
-		return { uuid, cached_id, relative_path_from_root };
+		return { uuid, cached_id, cached_name, relative_path_from_root };
 	}
 
 	return { uuid: '' };
@@ -289,6 +293,7 @@ const fromRustParamValue = (value: unknown): ParamValue => {
 			kind: 'reference',
 			uuid: reference.uuid,
 			cached_id: reference.cached_id,
+			cached_name: reference.cached_name,
 			relative_path_from_root: reference.relative_path_from_root
 		};
 	}
@@ -323,6 +328,7 @@ const toRustParamValue = (value: ParamValue): RustParamValue => {
 			return {
 				Reference: {
 					uuid: value.uuid,
+					cached_name: value.cached_name,
 					relative_path_from_root: value.relative_path_from_root ?? []
 				}
 			};

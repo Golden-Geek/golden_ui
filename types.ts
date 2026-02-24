@@ -15,7 +15,13 @@ export type ParamValue =
 	| { kind: 'vec2'; value: [number, number] }
 	| { kind: 'vec3'; value: [number, number, number] }
 	| { kind: 'color'; value: [number, number, number, number] }
-	| { kind: 'reference'; uuid: string; cached_id?: NodeId; relative_path_from_root?: string[] };
+	| {
+			kind: 'reference';
+			uuid: string;
+			cached_id?: NodeId;
+			cached_name?: string;
+			relative_path_from_root?: string[];
+	  };
 
 export type UiReferenceRoot =
 	| { kind: 'engineRoot' }

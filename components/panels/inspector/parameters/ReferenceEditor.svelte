@@ -39,6 +39,9 @@
 			return 'Empty reference';
 		}
 		if (value) {
+			if (typeof value.cached_name === 'string' && value.cached_name.trim().length > 0) {
+				return `Missing reference (${value.cached_name})`;
+			}
 			return `Missing reference (${value.uuid.slice(0, 8)})`;
 		}
 		return 'No reference';
@@ -245,6 +248,7 @@
 			{
 				kind: 'reference',
 				uuid: target.uuid,
+				cached_name: target.meta.label,
 				relative_path_from_root: relativePathFromRoot
 			},
 			param.event_behaviour

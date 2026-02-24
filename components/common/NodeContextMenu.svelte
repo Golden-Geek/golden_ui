@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { fly } from 'svelte/transition';
-	import Self from './NodeContextMenu.svelte';
+	import { fly, slide } from 'svelte/transition';
+	import ColorPicker from './ColorPicker.svelte';
 	import { appState } from '$lib/golden_ui/store/workbench.svelte';
 	import { sendPatchMetaIntent } from '$lib/golden_ui/store/ui-intents';
 	import {
@@ -21,8 +21,9 @@
 		tone?: MenuTone;
 		disabled?: boolean;
 		visible?: boolean;
-		action?: () => void;
-		submenu?: () => MenuItem[];
+		keepMenuOpen?: boolean;
+		showsChevron?: boolean;
+		action?: (event: MouseEvent) => void;
 	};
 
 	interface ResolvedNodeTarget {
@@ -30,34 +31,27 @@
 		host: HTMLElement;
 	}
 
-	let { submenu = null, offsetX = 0, offsetY = 0 } = $props<{
-		submenu?: MenuItem[] | null;
-		offsetX?: number;
-		offsetY?: number;
-	}>();
-
 	let session = $derived(appState.session);
 	let graphState = $derived(session?.graph.state ?? null);
 	let contextNodeId = $derived(nodeContextMenuState.nodeId);
 	let contextPosition = $derived(nodeContextMenuState.position);
 	let menuDiv: HTMLDivElement | null = $state(null);
-	let submenuDiv: HTMLDivElement | null = $state(null);
-	let colorInputElem: HTMLInputElement | null = $state(null);
+	let colorSubMenuDiv: HTMLDivElement | null = $state(null);
 
-	let activeSubMenu = $state({
-		items: null as MenuItem[] | null,
-		offsetX: 0,
-		offsetY: 0
+	let colorSubMenu = $state({
+		open: false,
+		rowOffsetY: 0
 	});
+	let isColorEditing = $state(false);
 
-	const clearSubMenu = (): void => {
-		activeSubMenu.items = null;
-		activeSubMenu.offsetX = 0;
-		activeSubMenu.offsetY = 0;
+	const closeColorSubMenu = (): void => {
+		colorSubMenu.open = false;
+		colorSubMenu.rowOffsetY = 0;
+		isColorEditing = false;
 	};
 
 	const closeMenu = (): void => {
-		clearSubMenu();
+		closeColorSubMenu();
 		closeNodeContextMenu();
 	};
 
@@ -98,6 +92,10 @@
 				continue;
 			}
 
+			if (!item.label || item.label.trim().length === 0) {
+				continue;
+			}
+
 			normalized.push(item);
 			previousWasSeparator = false;
 		}
@@ -128,10 +126,20 @@
 		return { left, top };
 	};
 
-	const applyMenuPosition = (node: HTMLDivElement, desiredLeft: number, desiredTop: number): void => {
+	const applyPanelPosition = (node: HTMLElement, desiredLeft: number, desiredTop: number): void => {
 		const clamped = clampPosition(node, desiredLeft, desiredTop);
 		node.style.left = `${clamped.left}px`;
 		node.style.top = `${clamped.top}px`;
+	};
+
+	const updateColorSubMenuPosition = (): void => {
+		if (!menuDiv || !colorSubMenuDiv || !colorSubMenu.open) {
+			return;
+		}
+		const menuRect = menuDiv.getBoundingClientRect();
+		const desiredLeft = menuRect.right + remToPx(0.35);
+		const desiredTop = menuRect.top + colorSubMenu.rowOffsetY;
+		applyPanelPosition(colorSubMenuDiv, desiredLeft, desiredTop);
 	};
 
 	const positionMenu = (x: number, y: number) => {
@@ -144,7 +152,8 @@
 
 			let raf = 0;
 			raf = requestAnimationFrame(() => {
-				applyMenuPosition(node, x, y);
+				applyPanelPosition(node, x, y);
+				updateColorSubMenuPosition();
 			});
 
 			return () => {
@@ -156,46 +165,27 @@
 		};
 	};
 
-	const captureSubmenuContainer = () => {
+	const captureColorSubMenuContainer = () => {
 		return (node: HTMLDivElement) => {
-			submenuDiv = node;
+			colorSubMenuDiv = node;
+			let raf = requestAnimationFrame(() => {
+				updateColorSubMenuPosition();
+			});
 			return () => {
-				if (submenuDiv === node) {
-					submenuDiv = null;
+				cancelAnimationFrame(raf);
+				if (colorSubMenuDiv === node) {
+					colorSubMenuDiv = null;
 				}
 			};
 		};
 	};
 
 	const updateRootMenuPosition = (): void => {
-		if (submenu !== null || contextNodeId === null || !menuDiv) {
+		if (contextNodeId === null || !menuDiv) {
 			return;
 		}
-		applyMenuPosition(menuDiv, contextPosition.x + offsetX, contextPosition.y + offsetY);
-	};
-
-	const openSubMenu = (event: Event, item: MenuItem): void => {
-		if (!item.submenu) {
-			clearSubMenu();
-			return;
-		}
-		const nextItems = normalizeMenuItems(item.submenu());
-		if (nextItems.length === 0 || !menuDiv) {
-			clearSubMenu();
-			return;
-		}
-
-		const currentTarget = event.currentTarget as HTMLElement | null;
-		if (!currentTarget) {
-			clearSubMenu();
-			return;
-		}
-
-		const menuRect = menuDiv.getBoundingClientRect();
-		const rowRect = currentTarget.getBoundingClientRect();
-		activeSubMenu.items = nextItems;
-		activeSubMenu.offsetX = offsetX + menuDiv.offsetWidth;
-		activeSubMenu.offsetY = offsetY + (rowRect.top - menuRect.top);
+		applyPanelPosition(menuDiv, contextPosition.x, contextPosition.y);
+		updateColorSubMenuPosition();
 	};
 
 	const handleItemClick = (event: MouseEvent, item: MenuItem): void => {
@@ -203,20 +193,10 @@
 		if (item.disabled || item.separator) {
 			return;
 		}
-		if (item.submenu) {
-			openSubMenu(event, item);
-			return;
+		item.action?.(event);
+		if (!item.keepMenuOpen) {
+			closeMenu();
 		}
-		item.action?.();
-		closeMenu();
-	};
-
-	const handleItemFocus = (event: Event, item: MenuItem): void => {
-		if (item.disabled) {
-			clearSubMenu();
-			return;
-		}
-		openSubMenu(event, item);
 	};
 
 	const handleMenuContextMenu = (event: MouseEvent): void => {
@@ -228,16 +208,14 @@
 		if (!(target instanceof Node)) {
 			return false;
 		}
-		return menuDiv?.contains(target) === true || submenuDiv?.contains(target) === true;
+		return menuDiv?.contains(target) === true || colorSubMenuDiv?.contains(target) === true;
 	};
 
 	const handleWindowContextMenu = (event: MouseEvent): void => {
-		if (submenu !== null) {
-			return;
-		}
+		event.preventDefault();
+		event.stopPropagation();
+
 		if (isInsideCurrentMenuTree(event.target)) {
-			event.preventDefault();
-			event.stopPropagation();
 			return;
 		}
 
@@ -259,11 +237,11 @@
 		}
 
 		openNodeContextMenu(target.nodeId, nextX, nextY);
-		clearSubMenu();
+		closeColorSubMenu();
 	};
 
 	const handleDocumentPointerDown = (event: PointerEvent): void => {
-		if (submenu !== null || contextNodeId === null) {
+		if (contextNodeId === null) {
 			return;
 		}
 		if (isInsideCurrentMenuTree(event.target)) {
@@ -273,7 +251,7 @@
 	};
 
 	const handleDocumentKeydown = (event: KeyboardEvent): void => {
-		if (submenu !== null || contextNodeId === null) {
+		if (contextNodeId === null) {
 			return;
 		}
 		if (event.key === 'Escape') {
@@ -287,10 +265,6 @@
 	};
 
 	onMount(() => {
-		if (submenu !== null) {
-			return;
-		}
-
 		window.addEventListener('contextmenu', handleWindowContextMenu, true);
 		document.addEventListener('pointerdown', handleDocumentPointerDown, true);
 		document.addEventListener('keydown', handleDocumentKeydown);
@@ -314,7 +288,7 @@
 	});
 
 	$effect(() => {
-		if (submenu !== null || contextNodeId === null) {
+		if (contextNodeId === null) {
 			return;
 		}
 		if (activeNode !== null) {
@@ -351,7 +325,9 @@
 	});
 	let canSetColor = $derived(Boolean(activeNode?.meta.user_permissions.can_edit_color));
 	let canSetConstraints = $derived(
-		Boolean(activeNode?.meta.user_permissions.can_edit_constraints && activeNode.data.kind === 'parameter')
+		Boolean(
+			activeNode?.meta.user_permissions.can_edit_constraints && activeNode.data.kind === 'parameter'
+		)
 	);
 
 	const clamp01 = (value: number): number => {
@@ -361,17 +337,47 @@
 		return Math.max(0, Math.min(1, value));
 	};
 
-	const toHexPair = (value: number): string => {
-		const channel = Math.round(clamp01(value) * 255);
-		return channel.toString(16).padStart(2, '0');
+	const normalizeColor = (candidate: unknown): UiColorDto => {
+		if (Array.isArray(candidate)) {
+			return {
+				r: clamp01(Number(candidate[0] ?? 0)),
+				g: clamp01(Number(candidate[1] ?? 0)),
+				b: clamp01(Number(candidate[2] ?? 0)),
+				a: clamp01(Number(candidate[3] ?? 1))
+			};
+		}
+		if (candidate && typeof candidate === 'object') {
+			const value = candidate as { r?: unknown; g?: unknown; b?: unknown; a?: unknown };
+			return {
+				r: clamp01(Number(value.r ?? 0)),
+				g: clamp01(Number(value.g ?? 0)),
+				b: clamp01(Number(value.b ?? 0)),
+				a: clamp01(Number(value.a ?? 1))
+			};
+		}
+		return { r: 1, g: 1, b: 1, a: 1 };
 	};
 
-	let colorInputValue = $derived.by((): string => {
-		const color = activeNode?.meta.presentation?.color;
-		const red = color?.r ?? 1;
-		const green = color?.g ?? 1;
-		const blue = color?.b ?? 1;
-		return `#${toHexPair(red)}${toHexPair(green)}${toHexPair(blue)}`;
+	const currentNodeColor = (node: UiNodeDto | null): UiColorDto => {
+		const color = node?.meta.presentation?.color;
+		return {
+			r: clamp01(color?.r ?? 1),
+			g: clamp01(color?.g ?? 1),
+			b: clamp01(color?.b ?? 1),
+			a: clamp01(color?.a ?? 1)
+		};
+	};
+
+	let activeNodeColor = $derived.by((): UiColorDto => {
+		return currentNodeColor(activeNode);
+	});
+	let colorDraft = $state<UiColorDto>({ r: 1, g: 1, b: 1, a: 1 });
+
+	$effect(() => {
+		if (isColorEditing) {
+			return;
+		}
+		colorDraft = activeNodeColor;
 	});
 
 	const relativeDeclPath = (targetNodeId: NodeId): string => {
@@ -445,7 +451,7 @@
 		const baseLabel =
 			activeNode && activeNode.meta.label.trim().length > 0
 				? activeNode.meta.label.trim()
-				: activeNode?.node_type ?? 'Node';
+				: (activeNode?.node_type ?? 'Node');
 		const firstCandidate = `${baseLabel} Copy`;
 		if (!graphState || !parentNode) {
 			return firstCandidate;
@@ -496,24 +502,6 @@
 		});
 	};
 
-	const parseHexColor = (hex: string, alpha: number): UiColorDto | null => {
-		const normalized = String(hex ?? '').trim();
-		const match = /^#?([0-9a-fA-F]{6})$/.exec(normalized);
-		if (!match) {
-			return null;
-		}
-		const value = match[1];
-		const red = parseInt(value.slice(0, 2), 16) / 255;
-		const green = parseInt(value.slice(2, 4), 16) / 255;
-		const blue = parseInt(value.slice(4, 6), 16) / 255;
-		return {
-			r: clamp01(red),
-			g: clamp01(green),
-			b: clamp01(blue),
-			a: clamp01(alpha)
-		};
-	};
-
 	const setNodeColor = (nextColor: UiColorDto): void => {
 		if (!activeNode) {
 			return;
@@ -527,28 +515,40 @@
 		});
 	};
 
-	const openColorPicker = (): void => {
-		if (!canSetColor || !colorInputElem) {
+	const openColorSubMenu = (event: MouseEvent): void => {
+		if (!canSetColor || !menuDiv) {
 			return;
 		}
-		colorInputElem.value = colorInputValue;
-		colorInputElem.click();
+		const currentTarget = event.currentTarget as HTMLElement | null;
+		if (!currentTarget) {
+			return;
+		}
+
+		const menuRect = menuDiv.getBoundingClientRect();
+		const rowRect = currentTarget.getBoundingClientRect();
+		colorSubMenu.rowOffsetY = rowRect.top - menuRect.top;
+		colorSubMenu.open = true;
+
+		queueMicrotask(() => {
+			updateColorSubMenuPosition();
+		});
 	};
 
-	const applyPickedColor = (event: Event): void => {
+	const applyPickedColor = (nextColor: unknown): void => {
 		if (!activeNode || !canSetColor) {
 			return;
 		}
-		const input = event.currentTarget as HTMLInputElement | null;
-		if (!input) {
-			return;
-		}
-		const alpha = activeNode.meta.presentation?.color?.a ?? 1;
-		const parsed = parseHexColor(input.value, alpha);
-		if (!parsed) {
-			return;
-		}
-		setNodeColor(parsed);
+		const normalized = normalizeColor(nextColor);
+		colorDraft = normalized;
+		setNodeColor(normalized);
+	};
+
+	const startColorEdit = (): void => {
+		isColorEditing = true;
+	};
+
+	const endColorEdit = (): void => {
+		isColorEditing = false;
 	};
 
 	const setConstraints = (): void => {
@@ -556,26 +556,32 @@
 			return;
 		}
 		void copyTextToClipboard(JSON.stringify(activeNode.data.param.constraints, null, 2));
-		console.warn('[ui] set constraints intent is not available yet; copied current constraints JSON');
+		console.warn(
+			'[ui] set constraints intent is not available yet; copied current constraints JSON'
+		);
 	};
 
-	const selectCopyScriptControlPath = (): void => {
+	const selectCopyScriptControlPath = (_event: MouseEvent): void => {
 		copyScriptControlPath();
 	};
 
-	const selectSetColor = (): void => {
-		openColorPicker();
+	const selectSetColor = (event: MouseEvent): void => {
+		if (colorSubMenu.open) {
+			closeColorSubMenu();
+			return;
+		}
+		openColorSubMenu(event);
 	};
 
-	const selectSetConstraints = (): void => {
+	const selectSetConstraints = (_event: MouseEvent): void => {
 		setConstraints();
 	};
 
-	const selectDuplicateNode = (): void => {
+	const selectDuplicateNode = (_event: MouseEvent): void => {
 		duplicateNode();
 	};
 
-	const selectDeleteNode = (): void => {
+	const selectDeleteNode = (_event: MouseEvent): void => {
 		deleteNode();
 	};
 
@@ -584,64 +590,84 @@
 			return [];
 		}
 
-		return normalizeMenuItems([
+		const items: MenuItem[] = [
 			{
 				id: 'copy-script-control-path',
 				label: 'Copy Script Control Path',
 				action: selectCopyScriptControlPath
-			},
-			{ separator: canSetColor || canSetConstraints },
-			{
+			}
+		];
+
+		if (canSetColor || canSetConstraints) {
+			items.push({ separator: true });
+		}
+		if (canSetColor) {
+			items.push({
 				id: 'set-color',
 				label: 'Set Color',
-				visible: canSetColor,
+				keepMenuOpen: true,
+				// showsChevron: true,
 				action: selectSetColor
-			},
-			{
+			});
+		}
+		if (canSetConstraints) {
+			items.push({
 				id: 'set-constraints',
 				label: 'Set Constraints',
-				visible: canSetConstraints,
 				action: selectSetConstraints
-			},
-			{ separator: canDuplicate || canDelete },
-			{
+			});
+		}
+
+		if (canDuplicate || canDelete) {
+			items.push({ separator: true });
+		}
+		if (canDuplicate) {
+			items.push({
 				id: 'duplicate',
 				label: 'Duplicate',
-				visible: canDuplicate,
 				action: selectDuplicateNode
-			},
-			{
+			});
+		}
+		if (canDelete) {
+			items.push({
 				id: 'delete',
 				label: 'Delete',
 				tone: 'danger',
-				visible: canDelete,
 				action: selectDeleteNode
-			}
-		]);
+			});
+		}
+
+		return normalizeMenuItems(items);
 	});
 
-	let menuItems = $derived.by((): MenuItem[] => {
-		if (submenu) {
-			return normalizeMenuItems(submenu);
-		}
-		return rootMenuItems;
-	});
-
-	let showMenu = $derived.by((): boolean => {
-		if (submenu) {
-			return menuItems.length > 0;
-		}
-		return contextNodeId !== null && activeNode !== null && menuItems.length > 0;
-	});
+	let menuItems = $derived(rootMenuItems);
+	let showMenu = $derived(contextNodeId !== null && activeNode !== null && menuItems.length > 0);
+	let showColorSubMenu = $derived(showMenu && colorSubMenu.open && canSetColor);
 
 	$effect(() => {
-		if (submenu !== null || contextNodeId === null) {
+		if (contextNodeId === null) {
 			return;
 		}
 		if (menuItems.length > 0) {
 			return;
 		}
 		closeMenu();
+	});
+
+	$effect(() => {
+		if (canSetColor || !colorSubMenu.open) {
+			return;
+		}
+		closeColorSubMenu();
+	});
+
+	$effect(() => {
+		if (!showColorSubMenu) {
+			return;
+		}
+		queueMicrotask(() => {
+			updateColorSubMenuPosition();
+		});
 	});
 </script>
 
@@ -650,8 +676,8 @@
 		class="gc-node-context-menu"
 		role="menu"
 		tabindex="-1"
-		{@attach positionMenu(contextPosition.x + offsetX, contextPosition.y + offsetY)}
-		transition:fly={{ x: -5, duration: 100 }}
+		{@attach positionMenu(contextPosition.x, contextPosition.y)}
+		transition:fly={{x:-10, duration: 100 }}
 		oncontextmenu={handleMenuContextMenu}>
 		{#each menuItems as item, i (item.id ?? `menu-item-${i}`)}
 			{#if item.separator}
@@ -660,13 +686,11 @@
 				<button
 					type="button"
 					role="menuitem"
-					class={`gc-node-context-item${item.disabled ? ' gc-node-context-item-disabled' : ''}${item.tone === 'danger' ? ' gc-node-context-item-danger' : ''}`}
-					onclick={(event) => handleItemClick(event, item)}
-					onmouseover={(event) => handleItemFocus(event, item)}
-					onfocus={(event) => handleItemFocus(event, item)}>
+					class={`gc-node-context-item${item.disabled ? ' gc-node-context-item-disabled' : ''}${item.tone === 'danger' ? ' gc-node-context-item-danger' : ''}${item.id === 'set-color' && showColorSubMenu ? ' gc-node-context-item-open' : ''}`}
+					onclick={(event) => handleItemClick(event, item)}>
 					<span class="gc-node-context-item-label">{item.label}</span>
-					{#if item.submenu}
-						<span class="gc-node-context-item-chevron">></span>
+					{#if item.showsChevron}
+						<span class="arrow gc-node-context-item-chevron"></span>
 					{/if}
 				</button>
 			{/if}
@@ -674,19 +698,20 @@
 	</div>
 {/if}
 
-{#if showMenu && activeSubMenu.items && activeSubMenu.items.length > 0}
-	<div class="gc-node-context-submenu-container" {@attach captureSubmenuContainer()}>
-		<Self submenu={activeSubMenu.items} offsetX={activeSubMenu.offsetX} offsetY={activeSubMenu.offsetY} />
+{#if showColorSubMenu}
+	<div
+		class="gc-node-context-color-submenu"
+		{@attach captureColorSubMenuContainer()}
+		transition:slide={{ axis: 'x', duration: 150 }}>
+		<ColorPicker
+			forceExpanded={true}
+			color={colorDraft}
+			onchange={(nextColor: unknown) => {
+				applyPickedColor(nextColor);
+			}}
+			onStartEdit={startColorEdit}
+			onEndEdit={endColorEdit} />
 	</div>
-{/if}
-
-{#if submenu === null}
-	<input
-		bind:this={colorInputElem}
-		class="hidden-color-input"
-		type="color"
-		value={colorInputValue}
-		oninput={applyPickedColor} />
 {/if}
 
 <style>
@@ -697,8 +722,9 @@
 		flex-direction: column;
 		padding: 0.25rem;
 		border-radius: 0.45rem;
-		border: 0.0625rem solid color-mix(in srgb, var(--gc-color-panel-outline) 75%, transparent);
-		background: color-mix(in srgb, var(--gc-color-panel) 94%, black 6%);
+		border: solid 1px rgba(255, 255, 255, 0.05);
+		background: var(--gc-color-panel);
+		color: var(--gc-color-text);
 		box-shadow: 0 0.5rem 1.25rem color-mix(in srgb, black 36%, transparent);
 		z-index: 1300;
 	}
@@ -719,10 +745,14 @@
 		line-height: 1.2;
 		text-align: start;
 		cursor: pointer;
+		transition:
+			background-color 0.2s ease,
+			color 0.2s ease;
 	}
 
 	.gc-node-context-item:hover,
-	.gc-node-context-item:focus-visible {
+	.gc-node-context-item:focus-visible,
+	.gc-node-context-item-open {
 		background: color-mix(in srgb, var(--gc-color-selection) 24%, transparent);
 		outline: none;
 	}
@@ -758,15 +788,10 @@
 		background: color-mix(in srgb, var(--gc-color-panel-outline) 45%, transparent);
 	}
 
-	.gc-node-context-submenu-container {
+	.gc-node-context-color-submenu {
 		position: fixed;
-	}
-
-	.hidden-color-input {
-		position: fixed;
-		inline-size: 0;
-		block-size: 0;
-		opacity: 0;
-		pointer-events: none;
+		min-inline-size: 16rem;
+		max-inline-size: min(24rem, 42vw);
+		z-index: 1301;
 	}
 </style>

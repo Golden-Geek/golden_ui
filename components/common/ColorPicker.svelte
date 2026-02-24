@@ -13,7 +13,7 @@
 
 	let isSwitch = $derived(previewIsSwitch);
 	let userPreviewOnly = $state(true);
-	let previewOnly = $derived(forceExpanded ? true : isSwitch ? userPreviewOnly : true);
+	let previewOnly = $derived(forceExpanded ? false : isSwitch ? userPreviewOnly : true);
 
 	// --- State ---
 	// Interaction Mode: 0 = Sat/Val (Standard), 1 = Hue/Val, 2 = Hue/Sat
