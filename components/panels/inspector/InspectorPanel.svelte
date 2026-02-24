@@ -12,6 +12,7 @@
 	import { getIconURLForNode } from '$lib/golden_ui/store/node-types';
 	import { sendPatchMetaIntent } from '$lib/golden_ui/store/ui-intents';
 	import EnableButton from '../../common/EnableButton.svelte';
+	import Watcher from '../../common/Watcher.svelte';
 
 	let { panelApi, panelId, panelType, title, params }: PanelProps = $props();
 
@@ -180,7 +181,7 @@
 						}
 					}}>📋</button>
 			</div>
-			</div>
+		</div>
 
 		{#if warningCount > 0}
 			<div class="warning-info" transition:slide={{ duration: 200 }}>
@@ -196,6 +197,12 @@
 		{/if}
 
 		<div class="inspector-content">
+
+			{#if node && node.data.kind === 'parameter'}
+				<div class="watcher-wrapper">
+					<Watcher {node} />
+				</div>
+			{/if}
 			<NodeInspector nodes={selectedNodes} level={0} />
 		</div>
 
@@ -257,7 +264,7 @@
 		background-color: var(--bg-color);
 		color: var(--text-color);
 		font-size: 0.8rem;
-		outline: 1px solid rgba(255,255,255,.2);
+		outline: 1px solid rgba(255, 255, 255, 0.2);
 		border-radius: 0.25rem;
 		padding: 0 0.35rem;
 	}
@@ -303,12 +310,17 @@
 	}
 
 	.inspector-content {
-		height: 100%;
+		flex: 1 1 auto;
+		min-height: 0;
 		overflow-x: hidden;
 		overflow: -moz-scrollbars-vertical;
 		overflow-y: auto;
 		scrollbar-gutter: stable;
 		padding-right: 0.3rem;
+	}
+
+	.watcher-wrapper {
+		padding: 0.35rem 0.15rem 0.2rem;
 	}
 
 	.data-inspector {
@@ -358,5 +370,3 @@
 		height: 100%;
 	}
 </style>
-
-

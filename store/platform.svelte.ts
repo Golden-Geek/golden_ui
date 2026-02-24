@@ -6,5 +6,5 @@ export const platform = $state({
     },
     get isLinux() { return this.name === 'linux'; },
     get isWindows() { return this.name === 'windows'; },
-    get isMac() { return this.name === 'mac'; }
+    get isMac() { return this.name === 'macos'; }
 });

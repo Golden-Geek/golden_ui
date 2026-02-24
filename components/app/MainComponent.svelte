@@ -33,10 +33,7 @@
 		UserPanelDefinitionMap
 	} from '$lib/golden_ui/dockview/panel-types';
 	import { configureNodeIcons, type NodeIconSet } from '../../store/node-types';
-	import {
-		loadPersistedDockLayout,
-		savePersistedDockLayout
-	} from '../../store/ui-persistence';
+	import { loadPersistedDockLayout, savePersistedDockLayout } from '../../store/ui-persistence';
 	import { appState } from '../../store/workbench.svelte';
 
 	import MainViewPanel from '../panels/MainViewPanel.svelte';
@@ -148,9 +145,7 @@
 		...normalizeUserPanels(userPanels)
 	});
 	const availablePanelDefinitions = $derived(
-		Object.values(panelDefinitions).sort((first, second) =>
-			first.title.localeCompare(second.title)
-		)
+		Object.values(panelDefinitions).sort((first, second) => first.title.localeCompare(second.title))
 	);
 
 	let containerElement: HTMLDivElement | undefined;
@@ -354,8 +349,7 @@
 	});
 
 	const defaultPanelRequestFor = (request: PanelSpawnRequest): PanelSpawnRequest | undefined => {
-		const initialPanelRequests: PanelSpawnRequest[] =
-			initialPanels ?? createDefaultInitialPanels();
+		const initialPanelRequests: PanelSpawnRequest[] = initialPanels ?? createDefaultInitialPanels();
 		if (request.panelId) {
 			const panelById = initialPanelRequests.find((panel) => panel.panelId === request.panelId);
 			if (panelById) {
@@ -676,7 +670,7 @@
 					direction: 'within'
 				},
 				inactive: true
-			},
+			}
 		];
 	};
 
@@ -873,9 +867,8 @@
 	:global(.gc-group-panel-add-trigger) {
 		inline-size: 1.4rem;
 		block-size: 1.4rem;
-		border: 0.0625rem solid color-mix(in srgb, var(--gc-color-panel-outline) 88%, white 12%);
 		border-radius: 0.35rem;
-		background: color-mix(in srgb, var(--gc-color-panel-row) 78%, black);
+		/* background: color-mix(in srgb, var(--gc-color-panel-row) 78%, black); */
 		color: inherit;
 		font-size: 0.92rem;
 		line-height: 1;
@@ -895,12 +888,11 @@
 		min-inline-size: 9rem;
 		max-inline-size: min(14rem, calc(100vw - 1rem));
 		display: grid;
-		gap: 0.2rem;
 		padding: 0.3rem;
 		border-radius: 0.45rem;
 		z-index: 20;
-		border: 0.0625rem solid color-mix(in srgb, var(--gc-color-focus) 45%, transparent);
-		background: color-mix(in srgb, var(--gc-color-header) 84%, transparent);
+		border: solid 1px rgba(255, 255, 255, 0.1);
+		background: var(--gc-color-panel);
 		backdrop-filter: blur(0.3rem);
 		box-shadow: 0 0.4rem 1rem color-mix(in srgb, black 60%, transparent);
 	}
@@ -912,16 +904,15 @@
 	:global(.gc-group-panel-add-item) {
 		inline-size: 100%;
 		text-align: start;
-		padding: 0.35rem 0.5rem;
 		border: 0;
 		border-radius: 0.3rem;
 		color: inherit;
 		cursor: pointer;
 		font-size: 0.76rem;
-		background: color-mix(in srgb, var(--gc-color-panel-row) 76%, black);
+		padding: 0.4rem 0.3rem !important;
 	}
 
 	:global(.gc-group-panel-add-item:hover) {
-		background: color-mix(in srgb, var(--gc-color-focus-muted) 74%, black);
+		background-color: rgba(200, 200, 200, 1s) !important;
 	}
 </style>
