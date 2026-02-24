@@ -12,11 +12,12 @@ html {
 
     overflow: hidden;
     font-family: var(--gc-font-sans);
-    font-optical-sizing: auto;
-    background-color: var(--gc-color-background);
-
+    font-optical-sizing: auto; 
     color: var(--gc-color-text);
+    background: transparent;
 }
+
+
 
 /* MAIN LAYOUT */
 
@@ -28,6 +29,11 @@ html {
     height: 100%;
     box-sizing: border-box;
     user-select: none;
+
+    background-color: var(--gc-color-background);
+    border-radius:.6rem;
+    overflow:hidden;
+   
 }
 
 .gc-header {
@@ -99,6 +105,8 @@ html {
     app-region: no-drag;
     -webkit-app-region: no-drag;
     overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
 }
 
 .gc-content * {
