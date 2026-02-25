@@ -3,6 +3,12 @@
 	import type { NodeId, UiLogRecord } from '$lib/golden_ui/types';
 	import type { PanelProps, PanelState } from '../../../dockview/panel-types';
 	import { appState } from '../../../store/workbench.svelte';
+	import {
+		DEFAULT_LOG_UI_UPDATE_HZ,
+		MAX_LOG_UI_UPDATE_HZ,
+		MIN_LOG_UI_UPDATE_HZ,
+		normalizeLogUiUpdateHz
+	} from '../../../store/logger-ui-config';
 	import { sendClearLogsIntent, sendSetLogMaxEntriesIntent } from '../../../store/ui-intents';
 
 	let { panelId, panelType, title, params }: PanelProps = $props();
@@ -41,17 +47,8 @@
 	const ENGINE_SOURCE_LABEL = 'engine';
 	const LIST_BOTTOM_EPSILON_PX = 6;
 	const LIVE_TAIL_RENDER_LIMIT = 200;
-	const DEFAULT_LOG_UI_UPDATE_HZ = 1;
-	const MIN_LOG_UI_UPDATE_HZ = 1;
-	const MAX_LOG_UI_UPDATE_HZ = 240;
 
 	const normalizeSearchText = (value: string): string => value.trim().toLowerCase();
-	const normalizeLogUiUpdateHz = (value: number): number => {
-		if (!Number.isFinite(value)) {
-			return DEFAULT_LOG_UI_UPDATE_HZ;
-		}
-		return Math.min(MAX_LOG_UI_UPDATE_HZ, Math.max(MIN_LOG_UI_UPDATE_HZ, Math.round(value)));
-	};
 
 	const repeatCountForRecord = (record: UiLogRecord): number => {
 		const raw = Number(record.repeat_count ?? 1);

@@ -18,6 +18,7 @@ import {
 	loadPersistedSelection,
 	savePersistedSelection
 } from './ui-persistence';
+import { DEFAULT_LOG_UI_UPDATE_HZ, normalizeLogUiUpdateHz } from './logger-ui-config';
 
 export type SelectionMode = 'REPLACE' | 'ADD' | 'REMOVE' | 'TOGGLE';
 
@@ -72,21 +73,11 @@ export interface WorkbenchSession {
 
 const DEFAULT_RETRY_MS = 1000;
 const DEFAULT_WARNING_ID = '';
-const DEFAULT_LOG_UI_UPDATE_HZ = 60;
-const MIN_LOG_UI_UPDATE_HZ = 1;
-const MAX_LOG_UI_UPDATE_HZ = 240;
 
 type PendingLogMutation =
 	| { kind: 'clear' }
 	| { kind: 'replaceTail'; record: UiLogRecord }
 	| { kind: 'append'; records: UiLogRecord[] };
-
-const normalizeLogUiUpdateHz = (value: number): number => {
-	if (!Number.isFinite(value)) {
-		return DEFAULT_LOG_UI_UPDATE_HZ;
-	}
-	return Math.min(MAX_LOG_UI_UPDATE_HZ, Math.max(MIN_LOG_UI_UPDATE_HZ, Math.round(value)));
-};
 
 const formatEventTime = (value: { tick: number; micro: number; seq: number }): string =>
 	`${value.tick}:${value.micro}:${value.seq}`;
