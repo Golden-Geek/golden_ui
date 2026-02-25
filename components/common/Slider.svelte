@@ -135,7 +135,11 @@
 
 <style>
 	.slider {
-		min-width: 6rem;
+		min-width: 0;
+		min-height: 0;
+		display: block;
+		flex: 1 1 auto;
+		align-self: stretch;
 		position: relative;
 		height: 100%;
 		width: 100%;

@@ -99,9 +99,12 @@ export interface ParamEnumOption {
 	ordering?: number;
 }
 
+export type UiRangeConstraint =
+	| { kind: 'uniform'; min?: number; max?: number }
+	| { kind: 'components'; min?: number[]; max?: number[] };
+
 export interface UiParamConstraints {
-	min?: number;
-	max?: number;
+	range?: UiRangeConstraint;
 	step?: number;
 	step_base?: number;
 	enum_options: ParamEnumOption[];

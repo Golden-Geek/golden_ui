@@ -71,23 +71,59 @@
 			param.event_behaviour
 		);
 	};
+
+	const componentMin = (index: number): number | undefined => {
+		if (!param) {
+			return undefined;
+		}
+		const range = param.constraints.range;
+		if (!range) {
+			return undefined;
+		}
+		if (range.kind === 'uniform') {
+			return range.min;
+		}
+		if (range.kind === 'components') {
+			return range.min?.[index];
+		}
+		return undefined;
+	};
+
+	const componentMax = (index: number): number | undefined => {
+		if (!param) {
+			return undefined;
+		}
+		const range = param.constraints.range;
+		if (!range) {
+			return undefined;
+		}
+		if (range.kind === 'uniform') {
+			return range.max;
+		}
+		if (range.kind === 'components') {
+			return range.max?.[index];
+		}
+		return undefined;
+	};
 </script>
 
 <div class="multi-number-editor">
 	{#if draftValue.length > 0}
 		{#each draftValue as item, index}
 			<div class="single-number-editor">
-				<Slider
-					value={draftValue[index]}
-					min={param?.constraints.min}
-					max={param?.constraints.max}
-					step={param?.constraints.step}
-					stepBase={param?.constraints.step_base}
-					{readOnly}
-					disabled={!enabled}
-					onValueChange={(nextValue: number) => commitValue(nextValue, index)}
-					onStartEdit={startEdit}
-					onEndEdit={endEdit} />
+				<div class="slider-wrapper">
+					<Slider
+						value={draftValue[index]}
+						min={componentMin(index)}
+						max={componentMax(index)}
+						step={param?.constraints.step}
+						stepBase={param?.constraints.step_base}
+						{readOnly}
+						disabled={!enabled}
+						onValueChange={(nextValue: number) => commitValue(nextValue, index)}
+						onStartEdit={startEdit}
+						onEndEdit={endEdit} />
+				</div>
 				<input
 					type="text"
 					class="number-field"
@@ -126,16 +162,27 @@
 		display: flex;
 		flex-direction: column;
 		gap: 0.25rem;
+		width: 100%;
 	}
 
 	.single-number-editor {
 		display: flex;
-		justify-content: right;
+		align-items: center;
 		gap: 0.25rem;
+		width: 100%;
+		height: 1.2rem;
+	}
+
+	.slider-wrapper {
+		display: flex;
+		flex: 1 1 auto;
+		min-width: 0;
+		height: 70%;
 	}
 
 	.number-field {
-		height: 1.2rem;
+		height: 100%;
+		box-sizing: border-box;
 		width: 30%;
 	}
 </style>

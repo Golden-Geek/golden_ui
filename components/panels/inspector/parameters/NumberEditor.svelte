@@ -4,7 +4,6 @@
 	import { appState } from '$lib/golden_ui/store/workbench.svelte';
 	import { createUiEditSession, sendSetParamIntent } from '$lib/golden_ui/store/ui-intents';
 	import type { UiNodeDto } from '$lib/golden_ui/types';
-	import { read } from '$app/server';
 
 	let { node } = $props<{
 		node: UiNodeDto;
@@ -23,8 +22,12 @@
 		param && (param.value.kind === 'int' || param.value.kind === 'float') ? param.value.value : 0
 	);
 
-	let min = $derived(constraints?.min);
-	let max = $derived(constraints?.max);
+	let min = $derived(
+		constraints?.range?.kind === 'uniform' ? constraints.range.min : undefined
+	);
+	let max = $derived(
+		constraints?.range?.kind === 'uniform' ? constraints.range.max : undefined
+	);
 	let step = $derived(constraints?.step);
 	let stepBase = $derived(constraints?.step_base);
 	let hasRange = $derived(min !== undefined && max !== undefined);

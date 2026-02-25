@@ -113,8 +113,7 @@
 	$effect(() => {
 		timeWindowMs;
 		rangeMode;
-		constraints.min;
-		constraints.max;
+		constraints.range;
 		latestValue;
 		buffer;
 

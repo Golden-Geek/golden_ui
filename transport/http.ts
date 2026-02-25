@@ -64,8 +64,11 @@ interface RustUiParamDto {
 	event_behaviour: ParamEventBehaviour;
 	read_only: boolean;
 	constraints: {
-		min?: number;
-		max?: number;
+		range?: {
+			kind?: string;
+			min?: number | number[];
+			max?: number | number[];
+		};
 		step?: number;
 		step_base?: number;
 		enum_options?: Array<{
@@ -389,9 +392,45 @@ const fromRustReferenceConstraints = (reference: RustUiParamDto['constraints']['
 	};
 };
 
+const fromRustRangeConstraint = (
+	range: RustUiParamDto['constraints']['range']
+): UiParamConstraints['range'] | undefined => {
+	if (!range || typeof range !== 'object') {
+		return undefined;
+	}
+
+	const kind = String(range.kind ?? '').toLowerCase();
+	if (kind === 'uniform') {
+		return {
+			kind: 'uniform',
+			min: typeof range.min === 'number' ? range.min : undefined,
+			max: typeof range.max === 'number' ? range.max : undefined
+		};
+	}
+
+	if (kind === 'components') {
+		const parseList = (value: unknown): number[] | undefined => {
+			if (!Array.isArray(value)) {
+				return undefined;
+			}
+			const parsed = value
+				.map((entry) => Number(entry))
+				.filter((entry) => Number.isFinite(entry));
+			return parsed.length > 0 ? parsed : undefined;
+		};
+
+		return {
+			kind: 'components',
+			min: parseList(range.min),
+			max: parseList(range.max)
+		};
+	}
+
+	return undefined;
+};
+
 const fromRustConstraints = (constraints: RustUiParamDto['constraints']): UiParamConstraints => ({
-	min: constraints.min,
-	max: constraints.max,
+	range: fromRustRangeConstraint(constraints.range),
 	step: constraints.step,
 	step_base: constraints.step_base,
 	enum_options: (constraints.enum_options ?? []).map((option) => ({

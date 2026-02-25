@@ -70,16 +70,37 @@ export const sanitizeWatcherUiSettings = (
 export const getFixedRange = (
 	constraints: UiParamConstraints | undefined
 ): { min: number; max: number } | null => {
-	const min = Number(constraints?.min);
-	const max = Number(constraints?.max);
+	const range = constraints?.range;
+	if (!range) {
+		return null;
+	}
 
-	if (!Number.isFinite(min) || !Number.isFinite(max)) {
-		return null;
+	if (range.kind === 'uniform') {
+		const min = Number(range.min);
+		const max = Number(range.max);
+		if (!Number.isFinite(min) || !Number.isFinite(max) || max <= min) {
+			return null;
+		}
+		return { min, max };
 	}
-	if (max <= min) {
-		return null;
+
+	if (range.kind === 'components') {
+		const mins =
+			range.min?.map((entry) => Number(entry)).filter((entry) => Number.isFinite(entry)) ?? [];
+		const maxs =
+			range.max?.map((entry) => Number(entry)).filter((entry) => Number.isFinite(entry)) ?? [];
+		if (mins.length === 0 || maxs.length === 0) {
+			return null;
+		}
+		const min = Math.min(...mins);
+		const max = Math.max(...maxs);
+		if (max <= min) {
+			return null;
+		}
+		return { min, max };
 	}
-	return { min, max };
+
+	return null;
 };
 
 export const extractNumericSample = (value: ParamValue): NumericSample | null => {
