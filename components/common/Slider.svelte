@@ -42,12 +42,15 @@
 		1 -
 			(!midZero
 				? relativeValue
-				: value >= 0
-					? relativeZero + relativeValue * (1 - relativeZero)
-					: relativeZero)
+					: value >= 0
+						? relativeZero + relativeValue * (1 - relativeZero)
+						: relativeZero)
 	);
 
 	function startDrag(e: MouseEvent) {
+		if (disabled || readOnly) {
+			return;
+		}
 		isDragging = true;
 		onStartEdit && onStartEdit(value);
 		mouseAtDown = isHorizontal ? e.clientX : e.clientY;
@@ -64,6 +67,8 @@
 		if (!isDragging) return;
 		const delta = isHorizontal ? e.movementX : e.movementY;
 		const range = max - min;
+		const previousValue = value;
+		let nextValue = value;
 
 		let alteredSensitivity = e.altKey
 			? sensitivity / 10
@@ -76,19 +81,24 @@
 			const stepCount = range / step;
 			const pixelsPerStep = sliderWidth / stepCount / alteredSensitivity;
 			const stepsMoved = Math.round(delta / pixelsPerStep);
-			value = Math.min(max, Math.max(min, valueAtDown + stepsMoved * step));
+			nextValue = Math.min(max, Math.max(min, valueAtDown + stepsMoved * step));
 		} else if (!infiniteMode) {
 			const percentDelta = (delta / sliderWidth) * alteredSensitivity;
-			value = Math.min(max, Math.max(min, valueAtDown + percentDelta * range));
+			nextValue = Math.min(max, Math.max(min, valueAtDown + percentDelta * range));
 		} else //infinite mode, no range
 		{
 			const valueDelta = (delta * alteredSensitivity) / 10;
-			value = valueAtDown + valueDelta;
+			nextValue = valueAtDown + valueDelta;
 		}
 
+		value = nextValue;
 		valueAtDown = value;
 
-		onValueChange && onValueChange(value);
+		if (previousValue === nextValue) {
+			return;
+		}
+
+		onValueChange && onValueChange(nextValue);
 	}
 
 	function stopDrag(e: MouseEvent) {

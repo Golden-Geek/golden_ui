@@ -1,5 +1,7 @@
 :root,
 .gc-colors-default {
+
+	/* GENERAL*/
 	--gc-color-background: #151515;
 	--gc-color-header: #181818;
 	--gc-color-footer: #181818;
@@ -7,6 +9,7 @@
 	--gc-color-text: #bababa;
 	--gc-color-panel: #1f2021;
 	--gc-color-panel-outline: #7c7c7c4c;
+
 
 	/* SELECTION */
 	--gc-color-selection: #d81dac;
@@ -34,6 +37,8 @@
 
 	/* META */
 	--gc-color-warning: #e4901c;
+	--gc-color-success: #95e554;
+	--gc-color-error: #bf4d43;
 
 
 	/* DOCKVIEW COLORS */

@@ -36,6 +36,7 @@
 	let draftValue = $state(0);
 	let isEditing = $state(false);
 	let editSession = createUiEditSession('Edit number', 'param-number');
+	const NUMERIC_EPSILON = 1e-9;
 
 	$effect(() => {
 		if (isEditing) {
@@ -48,18 +49,60 @@
 		void editSession.end();
 	});
 
-	const normalizeValue = (candidate: number): number => {
+	const normalizeValue = (candidate: number): number | null => {
 		let nextValue = candidate;
 		if (!Number.isFinite(nextValue)) {
-			return draftValue;
+			return null;
 		}
-		if (min !== undefined) {
-			nextValue = Math.max(min, nextValue);
+		const policy = constraints?.policy ?? 'ClampAdapt';
+		if (min !== undefined && max !== undefined && min > max) {
+			return null;
 		}
-		if (max !== undefined) {
-			nextValue = Math.min(max, nextValue);
+
+		if (min !== undefined && nextValue < min) {
+			if (policy === 'ClampAdapt') {
+				nextValue = min;
+			} else {
+				return null;
+			}
 		}
+
+		if (max !== undefined && nextValue > max) {
+			if (policy === 'ClampAdapt') {
+				nextValue = max;
+			} else {
+				return null;
+			}
+		}
+
+		if (step !== undefined) {
+			if (step <= 0) {
+				return null;
+			}
+			const base = stepBase ?? min ?? 0;
+			const scaled = (nextValue - base) / step;
+			const nearest = Math.round(scaled);
+			if (policy === 'ClampAdapt') {
+				nextValue = base + nearest * step;
+			} else if (Math.abs(scaled - nearest) > NUMERIC_EPSILON) {
+				return null;
+			}
+		}
+
+		if (policy === 'ClampAdapt') {
+			if (min !== undefined) {
+				nextValue = Math.max(min, nextValue);
+			}
+			if (max !== undefined) {
+				nextValue = Math.min(max, nextValue);
+			}
+		}
+
 		if (isInteger) {
+			const rounded = Math.round(nextValue);
+			if (policy === 'Reject' && Math.abs(nextValue - rounded) > NUMERIC_EPSILON) {
+				return null;
+			}
 			nextValue = Math.round(nextValue);
 		}
 		return nextValue;
@@ -73,6 +116,13 @@
 			return;
 		}
 		const nextValue = normalizeValue(candidate);
+		if (nextValue === null) {
+			return;
+		}
+		if (Math.abs(nextValue - value) <= NUMERIC_EPSILON) {
+			draftValue = nextValue;
+			return;
+		}
 		draftValue = nextValue;
 		void sendSetParamIntent(
 			liveNode.node_id,

@@ -21,6 +21,7 @@
 	let draftValue = $state<number[]>([]);
 	let isEditing = $state(false);
 	let editSession = createUiEditSession('Edit vector', 'param-vector');
+	const NUMERIC_EPSILON = 1e-9;
 
 	
 	$effect(() => {
@@ -57,12 +58,19 @@
 		if (param.value.kind !== 'vec2' && param.value.kind !== 'vec3') {
 			return;
 		}
-		if (!Number.isFinite(nextValue)) {
+		const normalized = normalizeComponentValue(nextValue, index);
+		if (normalized === null) {
+			return;
+		}
+		if (Math.abs((value[index] ?? 0) - normalized) <= NUMERIC_EPSILON) {
+			const next = [...draftValue];
+			next[index] = normalized;
+			draftValue = next;
 			return;
 		}
 
 		const next = [...draftValue];
-		next[index] = nextValue;
+		next[index] = normalized;
 		draftValue = next;
 
 		void sendSetParamIntent(
@@ -104,6 +112,66 @@
 			return range.max?.[index];
 		}
 		return undefined;
+	};
+
+	const normalizeComponentValue = (candidate: number, index: number): number | null => {
+		if (!Number.isFinite(candidate)) {
+			return null;
+		}
+		if (!param) {
+			return null;
+		}
+
+		const min = componentMin(index);
+		const max = componentMax(index);
+		if (min !== undefined && max !== undefined && min > max) {
+			return null;
+		}
+
+		const policy = param.constraints.policy ?? 'ClampAdapt';
+		let nextValue = candidate;
+
+		if (min !== undefined && nextValue < min) {
+			if (policy === 'ClampAdapt') {
+				nextValue = min;
+			} else {
+				return null;
+			}
+		}
+
+		if (max !== undefined && nextValue > max) {
+			if (policy === 'ClampAdapt') {
+				nextValue = max;
+			} else {
+				return null;
+			}
+		}
+
+		const step = param.constraints.step;
+		if (step !== undefined) {
+			if (step <= 0) {
+				return null;
+			}
+			const base = param.constraints.step_base ?? min ?? 0;
+			const scaled = (nextValue - base) / step;
+			const nearest = Math.round(scaled);
+			if (policy === 'ClampAdapt') {
+				nextValue = base + nearest * step;
+			} else if (Math.abs(scaled - nearest) > NUMERIC_EPSILON) {
+				return null;
+			}
+		}
+
+		if (policy === 'ClampAdapt') {
+			if (min !== undefined) {
+				nextValue = Math.max(min, nextValue);
+			}
+			if (max !== undefined) {
+				nextValue = Math.min(max, nextValue);
+			}
+		}
+
+		return nextValue;
 	};
 </script>
 

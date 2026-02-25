@@ -80,6 +80,7 @@
 	);
 
 	let loggerList = $state<HTMLDivElement | null>(null);
+	let listEndMarker = $state<HTMLDivElement | null>(null);
 	let focusedRecordKey = $state<string | null>(null);
 	let followLatest = $state(true);
 	let viewportSyncRaf: number | null = null;
@@ -323,7 +324,21 @@
 			return;
 		}
 		withSuppressedScroll(() => {
+			if (listEndMarker) {
+				listEndMarker.scrollIntoView({ block: 'end' });
+			}
 			loggerList.scrollTop = loggerList.scrollHeight;
+		});
+		requestAnimationFrame(() => {
+			if (!loggerList || !followLatest || focusedRecordKey !== null || isListAtBottom()) {
+				return;
+			}
+			withSuppressedScroll(() => {
+				if (listEndMarker) {
+					listEndMarker.scrollIntoView({ block: 'end' });
+				}
+				loggerList.scrollTop = loggerList.scrollHeight;
+			});
 		});
 	};
 
@@ -511,15 +526,15 @@
 
 <section class="logger-panel">
 	<header class="logger-toolbar">
-		<div class={`logger-stats${isFiltered ? ' is-filtered' : ''}`}>
+		<!-- <div class={`logger-stats${isFiltered ? ' is-filtered' : ''}`}>
 			<strong>{filteredEntries.length}</strong>
 			<span>/ {displayedEntries.length}</span>
 			{#if collapseDuplicates}
 				<span class="raw-count">({records.length})</span>
 			{/if}
-		</div>
+		</div> -->
 
-		<label class="max-input">
+		<!-- <label class="max-input">
 			<span>max</span>
 			<input
 				type="number"
@@ -539,7 +554,7 @@
 				bind:value={desiredLogUiUpdateHz}
 				onchange={applyLogUiUpdateHz}
 				onkeydown={handleLogUiUpdateHzKeydown} />
-		</label>
+		</label> -->
 
 		<input
 			class="filter-input source"
@@ -552,29 +567,10 @@
 			type="search"
 			placeholder="content"
 			bind:value={contentFilter} />
-
-		<button
-			type="button"
-			class={`toolbar-button collapse${collapseDuplicates ? ' is-active' : ''}`}
-			onclick={toggleCollapse}>
-			Collapse
-		</button>
+		<div class="spacer"></div>
 		<button type="button" class="toolbar-button" onclick={clearFilters} disabled={!isFiltered}>
 			Clear filters
 		</button>
-		<button
-			type="button"
-			class={`toolbar-button live${followLatest && focusedRecordKey === null ? '' : ' is-active'}`}
-			onclick={resyncToLatest}
-			disabled={followLatest && focusedRecordKey === null}>
-			Live
-		</button>
-		{#if isWindowedView}
-			<span class="windowed-indicator" title="Live mode renders only recent logs for performance">
-				tail {effectiveRenderLimit}
-			</span>
-		{/if}
-		<button type="button" class="toolbar-button clear-logs" onclick={clearLogs}>Clear logs</button>
 	</header>
 
 	<div
@@ -628,7 +624,31 @@
 				</div>
 			{/each}
 		{/if}
+		<div class="list-end-marker" bind:this={listEndMarker} aria-hidden="true"></div>
 	</div>
+	<footer class="logger-footer">
+		<button
+			type="button"
+			class={`toolbar-button collapse${collapseDuplicates ? ' is-active' : ''}`}
+			onclick={toggleCollapse}>
+			Collapse
+		</button>
+
+		<button
+			type="button"
+			class={`toolbar-button live${followLatest && focusedRecordKey === null ? '' : ' is-active'}`}
+			onclick={resyncToLatest}
+			disabled={followLatest && focusedRecordKey === null}>
+			Live
+		</button>
+		<!-- {#if isWindowedView}
+			<span class="windowed-indicator" title="Live mode renders only recent logs for performance">
+				tail {effectiveRenderLimit}
+			</span>
+		{/if} -->
+		<div class="spacer"></div>
+		<button type="button" class="toolbar-button clear-logs" onclick={clearLogs}>Clear logs</button>
+	</footer>
 </section>
 
 <style>
@@ -637,6 +657,7 @@
 		flex-direction: column;
 		block-size: 100%;
 		min-block-size: 0;
+		gap:.25rem;
 	}
 
 	.logger-toolbar {
@@ -644,77 +665,25 @@
 		flex-wrap: wrap;
 		align-items: center;
 		gap: 0.3rem;
-		padding: 0.3rem 0.4rem;
 		border-bottom: 0.0625rem solid
 			color-mix(in srgb, var(--gc-color-panel-outline) 85%, transparent);
 		background: color-mix(in srgb, var(--gc-color-panel-row) 70%, black);
 	}
 
-	.logger-stats {
-		display: inline-flex;
-		align-items: baseline;
-		gap: 0.2rem;
-		min-inline-size: 4.2rem;
-		font-size: 0.7rem;
-	}
-
-	.logger-stats strong {
-		font-size: 0.82rem;
-	}
-
-	.logger-stats.is-filtered {
-		color: color-mix(in srgb, var(--gc-color-focus) 80%, white 20%);
-	}
-
-	.raw-count {
-		opacity: 0.7;
-	}
-
-	.max-input,
-	.hz-input {
-		display: inline-flex;
-		align-items: center;
-		gap: 0.2rem;
-		font-size: 0.64rem;
+	header input {
+		font-size: 0.6rem;
 		text-transform: uppercase;
-		letter-spacing: 0.04em;
 	}
 
-	.max-input input,
-	.filter-input {
-		block-size: 1.7rem;
-		padding: 0.1rem 0.35rem;
-		border: 0.0625rem solid var(--gc-color-panel-outline);
-		border-radius: 0.25rem;
-		background: color-mix(in srgb, var(--gc-color-panel-row) 86%, black);
-		color: inherit;
-		font-size: 0.7rem;
+	.spacer {
+		flex: 1;
 	}
 
-	.max-input input {
-		inline-size: 4.5rem;
+	footer 
+	{
+		display: flex;
 	}
-
-	.hz-input input {
-		inline-size: 4.2rem;
-	}
-
-	.filter-input {
-		min-inline-size: 5.2rem;
-		flex: 1 1 8rem;
-	}
-
-	.filter-input.source {
-		flex-basis: 7rem;
-	}
-
-	.filter-input.tag {
-		flex-basis: 6rem;
-	}
-
-	.filter-input.content {
-		flex-basis: 10rem;
-	}
+	
 
 	.toolbar-button {
 		block-size: 1.7rem;
@@ -777,6 +746,13 @@
 		outline-offset: -0.0625rem;
 	}
 
+	.list-end-marker {
+		inline-size: 100%;
+		block-size: 0.0625rem;
+		flex: 0 0 auto;
+		pointer-events: none;
+	}
+
 	.empty-state {
 		padding: 0.6rem 0.4rem;
 		opacity: 0.7;
@@ -809,91 +785,97 @@
 		background: color-mix(in srgb, var(--gc-color-focus-muted) 45%, black);
 	}
 
-	.time,
-	.level,
-	.tag,
-	.repeat-count,
-	.origin,
-	.origin-label {
-		flex: 0 0 auto;
-		font-size: 0.66rem;
-		line-height: 1.35;
-	}
+	.record {
+		.time,
+		.level,
+		.tag,
+		.repeat-count,
+		.origin,
+		.origin-label {
+			flex: 0 0 auto;
+			font-size: 0.66rem;
+			line-height: 1.35;
+		}
 
-	.time {
-		min-inline-size: 7.6em;
-		opacity: 0.72;
-	}
+		.time {
+			min-inline-size: 7.6em;
+			opacity: 0.72;
+		}
 
-	.level {
-		min-inline-size: 4.8em;
-		text-transform: uppercase;
-		font-weight: 650;
-	}
+		.level {
+			min-inline-size: 4.8em;
+			text-transform: uppercase;
+			font-weight: 650;
+		}
 
-	.tag,
-	.repeat-count {
-		padding: 0 0.22rem;
-		border-radius: 0.22rem;
-		background: color-mix(in srgb, var(--gc-color-panel-alt) 84%, black);
-		white-space: nowrap;
-	}
+		.tag,
+		.repeat-count {
+			padding: 0 0.22rem;
+			border-radius: 0.22rem;
+			background: color-mix(in srgb, var(--gc-color-panel-alt) 84%, black);
+			white-space: nowrap;
+		}
 
-	.tag {
-		max-inline-size: 14em;
-		overflow: hidden;
-		text-overflow: ellipsis;
-	}
+		.tag {
+			max-inline-size: 14em;
+			overflow: hidden;
+			text-overflow: ellipsis;
+		}
 
-	.repeat-count {
-		color: color-mix(in srgb, var(--gc-color-focus) 85%, white 15%);
-	}
+		.repeat-count {
+			color: color-mix(in srgb, var(--gc-color-text) 85%, white 15%);
+		}
 
-	.origin,
-	.origin-label {
-		max-inline-size: 18em;
-		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
-		text-align: start;
-	}
+		.origin,
+		.origin-label {
+			max-inline-size: 18em;
+			overflow: hidden;
+			text-overflow: ellipsis;
+			white-space: nowrap;
+			text-align: start;
+		}
 
-	.origin {
-		padding: 0;
-		border: 0;
-		background: transparent;
-		color: color-mix(in srgb, var(--gc-color-focus) 80%, white 20%);
-		cursor: pointer;
-	}
+		.origin {
+			padding: 0;
+			border: 0;
+			background: transparent;
+			color: color-mix(in srgb, var(--gc-color-text) 80%, white 20%);
+			cursor: pointer;
+		}
 
-	.origin-label {
-		opacity: 0.78;
-	}
+		.origin:hover {
+			color: color-mix(in srgb, var(--gc-color-focus) 80%, white 20%);
+		}
 
-	.message {
-		margin: 0;
-		flex: 1 1 auto;
-		min-inline-size: 0;
-		font-size: 0.72rem;
-		line-height: 1.35;
-		overflow-wrap: anywhere;
-		word-break: break-word;
-		white-space: pre-wrap;
+		.origin-label {
+			opacity: 0.78;
+		}
+
+		.message {
+			margin: 0;
+			flex: 1 1 auto;
+			min-inline-size: 0;
+			font-size: 0.72rem;
+			line-height: 1.35;
+			overflow-wrap: anywhere;
+			word-break: break-word;
+			white-space: pre-wrap;
+		}
 	}
 
 	.level-info .message {
-		color: color-mix(in srgb, #3ca36b 85%, white 15%);
+		color: var(--gc-color-text);
 	}
 
 	.level-success .message {
-		color: color-mix(in srgb, #43c58e 85%, white 15%);
+		color: var(--gc-color-success);
 	}
 
 	.level-warning .message {
-		color: color-mix(in srgb, #cf9b37 85%, white 15%);
+		color: var(--gc-color-warning);
 	}
 
 	.level-error .message {
-		color: color-mix(in srgb, #bf4d43 85%, white 15%);
+		color: var(--gc-color-error);
 	}
 </style>
