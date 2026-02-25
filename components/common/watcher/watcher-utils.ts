@@ -16,7 +16,7 @@ export interface NumericSample {
 	values: number[];
 }
 
-const CURVE_COLORS = ['#6fd9ff', '#ffa26d', '#96e77d', '#f9da63'];
+const CURVE_COLORS = ['#ff5500', '#aaff00', '#00aaff', '#ff55cc'];
 export const WATCHER_WINDOW_OPTIONS_SEC = [2, 5, 10, 20, 40] as const;
 const WATCHER_DECIMATION_OPTIONS: WatcherDecimationMode[] = ['off', 'auto', 'minmax'];
 

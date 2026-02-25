@@ -171,7 +171,7 @@
 				{timeWindowMs}
 				rangeMin={rangeMin}
 				rangeMax={rangeMax}
-				color="#6fd9ff"
+				color="#ff5500"
 				latestPoint={[latestValue[0], latestValue[1]]}
 				axisLabel="X / Y" />
 		</div>
@@ -183,7 +183,7 @@
 				{timeWindowMs}
 				rangeMin={rangeMin}
 				rangeMax={rangeMax}
-				color="#ffa26d"
+				color="#aaff00"
 				latestPoint={[latestValue[0], latestValue[2]]}
 				axisLabel="X / Z" />
 		</div>
@@ -195,7 +195,7 @@
 				{timeWindowMs}
 				rangeMin={rangeMin}
 				rangeMax={rangeMax}
-				color="#96e77d"
+				color="#00aaff"
 				latestPoint={[latestValue[2], latestValue[1]]}
 				axisLabel="Z / Y" />
 		</div>

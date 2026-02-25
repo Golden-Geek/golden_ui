@@ -1,10 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import type { NodeId } from '$lib/golden_ui/types';
-	import {
-		readPanelPersistedState,
-		writePanelPersistedState
-	} from '$lib/golden_ui/dockview/panel-persistence';
+	import type { NodeId, UiLogRecord } from '$lib/golden_ui/types';
 	import type { PanelProps, PanelState } from '../../../dockview/panel-types';
 	import { appState } from '../../../store/workbench.svelte';
 	import {
@@ -12,7 +8,7 @@
 		sendSetLogMaxEntriesIntent
 	} from '../../../store/ui-intents';
 
-	let { panelApi, panelId, panelType, title, params }: PanelProps = $props();
+	let { panelId, panelType, title, params }: PanelProps = $props();
 
 	let panel = $state<PanelState>({
 		panelId: '',
@@ -32,59 +28,358 @@
 
 	export const setPanelState = (next: PanelState): void => {
 		panel = next;
-		restoreListScroll(next.params);
+	};
+
+	interface LoggerEntry {
+		key: string;
+		record: UiLogRecord;
+		sourceLabel: string;
+		sourceFilterText: string;
+		tagFilterText: string;
+		contentFilterText: string;
+		formattedTime: string;
+		repeatCount: number;
+	}
+
+	const ENGINE_SOURCE_LABEL = 'engine';
+	const LIST_BOTTOM_EPSILON_PX = 6;
+	const LIVE_TAIL_RENDER_LIMIT = 320;
+	const DEFAULT_LOG_UI_UPDATE_HZ = 60;
+	const MIN_LOG_UI_UPDATE_HZ = 15;
+	const MAX_LOG_UI_UPDATE_HZ = 240;
+
+	const normalizeSearchText = (value: string): string => value.trim().toLowerCase();
+	const normalizeLogUiUpdateHz = (value: number): number => {
+		if (!Number.isFinite(value)) {
+			return DEFAULT_LOG_UI_UPDATE_HZ;
+		}
+		return Math.min(MAX_LOG_UI_UPDATE_HZ, Math.max(MIN_LOG_UI_UPDATE_HZ, Math.round(value)));
+	};
+
+	const repeatCountForRecord = (record: UiLogRecord): number => {
+		const raw = Number(record.repeat_count ?? 1);
+		if (!Number.isFinite(raw)) {
+			return 1;
+		}
+		return Math.max(1, Math.floor(raw));
 	};
 
 	let session = $derived(appState.session);
 	let records = $derived(session?.logRecords ?? []);
-	let orderedRecords = $derived([...records].reverse());
-	let recordEntries = $derived.by(() => {
-		const seenByBaseKey = new Map<string, number>();
-		return orderedRecords.map((record) => {
-			const baseKey = `${record.id}:${record.timestamp_ms}:${record.level}:${record.tag}`;
-			const seenCount = seenByBaseKey.get(baseKey) ?? 0;
-			seenByBaseKey.set(baseKey, seenCount + 1);
-			return {
-				key: `${baseKey}:${seenCount}`,
-				record
-			};
-		});
-	});
 	let maxEntries = $derived(session?.logMaxEntries ?? 0);
+	let logUiUpdateHz = $derived(session?.logUiUpdateHz ?? DEFAULT_LOG_UI_UPDATE_HZ);
 	let desiredMaxEntries = $state(128);
-	let loggerList = $state<HTMLDivElement | null>(null);
-	let listRestoreRaf = $state<number | null>(null);
-	let listPersistRaf = $state<number | null>(null);
+	let desiredLogUiUpdateHz = $state(DEFAULT_LOG_UI_UPDATE_HZ);
 
-	interface LoggerPersistedState {
-		listScrollTop?: number;
+	let sourceFilter = $state('');
+	let tagFilter = $state('');
+	let contentFilter = $state('');
+	let collapseDuplicates = $state(true);
+
+	let normalizedSourceFilter = $derived(normalizeSearchText(sourceFilter));
+	let normalizedTagFilter = $derived(normalizeSearchText(tagFilter));
+	let normalizedContentFilter = $derived(normalizeSearchText(contentFilter));
+	let isFiltered = $derived(
+		normalizedSourceFilter.length > 0 ||
+			normalizedTagFilter.length > 0 ||
+			normalizedContentFilter.length > 0
+	);
+
+	let loggerList = $state<HTMLDivElement | null>(null);
+	let focusedRecordKey = $state<string | null>(null);
+	let followLatest = $state(true);
+	let viewportSyncRaf: number | null = null;
+	let suppressedScrollEvents = 0;
+	let userScrollIntentUntilMs = 0;
+
+	let rawEntryLimit = $derived(maxEntries > 0 ? maxEntries : Math.max(1, desiredMaxEntries));
+	let effectiveRenderLimit = $derived(
+		followLatest && focusedRecordKey === null && !isFiltered
+			? Math.min(rawEntryLimit, LIVE_TAIL_RENDER_LIMIT)
+			: rawEntryLimit
+	);
+	let isWindowedView = $derived(
+		followLatest &&
+			focusedRecordKey === null &&
+			!isFiltered &&
+			(collapseDuplicates ? records.length > effectiveRenderLimit : rawEntryLimit > effectiveRenderLimit)
+	);
+
+	interface CachedRecordDecorations {
+		timestampMs: number;
+		sourceLabel: string;
+		sourceFilterText: string;
+		tagFilterText: string;
+		contentFilterText: string;
+		formattedTime: string;
 	}
 
-	const normalizeScrollTop = (value: unknown): number | undefined => {
-		if (typeof value !== 'number' || !Number.isFinite(value)) {
-			return undefined;
+	const sourceLabelCache = new Map<NodeId, string>();
+	const recordDecorationsCache = new Map<number, CachedRecordDecorations>();
+	let lastSessionRef: typeof session = null;
+
+	const resolveSourceLabel = (record: UiLogRecord): string => {
+		if (record.origin === undefined) {
+			return ENGINE_SOURCE_LABEL;
 		}
-		return Math.max(0, value);
+
+		const cached = sourceLabelCache.get(record.origin);
+		if (cached !== undefined) {
+			return cached;
+		}
+
+		const label = session?.graph.state.nodesById.get(record.origin)?.meta.label;
+		const resolved = label ? `${label} (${record.origin})` : `node ${record.origin}`;
+		sourceLabelCache.set(record.origin, resolved);
+		return resolved;
 	};
 
-	const restoreListScroll = (params: PanelState['params']): void => {
-		if (listRestoreRaf !== null) {
-			cancelAnimationFrame(listRestoreRaf);
+	const formatTimestamp = (timestampMs: number): string => {
+		const date = new Date(timestampMs);
+		const hours = String(date.getHours()).padStart(2, '0');
+		const minutes = String(date.getMinutes()).padStart(2, '0');
+		const seconds = String(date.getSeconds()).padStart(2, '0');
+		const milliseconds = String(date.getMilliseconds()).padStart(3, '0');
+		return `${hours}:${minutes}:${seconds}.${milliseconds}`;
+	};
+
+	const decorationsForRecord = (record: UiLogRecord): CachedRecordDecorations => {
+		const sourceLabel = resolveSourceLabel(record);
+		const sourceFilterText = sourceLabel.toLowerCase();
+		const tagFilterText = record.tag.toLowerCase();
+		const contentFilterText = record.message.toLowerCase();
+
+		const cached = recordDecorationsCache.get(record.id);
+		if (
+			cached &&
+			cached.timestampMs === record.timestamp_ms &&
+			cached.sourceFilterText === sourceFilterText &&
+			cached.tagFilterText === tagFilterText &&
+			cached.contentFilterText === contentFilterText
+		) {
+			return cached;
 		}
 
-		const persistedState = readPanelPersistedState<LoggerPersistedState>(params);
-		const listScrollTop = normalizeScrollTop(persistedState.listScrollTop);
-		if (listScrollTop === undefined) {
-			listRestoreRaf = null;
+		const next: CachedRecordDecorations = {
+			timestampMs: record.timestamp_ms,
+			sourceLabel,
+			sourceFilterText,
+			tagFilterText,
+			contentFilterText,
+			formattedTime: formatTimestamp(record.timestamp_ms)
+		};
+		recordDecorationsCache.set(record.id, next);
+		return next;
+	};
+
+	const makeEntry = (record: UiLogRecord, key: string, repeatCount: number): LoggerEntry => {
+		const decorations = decorationsForRecord(record);
+		return {
+			key,
+			record,
+			sourceLabel: decorations.sourceLabel,
+			sourceFilterText: decorations.sourceFilterText,
+			tagFilterText: decorations.tagFilterText,
+			contentFilterText: decorations.contentFilterText,
+			formattedTime: decorations.formattedTime,
+			repeatCount
+		};
+	};
+
+	$effect(() => {
+		if (session !== lastSessionRef) {
+			lastSessionRef = session;
+			sourceLabelCache.clear();
+			recordDecorationsCache.clear();
+		}
+	});
+
+	$effect(() => {
+		if (records.length === 0) {
+			recordDecorationsCache.clear();
 			return;
 		}
 
-		listRestoreRaf = requestAnimationFrame(() => {
-			listRestoreRaf = null;
-			if (!loggerList) {
+		const oldestRetainedId = records[0].id;
+		for (const cachedId of recordDecorationsCache.keys()) {
+			if (cachedId >= oldestRetainedId) {
+				break;
+			}
+			recordDecorationsCache.delete(cachedId);
+		}
+	});
+
+	let displayedEntries = $derived.by<LoggerEntry[]>(() => {
+		const renderLimit = effectiveRenderLimit;
+		if (collapseDuplicates) {
+			const entries: LoggerEntry[] = [];
+			const startIndex = Math.max(0, records.length - renderLimit);
+			for (let recordIndex = startIndex; recordIndex < records.length; recordIndex += 1) {
+				const record = records[recordIndex];
+				entries.push(makeEntry(record, `r:${record.id}`, repeatCountForRecord(record)));
+			}
+			return entries;
+		}
+
+		let remaining = renderLimit;
+		const reversedEntries: LoggerEntry[] = [];
+
+		for (let recordIndex = records.length - 1; recordIndex >= 0; recordIndex -= 1) {
+			if (remaining <= 0) {
+				break;
+			}
+
+			const record = records[recordIndex];
+			const repeatCount = repeatCountForRecord(record);
+			const takeCount = Math.min(remaining, repeatCount);
+
+			for (let offset = 0; offset < takeCount; offset += 1) {
+				const occurrenceIndex = repeatCount - 1 - offset;
+				reversedEntries.push(makeEntry(record, `r:${record.id}:${occurrenceIndex}`, 1));
+			}
+
+			remaining -= takeCount;
+		}
+
+		reversedEntries.reverse();
+		return reversedEntries;
+	});
+
+	let filteredEntries = $derived.by<LoggerEntry[]>(() => {
+		if (!isFiltered) {
+			return displayedEntries;
+		}
+
+		return displayedEntries.filter((entry) => {
+			if (normalizedSourceFilter.length > 0 && !entry.sourceFilterText.includes(normalizedSourceFilter)) {
+				return false;
+			}
+			if (normalizedTagFilter.length > 0 && !entry.tagFilterText.includes(normalizedTagFilter)) {
+				return false;
+			}
+			if (
+				normalizedContentFilter.length > 0 &&
+				!entry.contentFilterText.includes(normalizedContentFilter)
+			) {
+				return false;
+			}
+			return true;
+		});
+	});
+
+	let renderedEntries = $derived(filteredEntries);
+
+	const withSuppressedScroll = (operation: () => void): void => {
+		suppressedScrollEvents += 1;
+		operation();
+		requestAnimationFrame(() => {
+			suppressedScrollEvents = Math.max(0, suppressedScrollEvents - 1);
+		});
+	};
+
+	const nowMs = (): number => {
+		if (typeof performance !== 'undefined' && typeof performance.now === 'function') {
+			return performance.now();
+		}
+		return Date.now();
+	};
+
+	const markUserScrollIntent = (): void => {
+		userScrollIntentUntilMs = nowMs() + 350;
+	};
+
+	const hasRecentUserScrollIntent = (): boolean => nowMs() <= userScrollIntentUntilMs;
+
+	const trackUserScrollIntent = (element: HTMLElement) => {
+		const onWheel = () => markUserScrollIntent();
+		const onPointerDown = () => markUserScrollIntent();
+		const onTouchStart = () => markUserScrollIntent();
+
+		element.addEventListener('wheel', onWheel, { passive: true });
+		element.addEventListener('pointerdown', onPointerDown);
+		element.addEventListener('touchstart', onTouchStart, { passive: true });
+
+		return {
+			destroy() {
+				element.removeEventListener('wheel', onWheel);
+				element.removeEventListener('pointerdown', onPointerDown);
+				element.removeEventListener('touchstart', onTouchStart);
+			}
+		};
+	};
+
+	const isListAtBottom = (): boolean => {
+		if (!loggerList) {
+			return true;
+		}
+		const maxScrollTop = loggerList.scrollHeight - loggerList.clientHeight;
+		if (maxScrollTop <= 0) {
+			return true;
+		}
+		return maxScrollTop - loggerList.scrollTop <= LIST_BOTTOM_EPSILON_PX;
+	};
+
+	const scrollToBottom = (): void => {
+		if (!loggerList) {
+			return;
+		}
+		withSuppressedScroll(() => {
+			loggerList.scrollTop = loggerList.scrollHeight;
+		});
+	};
+
+	const findRecordElement = (entryKey: string): HTMLElement | null => {
+		if (!loggerList) {
+			return null;
+		}
+		return loggerList.querySelector<HTMLElement>(`[data-record-key="${entryKey}"]`);
+	};
+
+	const scrollFocusedRecordIntoView = (): void => {
+		if (!focusedRecordKey) {
+			return;
+		}
+		const focusedElement = findRecordElement(focusedRecordKey);
+		if (!focusedElement) {
+			return;
+		}
+		withSuppressedScroll(() => {
+			focusedElement.scrollIntoView({ block: 'nearest' });
+		});
+	};
+
+	const syncViewport = (): void => {
+		if (!loggerList) {
+			return;
+		}
+
+		if (focusedRecordKey) {
+			const focusedRecordStillVisible = filteredEntries.some(
+				(entry) => entry.key === focusedRecordKey
+			);
+			if (!focusedRecordStillVisible) {
+				focusedRecordKey = null;
+				followLatest = true;
+				scrollToBottom();
 				return;
 			}
-			loggerList.scrollTop = listScrollTop;
+
+			scrollFocusedRecordIntoView();
+			return;
+		}
+
+		if (followLatest) {
+			scrollToBottom();
+		}
+	};
+
+	const scheduleViewportSync = (): void => {
+		if (viewportSyncRaf !== null) {
+			cancelAnimationFrame(viewportSyncRaf);
+		}
+		viewportSyncRaf = requestAnimationFrame(() => {
+			viewportSyncRaf = null;
+			syncViewport();
 		});
 	};
 
@@ -94,60 +389,124 @@
 		}
 	});
 
-	const selectOrigin = (origin: NodeId | undefined): void => {
-		if (origin === undefined || origin === null) {
+	$effect(() => {
+		const normalized = normalizeLogUiUpdateHz(logUiUpdateHz);
+		if (desiredLogUiUpdateHz !== normalized) {
+			desiredLogUiUpdateHz = normalized;
+		}
+	});
+
+	$effect(() => {
+		displayedEntries;
+		filteredEntries;
+		focusedRecordKey;
+		followLatest;
+		scheduleViewportSync();
+	});
+
+	const selectOrigin = (event: MouseEvent, origin: NodeId | undefined, entryKey: string): void => {
+		event.stopPropagation();
+		focusedRecordKey = entryKey;
+		followLatest = false;
+		if (origin !== undefined) {
+			session?.selectNode(origin);
+		}
+		scheduleViewportSync();
+	};
+
+	const focusRecord = (entryKey: string): void => {
+		focusedRecordKey = entryKey;
+		followLatest = false;
+		scheduleViewportSync();
+	};
+
+	const handleRecordKeydown = (event: KeyboardEvent, entryKey: string): void => {
+		if (event.key !== 'Enter' && event.key !== ' ') {
 			return;
 		}
-		session?.selectNode(origin);
+		event.preventDefault();
+		focusRecord(entryKey);
+	};
+
+	const resyncToLatest = (): void => {
+		focusedRecordKey = null;
+		followLatest = true;
+		scheduleViewportSync();
+	};
+
+	const clearFilters = (): void => {
+		sourceFilter = '';
+		tagFilter = '';
+		contentFilter = '';
+	};
+
+	const toggleCollapse = (): void => {
+		collapseDuplicates = !collapseDuplicates;
 	};
 
 	const applyMaxEntries = (): void => {
-		void sendSetLogMaxEntriesIntent(desiredMaxEntries);
+		const normalized = Math.max(1, Math.round(Number(desiredMaxEntries)));
+		if (!Number.isFinite(normalized)) {
+			desiredMaxEntries = maxEntries > 0 ? maxEntries : 1;
+			return;
+		}
+		desiredMaxEntries = normalized;
+		void sendSetLogMaxEntriesIntent(normalized);
+	};
+
+	const handleMaxEntriesKeydown = (event: KeyboardEvent): void => {
+		if (event.key !== 'Enter') {
+			return;
+		}
+		event.preventDefault();
+		applyMaxEntries();
+	};
+
+	const applyLogUiUpdateHz = (): void => {
+		const normalized = normalizeLogUiUpdateHz(Number(desiredLogUiUpdateHz));
+		desiredLogUiUpdateHz = normalized;
+		session?.setLogUiUpdateHz(normalized);
+	};
+
+	const handleLogUiUpdateHzKeydown = (event: KeyboardEvent): void => {
+		if (event.key !== 'Enter') {
+			return;
+		}
+		event.preventDefault();
+		applyLogUiUpdateHz();
 	};
 
 	const clearLogs = (): void => {
+		focusedRecordKey = null;
+		followLatest = true;
 		void sendClearLogsIntent();
 	};
 
-	const persistListScroll = (): void => {
-		if (listPersistRaf !== null) {
+	const handleListScroll = (): void => {
+		if (suppressedScrollEvents > 0) {
 			return;
 		}
 
-		listPersistRaf = requestAnimationFrame(() => {
-			listPersistRaf = null;
-			if (!loggerList) {
+		if (!isListAtBottom()) {
+			if (followLatest && focusedRecordKey === null && !hasRecentUserScrollIntent()) {
+				scheduleViewportSync();
 				return;
 			}
-			writePanelPersistedState(panelApi, {
-				listScrollTop: loggerList.scrollTop
-			});
-		});
-	};
+			if (focusedRecordKey === null) {
+				followLatest = false;
+			}
+			return;
+		}
 
-	const formatTimestamp = (timestampMs: number): string => {
-		const date = new Date(timestampMs);
-		return date.toLocaleTimeString([], {
-			hour12: false,
-			hour: '2-digit',
-			minute: '2-digit',
-			second: '2-digit'
-		});
+		focusedRecordKey = null;
+		followLatest = true;
 	};
-
-	$effect(() => {
-		orderedRecords.length;
-		restoreListScroll(panel.params);
-	});
 
 	onMount(() => {
-		restoreListScroll(panel.params);
+		scheduleViewportSync();
 		return () => {
-			if (listRestoreRaf !== null) {
-				cancelAnimationFrame(listRestoreRaf);
-			}
-			if (listPersistRaf !== null) {
-				cancelAnimationFrame(listPersistRaf);
+			if (viewportSyncRaf !== null) {
+				cancelAnimationFrame(viewportSyncRaf);
 			}
 		};
 	});
@@ -155,43 +514,122 @@
 
 <section class="logger-panel">
 	<header class="logger-toolbar">
-		<div class="logger-stats">
-			<strong>{records.length}</strong>
-			<span>records</span>
+		<div class={`logger-stats${isFiltered ? ' is-filtered' : ''}`}>
+			<strong>{filteredEntries.length}</strong>
+			<span>/ {displayedEntries.length}</span>
+			{#if collapseDuplicates}
+				<span class="raw-count">({records.length})</span>
+			{/if}
 		</div>
+
 		<label class="max-input">
-			<span>Max</span>
+			<span>max</span>
 			<input
 				type="number"
 				min="1"
 				step="1"
 				bind:value={desiredMaxEntries}
 				onchange={applyMaxEntries}
+				onkeydown={handleMaxEntriesKeydown}
 			/>
 		</label>
-		<button type="button" class="clear-button" onclick={clearLogs}>Clear</button>
+		<label class="hz-input" title="Logger UI update rate limit">
+			<span>hz</span>
+			<input
+				type="number"
+				min={MIN_LOG_UI_UPDATE_HZ}
+				max={MAX_LOG_UI_UPDATE_HZ}
+				step="1"
+				bind:value={desiredLogUiUpdateHz}
+				onchange={applyLogUiUpdateHz}
+				onkeydown={handleLogUiUpdateHzKeydown}
+			/>
+		</label>
+
+		<input class="filter-input source" type="search" placeholder="source" bind:value={sourceFilter} />
+		<input class="filter-input tag" type="search" placeholder="tag" bind:value={tagFilter} />
+		<input
+			class="filter-input content"
+			type="search"
+			placeholder="content"
+			bind:value={contentFilter}
+		/>
+
+		<button
+			type="button"
+			class={`toolbar-button collapse${collapseDuplicates ? ' is-active' : ''}`}
+			onclick={toggleCollapse}
+		>
+			Collapse
+		</button>
+		<button type="button" class="toolbar-button" onclick={clearFilters} disabled={!isFiltered}>
+			Clear filters
+		</button>
+		<button
+			type="button"
+			class={`toolbar-button live${followLatest && focusedRecordKey === null ? '' : ' is-active'}`}
+			onclick={resyncToLatest}
+			disabled={followLatest && focusedRecordKey === null}
+		>
+			Live
+		</button>
+		{#if isWindowedView}
+			<span class="windowed-indicator" title="Live mode renders only recent logs for performance">
+				tail {effectiveRenderLimit}
+			</span>
+		{/if}
+		<button type="button" class="toolbar-button clear-logs" onclick={clearLogs}>Clear logs</button>
 	</header>
 
-	<div class="logger-list" bind:this={loggerList} onscroll={persistListScroll}>
-		{#if orderedRecords.length === 0}
-			<div class="empty-state">No logs yet.</div>
+	<div
+		class={`logger-list${isFiltered ? ' is-filtered' : ''}${isWindowedView ? ' is-windowed' : ''}`}
+		bind:this={loggerList}
+		use:trackUserScrollIntent
+		onscroll={handleListScroll}
+	>
+		{#if filteredEntries.length === 0}
+			<div class="empty-state">
+				{#if records.length === 0}
+					No logs yet.
+				{:else if isFiltered}
+					No log matches the current filters.
+				{:else}
+					No logs yet.
+				{/if}
+			</div>
 		{:else}
-			{#each recordEntries as entry (entry.key)}
+			{#each renderedEntries as entry (entry.key)}
 				{@const record = entry.record}
-				{@const nodeLabel = session?.graph.state.nodesById.get(record.origin ?? -1)?.meta.label ?? 'unknown node'}
-				<article class={`record level-${record.level}`}>
-					<div class="record-head">
-						<span class="time">{formatTimestamp(record.timestamp_ms)}</span>
-						<span class="level">{record.level}</span>
-						<span class="tag">{record.tag}</span>
-						{#if record.origin !== undefined}
-							<button type="button" class="origin" onclick={() => selectOrigin(record.origin)}>
-								{nodeLabel}
-							</button>
-						{/if}
-					</div>
+				<div
+					class={`record level-${record.level}${focusedRecordKey === entry.key ? ' is-focused' : ''}`}
+					role="button"
+					tabindex="0"
+					data-record-key={entry.key}
+					onclick={() => focusRecord(entry.key)}
+					onkeydown={(event) => handleRecordKeydown(event, entry.key)}
+				>
+					<time class="time">{entry.formattedTime}</time>
+					<span class="level">{record.level}</span>
+					<span class="tag">{record.tag}</span>
+					{#if entry.repeatCount > 1}
+						<span class="repeat-count" title={`${entry.repeatCount} repeated logs`}>
+							x{entry.repeatCount}
+						</span>
+					{/if}
+					{#if record.origin !== undefined}
+						<button
+							type="button"
+							class="origin"
+							onclick={(event) => selectOrigin(event, record.origin, entry.key)}
+							title="Select source node"
+						>
+							{entry.sourceLabel}
+						</button>
+					{:else}
+						<span class="origin-label">{entry.sourceLabel}</span>
+					{/if}
 					<p class="message">{record.message}</p>
-				</article>
+				</div>
 			{/each}
 		{/if}
 	</div>
@@ -207,117 +645,257 @@
 
 	.logger-toolbar {
 		display: flex;
+		flex-wrap: wrap;
 		align-items: center;
-		gap: 0.5rem;
-		padding: 0.5rem;
+		gap: 0.3rem;
+		padding: 0.3rem 0.4rem;
 		border-bottom: 0.0625rem solid color-mix(in srgb, var(--gc-color-panel-outline) 85%, transparent);
+		background: color-mix(in srgb, var(--gc-color-panel-row) 70%, black);
 	}
 
 	.logger-stats {
 		display: inline-flex;
 		align-items: baseline;
-		gap: 0.25rem;
-		font-size: 0.75rem;
+		gap: 0.2rem;
+		min-inline-size: 4.2rem;
+		font-size: 0.7rem;
 	}
 
-	.max-input {
+	.logger-stats strong {
+		font-size: 0.82rem;
+	}
+
+	.logger-stats.is-filtered {
+		color: color-mix(in srgb, var(--gc-color-focus) 80%, white 20%);
+	}
+
+	.raw-count {
+		opacity: 0.7;
+	}
+
+	.max-input,
+	.hz-input {
 		display: inline-flex;
 		align-items: center;
-		gap: 0.3rem;
+		gap: 0.2rem;
+		font-size: 0.64rem;
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+	}
+
+	.max-input input,
+	.filter-input {
+		block-size: 1.7rem;
+		padding: 0.1rem 0.35rem;
+		border: 0.0625rem solid var(--gc-color-panel-outline);
+		border-radius: 0.25rem;
+		background: color-mix(in srgb, var(--gc-color-panel-row) 86%, black);
+		color: inherit;
 		font-size: 0.7rem;
 	}
 
 	.max-input input {
-		inline-size: 5rem;
-		padding: 0.2rem 0.3rem;
-		border: 0.0625rem solid var(--gc-color-panel-outline);
-		border-radius: 0.3rem;
-		background: color-mix(in srgb, var(--gc-color-panel-row) 80%, black);
-		color: inherit;
+		inline-size: 4.5rem;
 	}
 
-	.clear-button {
-		margin-inline-start: auto;
-		padding: 0.25rem 0.5rem;
-		border: 0.0625rem solid color-mix(in srgb, var(--gc-color-focus) 45%, transparent);
-		border-radius: 0.35rem;
-		background: color-mix(in srgb, var(--gc-color-focus-muted) 72%, black);
+	.hz-input input {
+		inline-size: 4.2rem;
+	}
+
+	.filter-input {
+		min-inline-size: 5.2rem;
+		flex: 1 1 8rem;
+	}
+
+	.filter-input.source {
+		flex-basis: 7rem;
+	}
+
+	.filter-input.tag {
+		flex-basis: 6rem;
+	}
+
+	.filter-input.content {
+		flex-basis: 10rem;
+	}
+
+	.toolbar-button {
+		block-size: 1.7rem;
+		padding: 0.1rem 0.45rem;
+		border: 0.0625rem solid color-mix(in srgb, var(--gc-color-panel-outline) 80%, transparent);
+		border-radius: 0.25rem;
+		background: color-mix(in srgb, var(--gc-color-panel-row) 82%, black);
 		color: inherit;
+		font-size: 0.66rem;
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
 		cursor: pointer;
+	}
+
+	.toolbar-button:disabled {
+		opacity: 0.5;
+		cursor: default;
+	}
+
+	.toolbar-button.collapse.is-active,
+	.toolbar-button.live.is-active {
+		border-color: color-mix(in srgb, var(--gc-color-focus) 60%, transparent);
+		background: color-mix(in srgb, var(--gc-color-focus-muted) 70%, black);
+	}
+
+	.toolbar-button.clear-logs {
+		border-color: color-mix(in srgb, #bf4d43 55%, transparent);
+	}
+
+	.windowed-indicator {
+		padding: 0 0.32rem;
+		border: 0.0625rem solid color-mix(in srgb, #cf9b37 45%, transparent);
+		border-radius: 0.25rem;
+		background: color-mix(in srgb, #cf9b37 22%, transparent);
+		font-size: 0.64rem;
+		line-height: 1.6;
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+		white-space: nowrap;
 	}
 
 	.logger-list {
 		flex: 1;
 		min-block-size: 0;
 		overflow: auto;
-		padding: 0.5rem;
+		padding: 0.18rem 0.35rem 0.4rem;
 		display: flex;
 		flex-direction: column;
-		gap: 0.4rem;
+		font-family: ui-monospace, 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace;
+		font-variant-ligatures: none;
+	}
+
+	.logger-list.is-filtered {
+		box-shadow: inset 0 0 0 0.0625rem color-mix(in srgb, var(--gc-color-focus) 45%, transparent);
+		background: color-mix(in srgb, var(--gc-color-focus-muted) 30%, transparent);
+	}
+
+	.logger-list.is-windowed {
+		outline: 0.0625rem dashed color-mix(in srgb, #cf9b37 40%, transparent);
+		outline-offset: -0.0625rem;
 	}
 
 	.empty-state {
+		padding: 0.6rem 0.4rem;
 		opacity: 0.7;
-		font-size: 0.78rem;
+		font-size: 0.76rem;
 	}
 
 	.record {
-		padding: 0.4rem 0.5rem;
-		border: 0.0625rem solid color-mix(in srgb, var(--gc-color-panel-outline) 70%, transparent);
-		border-radius: 0.35rem;
-		background: color-mix(in srgb, var(--gc-color-panel-row) 80%, black);
 		display: flex;
-		flex-direction: column;
-		gap: 0.2rem;
+		align-items: flex-start;
+		gap: 0.35rem;
+		padding: 0.16rem 0.24rem;
+		border-radius: 0.22rem;
+		border-bottom: 0.0625rem solid color-mix(in srgb, var(--gc-color-panel-outline) 65%, transparent);
+		contain: layout style paint;
+		content-visibility: auto;
+		contain-intrinsic-size: 1.4rem;
 	}
 
-	.record-head {
-		display: flex;
-		align-items: center;
-		gap: 0.4rem;
+	.record:hover {
+		background: color-mix(in srgb, var(--gc-color-panel-row) 65%, black);
+	}
+
+	.record:focus-visible {
+		outline: 0.0625rem solid color-mix(in srgb, var(--gc-color-focus) 65%, transparent);
+	}
+
+	.record.is-focused {
+		outline: 0.0625rem solid color-mix(in srgb, var(--gc-color-focus) 70%, transparent);
+		background: color-mix(in srgb, var(--gc-color-focus-muted) 45%, black);
+	}
+
+	.time,
+	.level,
+	.tag,
+	.repeat-count,
+	.origin,
+	.origin-label {
+		flex: 0 0 auto;
 		font-size: 0.66rem;
-		text-transform: uppercase;
-		letter-spacing: 0.02em;
+		line-height: 1.35;
 	}
 
 	.time {
-		opacity: 0.75;
+		min-inline-size: 7.6em;
+		opacity: 0.72;
 	}
 
 	.level {
-		font-weight: 600;
+		min-inline-size: 4.8em;
+		text-transform: uppercase;
+		font-weight: 650;
+	}
+
+	.tag,
+	.repeat-count {
+		padding: 0 0.22rem;
+		border-radius: 0.22rem;
+		background: color-mix(in srgb, var(--gc-color-panel-alt) 84%, black);
+		white-space: nowrap;
 	}
 
 	.tag {
-		padding: 0.05rem 0.3rem;
-		border-radius: 0.3rem;
-		background: color-mix(in srgb, var(--gc-color-panel-alt) 85%, black);
+		max-inline-size: 14em;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+
+	.repeat-count {
+		color: color-mix(in srgb, var(--gc-color-focus) 85%, white 15%);
+	}
+
+	.origin,
+	.origin-label {
+		max-inline-size: 18em;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+		text-align: start;
 	}
 
 	.origin {
-		margin-inline-start: auto;
+		padding: 0;
 		border: 0;
 		background: transparent;
-		color: color-mix(in srgb, var(--gc-color-focus) 85%, white 15%);
-		font-size: 0.66rem;
+		color: color-mix(in srgb, var(--gc-color-focus) 80%, white 20%);
+		cursor: pointer;
+	}
+
+	.origin-label {
+		opacity: 0.78;
 	}
 
 	.message {
 		margin: 0;
-		font-size: 0.78rem;
-		line-height: 1.3;
+		flex: 1 1 auto;
+		min-inline-size: 0;
+		font-size: 0.72rem;
+		line-height: 1.35;
+		overflow-wrap: anywhere;
 		word-break: break-word;
+		white-space: pre-wrap;
 	}
 
-	.level-info {
-		border-inline-start: 0.2rem solid color-mix(in srgb, #3ca36b 75%, white 25%);
+	.level-info .level {
+		color: color-mix(in srgb, #3ca36b 85%, white 15%);
 	}
 
-	.level-warning {
-		border-inline-start: 0.2rem solid color-mix(in srgb, #cf9b37 75%, white 25%);
+	.level-success .level {
+		color: color-mix(in srgb, #43c58e 85%, white 15%);
 	}
 
-	.level-error {
-		border-inline-start: 0.2rem solid color-mix(in srgb, #bf4d43 75%, white 25%);
+	.level-warning .level {
+		color: color-mix(in srgb, #cf9b37 85%, white 15%);
+	}
+
+	.level-error .level {
+		color: color-mix(in srgb, #bf4d43 85%, white 15%);
 	}
 </style>

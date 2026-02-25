@@ -7,6 +7,7 @@ import type {
 	UiClient,
 	UiEditIntent,
 	UiEventBatch,
+	UiEventDto,
 	UiLogRecord,
 	UiHistoryState,
 	UiSubscriptionScope
@@ -44,6 +45,7 @@ export interface WorkbenchSession {
 	readonly client: UiClient;
 	readonly logRecords: UiLogRecord[];
 	readonly logMaxEntries: number;
+	readonly logUiUpdateHz: number;
 	readonly selectedNodesIds: NodeId[];
 	readonly selectedNodeId: NodeId | null;
 	readonly status: string;
@@ -62,6 +64,7 @@ export interface WorkbenchSession {
 	selectNodes(nodeIds: NodeId[], selectionMode?: SelectionMode): void;
 	clearSelection(): void;
 	sendIntent(intent: UiEditIntent): Promise<void>;
+	setLogUiUpdateHz(hz: number): void;
 	undo(): Promise<void>;
 	redo(): Promise<void>;
 	mount(): () => void;
@@ -69,6 +72,21 @@ export interface WorkbenchSession {
 
 const DEFAULT_RETRY_MS = 1000;
 const DEFAULT_WARNING_ID = '';
+const DEFAULT_LOG_UI_UPDATE_HZ = 60;
+const MIN_LOG_UI_UPDATE_HZ = 15;
+const MAX_LOG_UI_UPDATE_HZ = 240;
+
+type PendingLogMutation =
+	| { kind: 'clear' }
+	| { kind: 'replaceTail'; record: UiLogRecord }
+	| { kind: 'append'; records: UiLogRecord[] };
+
+const normalizeLogUiUpdateHz = (value: number): number => {
+	if (!Number.isFinite(value)) {
+		return DEFAULT_LOG_UI_UPDATE_HZ;
+	}
+	return Math.min(MAX_LOG_UI_UPDATE_HZ, Math.max(MIN_LOG_UI_UPDATE_HZ, Math.round(value)));
+};
 
 const formatEventTime = (value: { tick: number; micro: number; seq: number }): string =>
 	`${value.tick}:${value.micro}:${value.seq}`;
@@ -98,11 +116,12 @@ const asUiLogRecord = (payload: unknown): UiLogRecord | null => {
 	const tag = payload.tag;
 	const message = payload.message;
 	const originRaw = payload.origin;
+	const repeatCountRaw = payload.repeat_count;
 
 	if (
 		!Number.isFinite(id) ||
 		!Number.isFinite(timestampMs) ||
-		(level !== 'info' && level !== 'warning' && level !== 'error') ||
+		(level !== 'success' && level !== 'info' && level !== 'warning' && level !== 'error') ||
 		typeof tag !== 'string' ||
 		typeof message !== 'string'
 	) {
@@ -110,12 +129,17 @@ const asUiLogRecord = (payload: unknown): UiLogRecord | null => {
 	}
 
 	const origin = typeof originRaw === 'number' ? originRaw : undefined;
+	const repeatCount =
+		typeof repeatCountRaw === 'number' && Number.isFinite(repeatCountRaw)
+			? Math.max(1, Math.floor(repeatCountRaw))
+			: undefined;
 	return {
 		id,
 		timestamp_ms: timestampMs,
 		level,
 		tag,
 		message,
+		repeat_count: repeatCount,
 		origin
 	};
 };
@@ -176,6 +200,9 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 	let canRedo = $state(false);
 	let logRecords = $state<UiLogRecord[]>([]);
 	let logMaxEntries = $state(0);
+	let logUiUpdateHz = $state(DEFAULT_LOG_UI_UPDATE_HZ);
+	const pendingLogMutations: PendingLogMutation[] = [];
+	let logFlushTimer: ReturnType<typeof setTimeout> | null = null;
 
 	let mountedCleanup: (() => void) | null = null;
 	let resyncInFlight = false;
@@ -453,10 +480,122 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 	};
 
 	const trimLogRecords = (): void => {
-		if (logMaxEntries <= 0 || logRecords.length <= logMaxEntries) {
+		if (logMaxEntries <= 0) {
 			return;
 		}
-		logRecords = logRecords.slice(logRecords.length - logMaxEntries);
+		const overflow = logRecords.length - logMaxEntries;
+		if (overflow <= 0) {
+			return;
+		}
+		logRecords.splice(0, overflow);
+	};
+
+	const clearPendingLogFlush = (): void => {
+		if (logFlushTimer !== null) {
+			clearTimeout(logFlushTimer);
+			logFlushTimer = null;
+		}
+	};
+
+	const resetPendingLogMutations = (): void => {
+		pendingLogMutations.length = 0;
+		clearPendingLogFlush();
+	};
+
+	const flushPendingLogMutations = (): void => {
+		logFlushTimer = null;
+		if (pendingLogMutations.length === 0) {
+			return;
+		}
+
+		for (const mutation of pendingLogMutations) {
+			if (mutation.kind === 'clear') {
+				if (logRecords.length > 0) {
+					logRecords = [];
+				}
+				continue;
+			}
+
+			if (mutation.kind === 'replaceTail') {
+				if (logRecords.length > 0) {
+					logRecords[logRecords.length - 1] = mutation.record;
+				}
+				continue;
+			}
+
+			if (mutation.records.length > 0) {
+				logRecords.push(...mutation.records);
+			}
+		}
+
+		pendingLogMutations.length = 0;
+		trimLogRecords();
+	};
+
+	const schedulePendingLogFlush = (): void => {
+		if (logFlushTimer !== null) {
+			return;
+		}
+		const intervalMs = Math.max(1, Math.round(1000 / logUiUpdateHz));
+		logFlushTimer = setTimeout(() => {
+			flushPendingLogMutations();
+		}, intervalMs);
+	};
+
+	const queuePendingLogMutations = (
+		shouldClearLogs: boolean,
+		replaceTailRecord: UiLogRecord | null,
+		pendingLogRecords: UiLogRecord[]
+	): void => {
+		if (shouldClearLogs) {
+			pendingLogMutations.length = 0;
+			pendingLogMutations.push({ kind: 'clear' });
+		} else if (replaceTailRecord) {
+			pendingLogMutations.push({ kind: 'replaceTail', record: replaceTailRecord });
+		}
+
+		if (pendingLogRecords.length > 0) {
+			pendingLogMutations.push({
+				kind: 'append',
+				records: [...pendingLogRecords]
+			});
+		}
+
+		if (pendingLogMutations.length > 0) {
+			schedulePendingLogFlush();
+		}
+	};
+
+	const pendingLogTailId = (): number | undefined => {
+		let tailId = logRecords[logRecords.length - 1]?.id;
+		for (const mutation of pendingLogMutations) {
+			if (mutation.kind === 'clear') {
+				tailId = undefined;
+				continue;
+			}
+			if (mutation.kind === 'replaceTail') {
+				if (tailId !== undefined) {
+					tailId = mutation.record.id;
+				}
+				continue;
+			}
+			if (mutation.records.length > 0) {
+				tailId = mutation.records[mutation.records.length - 1]?.id;
+			}
+		}
+		return tailId;
+	};
+
+	const setLogUiUpdateHz = (hz: number): void => {
+		const normalized = normalizeLogUiUpdateHz(hz);
+		if (normalized === logUiUpdateHz) {
+			return;
+		}
+		logUiUpdateHz = normalized;
+		if (pendingLogMutations.length > 0) {
+			clearPendingLogFlush();
+			schedulePendingLogFlush();
+		}
 	};
 
 	
@@ -551,6 +690,7 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 			restorePersistedSelection();
 			reconcileSelection();
 			applyHistoryState(snapshot.history);
+			resetPendingLogMutations();
 			logMaxEntries = snapshot.logger.max_entries;
 			logRecords = [...snapshot.logger.records];
 			status = successStatus;
@@ -563,10 +703,15 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 	};
 
 	const applyBatch = (batch: UiEventBatch): void => {
-		const warningDataChanged = batchAffectsWarnings(batch);
+		const graphEvents: UiEventDto[] = [];
+		const pendingLogRecords: UiLogRecord[] = [];
+		let shouldClearLogs = false;
+		let nextLogMaxEntries: number | null = null;
+		let replaceTailRecord: UiLogRecord | null = null;
 
 		for (const event of batch.events) {
 			if (event.kind.kind !== 'custom') {
+				graphEvents.push(event);
 				continue;
 			}
 
@@ -575,31 +720,68 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 				if (!record) {
 					continue;
 				}
-				logRecords = [...logRecords, record];
-				trimLogRecords();
+				const pendingTail = pendingLogRecords[pendingLogRecords.length - 1];
+				if (pendingTail && pendingTail.id === record.id) {
+					pendingLogRecords[pendingLogRecords.length - 1] = record;
+					continue;
+				}
+
+				if (!shouldClearLogs && pendingLogRecords.length === 0) {
+					const currentTailId = replaceTailRecord?.id ?? pendingLogTailId();
+					if (currentTailId !== undefined && currentTailId === record.id) {
+						replaceTailRecord = record;
+						continue;
+					}
+				}
+
+				pendingLogRecords.push(record);
 				continue;
 			}
 
 			if (event.kind.topic === '__logger.cleared') {
-				logRecords = [];
+				shouldClearLogs = true;
+				pendingLogRecords.length = 0;
+				replaceTailRecord = null;
 				continue;
 			}
 
 			if (event.kind.topic === '__logger.max_entries') {
 				if (isRecord(event.kind.payload) && Number.isFinite(Number(event.kind.payload.max_entries))) {
-					logMaxEntries = Math.max(1, Math.round(Number(event.kind.payload.max_entries)));
-					trimLogRecords();
+					nextLogMaxEntries = Math.max(1, Math.round(Number(event.kind.payload.max_entries)));
 				}
+				continue;
 			}
+
+			graphEvents.push(event);
 		}
 
-		graph.applyBatch(batch);
-		if (warningDataChanged) {
-			invalidateWarningCaches();
+		if (nextLogMaxEntries !== null) {
+			logMaxEntries = nextLogMaxEntries;
+			trimLogRecords();
 		}
-		reconcileSelection();
-		if (graph.state.requiresResync) {
-			void resyncSnapshot('Snapshot resynced.');
+
+		if (shouldClearLogs || replaceTailRecord !== null || pendingLogRecords.length > 0) {
+			queuePendingLogMutations(shouldClearLogs, replaceTailRecord, pendingLogRecords);
+		}
+
+		if (graphEvents.length > 0) {
+			const warningDataChanged = batchAffectsWarnings({
+				from: batch.from,
+				to: batch.to,
+				events: graphEvents
+			});
+			graph.applyBatch({
+				from: batch.from,
+				to: graphEvents[graphEvents.length - 1]?.time ?? batch.to,
+				events: graphEvents
+			});
+			if (warningDataChanged) {
+				invalidateWarningCaches();
+			}
+			reconcileSelection();
+			if (graph.state.requiresResync) {
+				void resyncSnapshot('Snapshot resynced.');
+			}
 		}
 	};
 
@@ -713,6 +895,7 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 				restorePersistedSelection();
 				reconcileSelection();
 				applyHistoryState(snapshot.history);
+				resetPendingLogMutations();
 				logMaxEntries = snapshot.logger.max_entries;
 				logRecords = [...snapshot.logger.records];
 				status = 'Connected.';
@@ -770,6 +953,7 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 			unsubscribe();
 			graph.reset();
 			invalidateWarningCaches();
+			resetPendingLogMutations();
 			selectedNodeIds = [];
 			logRecords = [];
 			logMaxEntries = 0;
@@ -791,6 +975,9 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 		},
 		get logMaxEntries(): number {
 			return logMaxEntries;
+		},
+		get logUiUpdateHz(): number {
+			return logUiUpdateHz;
 		},
 		get selectedNodesIds(): NodeId[] {
 			return selectedNodeIds;
@@ -822,6 +1009,7 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 		selectNodes,
 		clearSelection,
 		sendIntent,
+		setLogUiUpdateHz,
 		undo,
 		redo,
 		mount

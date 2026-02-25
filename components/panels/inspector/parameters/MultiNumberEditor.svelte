@@ -176,6 +176,7 @@
 	.slider-wrapper {
 		display: flex;
 		flex: 1 1 auto;
+		justify-content: right;
 		min-width: 0;
 		height: 70%;
 	}

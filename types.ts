@@ -3,7 +3,7 @@ export type NodeId = number;
 export type ParamEventBehaviour = 'Coalesce' | 'Append';
 export type ParamConstraintPolicy = 'ClampAdapt' | 'Reject';
 export type UiAckStatus = 'applied' | 'staged' | 'rejected';
-export type UiLogLevel = 'info' | 'warning' | 'error';
+export type UiLogLevel = 'info' | 'warning' | 'error' | 'success';
 
 export type ParamValue =
 	| { kind: 'trigger' }
@@ -179,6 +179,7 @@ export interface UiLogRecord {
 	level: UiLogLevel;
 	tag: string;
 	message: string;
+	repeat_count?: number;
 	origin?: NodeId;
 }
 
