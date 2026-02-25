@@ -3,10 +3,7 @@
 	import type { NodeId, UiLogRecord } from '$lib/golden_ui/types';
 	import type { PanelProps, PanelState } from '../../../dockview/panel-types';
 	import { appState } from '../../../store/workbench.svelte';
-	import {
-		sendClearLogsIntent,
-		sendSetLogMaxEntriesIntent
-	} from '../../../store/ui-intents';
+	import { sendClearLogsIntent, sendSetLogMaxEntriesIntent } from '../../../store/ui-intents';
 
 	let { panelId, panelType, title, params }: PanelProps = $props();
 
@@ -43,9 +40,9 @@
 
 	const ENGINE_SOURCE_LABEL = 'engine';
 	const LIST_BOTTOM_EPSILON_PX = 6;
-	const LIVE_TAIL_RENDER_LIMIT = 320;
-	const DEFAULT_LOG_UI_UPDATE_HZ = 60;
-	const MIN_LOG_UI_UPDATE_HZ = 15;
+	const LIVE_TAIL_RENDER_LIMIT = 200;
+	const DEFAULT_LOG_UI_UPDATE_HZ = 1;
+	const MIN_LOG_UI_UPDATE_HZ = 1;
 	const MAX_LOG_UI_UPDATE_HZ = 240;
 
 	const normalizeSearchText = (value: string): string => value.trim().toLowerCase();
@@ -102,7 +99,9 @@
 		followLatest &&
 			focusedRecordKey === null &&
 			!isFiltered &&
-			(collapseDuplicates ? records.length > effectiveRenderLimit : rawEntryLimit > effectiveRenderLimit)
+			(collapseDuplicates
+				? records.length > effectiveRenderLimit
+				: rawEntryLimit > effectiveRenderLimit)
 	);
 
 	interface CachedRecordDecorations {
@@ -129,7 +128,7 @@
 		}
 
 		const label = session?.graph.state.nodesById.get(record.origin)?.meta.label;
-		const resolved = label ? `${label} (${record.origin})` : `node ${record.origin}`;
+		const resolved = label ? `${label}` : `node ${record.origin}`;
 		sourceLabelCache.set(record.origin, resolved);
 		return resolved;
 	};
@@ -251,7 +250,10 @@
 		}
 
 		return displayedEntries.filter((entry) => {
-			if (normalizedSourceFilter.length > 0 && !entry.sourceFilterText.includes(normalizedSourceFilter)) {
+			if (
+				normalizedSourceFilter.length > 0 &&
+				!entry.sourceFilterText.includes(normalizedSourceFilter)
+			) {
 				return false;
 			}
 			if (normalizedTagFilter.length > 0 && !entry.tagFilterText.includes(normalizedTagFilter)) {
@@ -391,9 +393,7 @@
 
 	$effect(() => {
 		const normalized = normalizeLogUiUpdateHz(logUiUpdateHz);
-		if (desiredLogUiUpdateHz !== normalized) {
-			desiredLogUiUpdateHz = normalized;
-		}
+		desiredLogUiUpdateHz = normalized;
 	});
 
 	$effect(() => {
@@ -530,8 +530,7 @@
 				step="1"
 				bind:value={desiredMaxEntries}
 				onchange={applyMaxEntries}
-				onkeydown={handleMaxEntriesKeydown}
-			/>
+				onkeydown={handleMaxEntriesKeydown} />
 		</label>
 		<label class="hz-input" title="Logger UI update rate limit">
 			<span>hz</span>
@@ -542,24 +541,25 @@
 				step="1"
 				bind:value={desiredLogUiUpdateHz}
 				onchange={applyLogUiUpdateHz}
-				onkeydown={handleLogUiUpdateHzKeydown}
-			/>
+				onkeydown={handleLogUiUpdateHzKeydown} />
 		</label>
 
-		<input class="filter-input source" type="search" placeholder="source" bind:value={sourceFilter} />
+		<input
+			class="filter-input source"
+			type="search"
+			placeholder="source"
+			bind:value={sourceFilter} />
 		<input class="filter-input tag" type="search" placeholder="tag" bind:value={tagFilter} />
 		<input
 			class="filter-input content"
 			type="search"
 			placeholder="content"
-			bind:value={contentFilter}
-		/>
+			bind:value={contentFilter} />
 
 		<button
 			type="button"
 			class={`toolbar-button collapse${collapseDuplicates ? ' is-active' : ''}`}
-			onclick={toggleCollapse}
-		>
+			onclick={toggleCollapse}>
 			Collapse
 		</button>
 		<button type="button" class="toolbar-button" onclick={clearFilters} disabled={!isFiltered}>
@@ -569,8 +569,7 @@
 			type="button"
 			class={`toolbar-button live${followLatest && focusedRecordKey === null ? '' : ' is-active'}`}
 			onclick={resyncToLatest}
-			disabled={followLatest && focusedRecordKey === null}
-		>
+			disabled={followLatest && focusedRecordKey === null}>
 			Live
 		</button>
 		{#if isWindowedView}
@@ -585,8 +584,7 @@
 		class={`logger-list${isFiltered ? ' is-filtered' : ''}${isWindowedView ? ' is-windowed' : ''}`}
 		bind:this={loggerList}
 		use:trackUserScrollIntent
-		onscroll={handleListScroll}
-	>
+		onscroll={handleListScroll}>
 		{#if filteredEntries.length === 0}
 			<div class="empty-state">
 				{#if records.length === 0}
@@ -606,29 +604,30 @@
 					tabindex="0"
 					data-record-key={entry.key}
 					onclick={() => focusRecord(entry.key)}
-					onkeydown={(event) => handleRecordKeydown(event, entry.key)}
-				>
+					onkeydown={(event) => handleRecordKeydown(event, entry.key)}>
 					<time class="time">{entry.formattedTime}</time>
-					<span class="level">{record.level}</span>
-					<span class="tag">{record.tag}</span>
-					{#if entry.repeatCount > 1}
-						<span class="repeat-count" title={`${entry.repeatCount} repeated logs`}>
-							x{entry.repeatCount}
-						</span>
-					{/if}
+					<!-- <span class="level">{record.level}</span> -->
+					<!-- <span class="tag">{record.tag}</span> -->
+
+					<p class="message">{record.message}</p>
+
 					{#if record.origin !== undefined}
 						<button
 							type="button"
 							class="origin"
 							onclick={(event) => selectOrigin(event, record.origin, entry.key)}
-							title="Select source node"
-						>
+							title="Select source node">
 							{entry.sourceLabel}
 						</button>
 					{:else}
 						<span class="origin-label">{entry.sourceLabel}</span>
 					{/if}
-					<p class="message">{record.message}</p>
+
+					{#if entry.repeatCount > 1}
+						<span class="repeat-count" title={`${entry.repeatCount} repeated logs`}>
+							x{entry.repeatCount}
+						</span>
+					{/if}
 				</div>
 			{/each}
 		{/if}
@@ -649,7 +648,8 @@
 		align-items: center;
 		gap: 0.3rem;
 		padding: 0.3rem 0.4rem;
-		border-bottom: 0.0625rem solid color-mix(in srgb, var(--gc-color-panel-outline) 85%, transparent);
+		border-bottom: 0.0625rem solid
+			color-mix(in srgb, var(--gc-color-panel-outline) 85%, transparent);
 		background: color-mix(in srgb, var(--gc-color-panel-row) 70%, black);
 	}
 
@@ -792,7 +792,8 @@
 		gap: 0.35rem;
 		padding: 0.16rem 0.24rem;
 		border-radius: 0.22rem;
-		border-bottom: 0.0625rem solid color-mix(in srgb, var(--gc-color-panel-outline) 65%, transparent);
+		border-bottom: 0.0625rem solid
+			color-mix(in srgb, var(--gc-color-panel-outline) 65%, transparent);
 		contain: layout style paint;
 		content-visibility: auto;
 		contain-intrinsic-size: 1.4rem;
@@ -883,19 +884,19 @@
 		white-space: pre-wrap;
 	}
 
-	.level-info .level {
+	.level-info .message {
 		color: color-mix(in srgb, #3ca36b 85%, white 15%);
 	}
 
-	.level-success .level {
+	.level-success .message {
 		color: color-mix(in srgb, #43c58e 85%, white 15%);
 	}
 
-	.level-warning .level {
+	.level-warning .message {
 		color: color-mix(in srgb, #cf9b37 85%, white 15%);
 	}
 
-	.level-error .level {
+	.level-error .message {
 		color: color-mix(in srgb, #bf4d43 85%, white 15%);
 	}
 </style>

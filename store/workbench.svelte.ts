@@ -73,7 +73,7 @@ export interface WorkbenchSession {
 const DEFAULT_RETRY_MS = 1000;
 const DEFAULT_WARNING_ID = '';
 const DEFAULT_LOG_UI_UPDATE_HZ = 60;
-const MIN_LOG_UI_UPDATE_HZ = 15;
+const MIN_LOG_UI_UPDATE_HZ = 1;
 const MAX_LOG_UI_UPDATE_HZ = 240;
 
 type PendingLogMutation =
@@ -591,6 +591,7 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 		if (normalized === logUiUpdateHz) {
 			return;
 		}
+		console.log(`Setting log UI update frequency to ${normalized} Hz`);
 		logUiUpdateHz = normalized;
 		if (pendingLogMutations.length > 0) {
 			clearPendingLogFlush();
