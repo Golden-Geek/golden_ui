@@ -15,9 +15,15 @@ import type {
 	UiNodeMetaDto,
 	UiParamConstraints,
 	UiParamDto,
+	UiFileConstraints,
 	UiReferenceConstraints,
 	UiReferenceTargets,
 	UiReferenceRoot,
+	UiScriptConfig,
+	UiScriptManifest,
+	UiScriptRuntimeKind,
+	UiScriptSource,
+	UiScriptState,
 	UiSnapshot,
 	UiSubscriptionScope
 } from '../types';
@@ -52,11 +58,58 @@ export interface RustReferenceTargetsResponse {
 	visible_nodes?: number[];
 }
 
+export interface RustScriptStateRequest {
+	node: number;
+}
+
+export interface RustScriptConfigRequest {
+	node: number;
+	config: RustScriptConfig;
+	force_reload?: boolean;
+}
+
+export interface RustScriptReloadRequest {
+	node: number;
+}
+
 export type RustParamValue =
 	| string
 	| {
 			[key: string]: unknown;
 	  };
+
+type RustScriptSource =
+	| { kind: 'inline'; text: string }
+	| { kind: 'projectFile'; path: string };
+
+interface RustScriptConfig {
+	source: RustScriptSource;
+	runtime_hint?: string;
+	auto_reload: boolean;
+	enabled: boolean;
+	requested_update_rate_hz?: number;
+	project_root?: string;
+}
+
+interface RustScriptManifest {
+	api_version?: number;
+	update_rate_hz?: number;
+	exports?: Array<{
+		name?: string;
+		signature?: {
+			args?: string[];
+			returns?: string;
+		};
+	}>;
+}
+
+interface RustScriptState {
+	config: RustScriptConfig;
+	runtime_kind?: string;
+	effective_update_rate_hz?: number;
+	export_names?: string[];
+	manifest?: RustScriptManifest;
+}
 
 interface RustUiParamDto {
 	value: RustParamValue;
@@ -86,6 +139,10 @@ interface RustUiParamDto {
 			allowed_parameter_types?: string[];
 			custom_filter_key?: string;
 			default_search_filter?: string;
+		};
+		file?: {
+			allowed_types?: string[];
+			allowed_extensions?: string[];
 		};
 	};
 	reference_allowed_targets?: number[];
@@ -261,6 +318,9 @@ const fromRustParamValue = (value: unknown): ParamValue => {
 	if ('Str' in value) {
 		return { kind: 'str', value: String(value.Str ?? '') };
 	}
+	if ('File' in value) {
+		return { kind: 'file', value: String(value.File ?? '') };
+	}
 	if ('Enum' in value) {
 		return { kind: 'enum', value: String(value.Enum ?? '') };
 	}
@@ -317,6 +377,8 @@ const toRustParamValue = (value: ParamValue): RustParamValue => {
 			return { Float: value.value };
 		case 'str':
 			return { Str: value.value };
+		case 'file':
+			return { File: value.value };
 		case 'enum':
 			return { Enum: value.value };
 		case 'bool':
@@ -392,6 +454,151 @@ const fromRustReferenceConstraints = (reference: RustUiParamDto['constraints']['
 	};
 };
 
+const fromRustFileConstraints = (file: RustUiParamDto['constraints']['file']): UiFileConstraints | undefined => {
+	if (!file) {
+		return undefined;
+	}
+
+	const allowed_types = (file.allowed_types ?? [])
+		.map((value) => String(value).toLowerCase())
+		.filter((value): value is UiFileConstraints['allowed_types'][number] => value === 'audio' || value === 'video' || value === 'script');
+	const allowed_extensions = (file.allowed_extensions ?? [])
+		.map((value) => String(value).trim())
+		.filter((value) => value.length > 0);
+
+	return {
+		allowed_types,
+		allowed_extensions
+	};
+};
+
+const normalizeScriptRuntimeKind = (value: unknown): UiScriptRuntimeKind | undefined => {
+	if (value === 'luau' || value === 'quickJs') {
+		return value;
+	}
+	return undefined;
+};
+
+const fromRustScriptSource = (source: unknown): UiScriptSource => {
+	if (isRecord(source)) {
+		if (source.kind === 'projectFile') {
+			return { kind: 'projectFile', path: String(source.path ?? '') };
+		}
+		if (source.kind === 'inline') {
+			return { kind: 'inline', text: String(source.text ?? '') };
+		}
+	}
+	return { kind: 'inline', text: '' };
+};
+
+const toRustScriptSource = (source: UiScriptSource): RustScriptSource => {
+	if (source.kind === 'projectFile') {
+		return { kind: 'projectFile', path: source.path };
+	}
+	return { kind: 'inline', text: source.text };
+};
+
+const fromRustScriptConfig = (config: unknown): UiScriptConfig => {
+	if (!isRecord(config)) {
+		return {
+			source: { kind: 'inline', text: '' },
+			auto_reload: true,
+			enabled: true
+		};
+	}
+
+	return {
+		source: fromRustScriptSource(config.source),
+		runtime_hint: normalizeScriptRuntimeKind(config.runtime_hint),
+		auto_reload: Boolean(config.auto_reload ?? true),
+		enabled: Boolean(config.enabled ?? true),
+		requested_update_rate_hz:
+			typeof config.requested_update_rate_hz === 'number' &&
+			Number.isFinite(config.requested_update_rate_hz)
+				? Math.max(1, Math.round(config.requested_update_rate_hz))
+				: undefined,
+		project_root:
+			typeof config.project_root === 'string' && config.project_root.trim().length > 0
+				? config.project_root
+				: undefined
+	};
+};
+
+const toRustScriptConfig = (config: UiScriptConfig): RustScriptConfig => ({
+	source: toRustScriptSource(config.source),
+	runtime_hint: config.runtime_hint,
+	auto_reload: config.auto_reload,
+	enabled: config.enabled,
+	requested_update_rate_hz:
+		typeof config.requested_update_rate_hz === 'number' &&
+		Number.isFinite(config.requested_update_rate_hz)
+			? Math.max(1, Math.round(config.requested_update_rate_hz))
+			: undefined,
+	project_root:
+		typeof config.project_root === 'string' && config.project_root.trim().length > 0
+			? config.project_root.trim()
+			: undefined
+});
+
+const fromRustScriptManifest = (manifest: unknown): UiScriptManifest | undefined => {
+	if (!isRecord(manifest)) {
+		return undefined;
+	}
+
+	const apiVersion =
+		typeof manifest.api_version === 'number' && Number.isFinite(manifest.api_version)
+			? Math.max(1, Math.round(manifest.api_version))
+			: undefined;
+	if (apiVersion === undefined) {
+		return undefined;
+	}
+
+	const exports = Array.isArray(manifest.exports)
+		? manifest.exports
+				.filter((value): value is Record<string, unknown> => isRecord(value))
+				.map((value) => {
+					const signature = isRecord(value.signature) ? value.signature : {};
+					const argsRaw = signature.args;
+					const args = Array.isArray(argsRaw)
+						? argsRaw.filter((entry): entry is string => typeof entry === 'string')
+						: [];
+					const returns =
+						typeof signature.returns === 'string' && signature.returns.length > 0
+							? signature.returns
+							: undefined;
+					return {
+						name: String(value.name ?? ''),
+						signature: { args, returns }
+					};
+				})
+				.filter((value) => value.name.length > 0)
+		: [];
+
+	return {
+		api_version: apiVersion,
+		update_rate_hz:
+			typeof manifest.update_rate_hz === 'number' &&
+			Number.isFinite(manifest.update_rate_hz)
+				? Math.max(1, Math.round(manifest.update_rate_hz))
+				: undefined,
+		exports
+	};
+};
+
+const fromRustScriptState = (state: RustScriptState): UiScriptState => ({
+	config: fromRustScriptConfig(state.config),
+	runtime_kind: normalizeScriptRuntimeKind(state.runtime_kind),
+	effective_update_rate_hz:
+		typeof state.effective_update_rate_hz === 'number' &&
+		Number.isFinite(state.effective_update_rate_hz)
+			? Math.max(1, Math.round(state.effective_update_rate_hz))
+			: undefined,
+	export_names: Array.isArray(state.export_names)
+		? state.export_names.filter((name): name is string => typeof name === 'string')
+		: [],
+	manifest: fromRustScriptManifest(state.manifest)
+});
+
 const fromRustRangeConstraint = (
 	range: RustUiParamDto['constraints']['range']
 ): UiParamConstraints['range'] | undefined => {
@@ -441,7 +648,8 @@ const fromRustConstraints = (constraints: RustUiParamDto['constraints']): UiPara
 		ordering: option.ordering
 	})),
 	policy: constraints.policy,
-	reference: fromRustReferenceConstraints(constraints.reference)
+	reference: fromRustReferenceConstraints(constraints.reference),
+	file: fromRustFileConstraints(constraints.file)
 });
 
 const fromRustParam = (param: RustUiParamDto): UiParamDto => ({
@@ -686,6 +894,30 @@ export const createHttpUiClient = (options: HttpClientOptions = {}): UiClient =>
 				request
 			);
 			return fromRustReferenceTargets(response);
+		},
+
+		async scriptState(nodeId: number): Promise<UiScriptState> {
+			const request: RustScriptStateRequest = { node: nodeId };
+			const response = await postJson<RustScriptState>('/script-state', request);
+			return fromRustScriptState(response);
+		},
+
+		async setScriptConfig(
+			nodeId: number,
+			config: UiScriptConfig,
+			forceReload = false
+		): Promise<void> {
+			const request: RustScriptConfigRequest = {
+				node: nodeId,
+				config: toRustScriptConfig(config),
+				force_reload: forceReload
+			};
+			await postJson<{ ok?: boolean }>('/script-config', request);
+		},
+
+		async reloadScript(nodeId: number): Promise<void> {
+			const request: RustScriptReloadRequest = { node: nodeId };
+			await postJson<{ ok?: boolean }>('/script-reload', request);
 		}
 	};
 

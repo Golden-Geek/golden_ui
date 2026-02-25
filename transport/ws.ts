@@ -542,6 +542,18 @@ export const createWebSocketUiClient = (options: WebSocketUiClientOptions = {}):
 
 		async referenceTargets(paramNodeId: number) {
 			return httpClient.referenceTargets(paramNodeId);
+		},
+
+		async scriptState(nodeId: number) {
+			return httpClient.scriptState(nodeId);
+		},
+
+		async setScriptConfig(nodeId, config, forceReload = false) {
+			return httpClient.setScriptConfig(nodeId, config, forceReload);
+		},
+
+		async reloadScript(nodeId) {
+			return httpClient.reloadScript(nodeId);
 		}
 	};
 

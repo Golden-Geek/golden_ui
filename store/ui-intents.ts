@@ -1,4 +1,11 @@
-import type { NodeId, ParamEventBehaviour, ParamValue, UiEditIntent, UiNodeMetaDto } from '../types';
+import type {
+	NodeId,
+	ParamEventBehaviour,
+	ParamValue,
+	UiEditIntent,
+	UiNodeMetaDto,
+	UiScriptConfig
+} from '../types';
 import { appState } from './workbench.svelte';
 
 let intentSequence = 0;
@@ -62,6 +69,40 @@ export const sendSetLogMaxEntriesIntent = async (max_entries: number): Promise<b
 		kind: 'setLogMaxEntries',
 		max_entries: Math.max(1, Math.round(max_entries))
 	});
+};
+
+export const sendSetScriptConfig = async (
+	node: NodeId,
+	config: UiScriptConfig,
+	forceReload = false
+): Promise<boolean> => {
+	const session = appState.session;
+	if (!session) {
+		return false;
+	}
+
+	try {
+		await session.client.setScriptConfig(node, config, forceReload);
+		return true;
+	} catch (error) {
+		console.error('failed to set script config', { node, forceReload }, error);
+		return false;
+	}
+};
+
+export const sendReloadScript = async (node: NodeId): Promise<boolean> => {
+	const session = appState.session;
+	if (!session) {
+		return false;
+	}
+
+	try {
+		await session.client.reloadScript(node);
+		return true;
+	} catch (error) {
+		console.error('failed to reload script', { node }, error);
+		return false;
+	}
 };
 
 export const createUiEditSession = (

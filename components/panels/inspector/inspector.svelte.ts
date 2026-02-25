@@ -6,11 +6,13 @@ import TextInputEditor from "./parameters/TextInputEditor.svelte";
 import TriggerEditor from "./parameters/TriggerEditor.svelte";
 import ReferenceEditor from "./parameters/ReferenceEditor.svelte";
 import MultiNumberEditor from "./parameters/MultiNumberEditor.svelte";
+import FilePathEditor from "./parameters/FilePathEditor.svelte";
 
 export const propertiesInspectorClass: Record<string, { component: any; useFullSpace?: boolean }> = {
     "trigger": { component: TriggerEditor },
     "int": { component: NumberEditor },
     "str": { component: TextInputEditor },
+    "file": { component: FilePathEditor },
     "float": { component: NumberEditor },
     "bool": { component: CheckboxEditor },
     "color": { component: ColorPickerEditor },

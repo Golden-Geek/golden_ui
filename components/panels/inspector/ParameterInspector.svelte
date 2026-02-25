@@ -68,6 +68,7 @@
 			case 'int':
 			case 'float':
 			case 'str':
+			case 'file':
 			case 'enum':
 			case 'bool':
 				return left.value === (right as typeof left).value;

@@ -14,6 +14,7 @@
 	import EnableButton from '../../common/EnableButton.svelte';
 	import Watcher from '../../common/Watcher.svelte';
 	import type { WatcherUiSettings } from '../../common/watcher/watcher-utils';
+	import ScriptNodeInspector from './ScriptNodeInspector.svelte';
 
 	let { panelApi, panelId, panelType, title, params }: PanelProps = $props();
 
@@ -274,6 +275,9 @@
 						persistedSettings={selectedWatcherSettings}
 						onSettingsChange={persistWatcherSettingsForSelectedParam} />
 				</div>
+			{/if}
+			{#if node && node.node_type === 'script'}
+				<ScriptNodeInspector {node} />
 			{/if}
 			<NodeInspector nodes={selectedNodes} level={0} />
 		</div>

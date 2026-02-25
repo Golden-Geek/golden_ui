@@ -48,6 +48,7 @@ const defaultNodeIcons: ResolvedNodeIconSet = {
         float: parameterFloatIcon,
         int: parameterIntIcon,
         str: parameterStringIcon,
+        file: parameterStringIcon,
         trigger: parameterTriggerIcon,
         vec2: parameterVec2Icon,
         vec3: parameterVec3Icon,

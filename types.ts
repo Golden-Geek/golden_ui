@@ -10,6 +10,7 @@ export type ParamValue =
 	| { kind: 'int'; value: number }
 	| { kind: 'float'; value: number }
 	| { kind: 'str'; value: string }
+	| { kind: 'file'; value: string }
 	| { kind: 'enum'; value: string }
 	| { kind: 'bool'; value: boolean }
 	| { kind: 'vec2'; value: [number, number] }
@@ -30,6 +31,13 @@ export type UiReferenceRoot =
 
 export type UiReferenceTargetKind = 'anyNode' | 'parameterOnly';
 
+export type UiFileTypeGroup = 'audio' | 'video' | 'script';
+
+export interface UiFileConstraints {
+	allowed_types: UiFileTypeGroup[];
+	allowed_extensions: string[];
+}
+
 export interface UiReferenceConstraints {
 	root: UiReferenceRoot;
 	target_kind: UiReferenceTargetKind;
@@ -37,6 +45,45 @@ export interface UiReferenceConstraints {
 	allowed_parameter_types: string[];
 	custom_filter_key?: string;
 	default_search_filter?: string;
+}
+
+export type UiScriptRuntimeKind = 'luau' | 'quickJs';
+
+export type UiScriptSource =
+	| { kind: 'inline'; text: string }
+	| { kind: 'projectFile'; path: string };
+
+export interface UiScriptConfig {
+	source: UiScriptSource;
+	runtime_hint?: UiScriptRuntimeKind;
+	auto_reload: boolean;
+	enabled: boolean;
+	requested_update_rate_hz?: number;
+	project_root?: string;
+}
+
+export interface UiScriptFnSignature {
+	args: string[];
+	returns?: string;
+}
+
+export interface UiScriptExportSpec {
+	name: string;
+	signature: UiScriptFnSignature;
+}
+
+export interface UiScriptManifest {
+	api_version: number;
+	update_rate_hz?: number;
+	exports: UiScriptExportSpec[];
+}
+
+export interface UiScriptState {
+	config: UiScriptConfig;
+	runtime_kind?: UiScriptRuntimeKind;
+	effective_update_rate_hz?: number;
+	export_names: string[];
+	manifest?: UiScriptManifest;
 }
 
 export type UiSubscriptionScope =
@@ -110,6 +157,7 @@ export interface UiParamConstraints {
 	enum_options: ParamEnumOption[];
 	policy: ParamConstraintPolicy;
 	reference?: UiReferenceConstraints;
+	file?: UiFileConstraints;
 }
 
 export interface UiParamHints {
@@ -254,6 +302,9 @@ export interface UiClient {
 	sendIntent(intent: UiEditIntent): Promise<UiAck>;
 	replay(scope: UiSubscriptionScope, from?: EventTime): Promise<UiEventBatch>;
 	referenceTargets(paramNodeId: NodeId): Promise<UiReferenceTargets>;
+	scriptState(nodeId: NodeId): Promise<UiScriptState>;
+	setScriptConfig(nodeId: NodeId, config: UiScriptConfig, forceReload?: boolean): Promise<void>;
+	reloadScript(nodeId: NodeId): Promise<void>;
 }
 
 export const wholeGraphScope: UiSubscriptionScope = { kind: 'wholeGraph' };

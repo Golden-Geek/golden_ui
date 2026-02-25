@@ -138,6 +138,10 @@ export const extractEventLabel = (value: ParamValue): string | null => {
 			const trimmed = value.value.trim();
 			return trimmed.length > 0 ? shorten(trimmed) : '<empty>';
 		}
+		case 'file': {
+			const trimmed = value.value.trim();
+			return trimmed.length > 0 ? shorten(trimmed) : '<none>';
+		}
 		case 'reference':
 			return shorten(value.cached_name || value.uuid || 'none');
 		default:

@@ -662,7 +662,6 @@
 
 	.logger-toolbar {
 		display: flex;
-		flex-wrap: wrap;
 		align-items: center;
 		gap: 0.3rem;
 		border-bottom: 0.0625rem solid
@@ -673,6 +672,7 @@
 	header input {
 		font-size: 0.6rem;
 		text-transform: uppercase;
+		width:5rem;
 	}
 
 	.spacer {
