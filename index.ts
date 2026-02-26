@@ -23,6 +23,18 @@ export { default as Outliner } from './components/panels/outliner/OutlinerPanel.
 export { default as Inspector } from './components/panels/inspector/InspectorPanel.svelte';
 export { default as LoggerPanel } from './components/panels/logger/LoggerPanel.svelte';
 export { default as WarningsPanel } from './components/panels/warnings/WarningsPanel.svelte';
+export {
+	registerNodeInspector,
+	registerNodeInspectors,
+	unregisterNodeInspector,
+	clearCustomNodeInspectors
+} from './components/panels/inspector/node-inspector-registry';
+export type {
+	NodeInspectorComponentProps,
+	NodeInspectorEntry,
+	NodeInspectorOrder,
+	NodeInspectorRegistry
+} from './components/panels/inspector/node-inspector-registry';
 
 export { goldenDockviewTheme } from './dockview/goldenDockviewTheme';
 export { createGoldenTabRenderer } from './dockview/createGoldenTabRenderer';

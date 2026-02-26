@@ -1,4 +1,5 @@
 import type {
+	UiCreatableUserItem,
 	NodeId,
 	ParamEventBehaviour,
 	ParamValue,
@@ -68,6 +69,18 @@ export const sendSetLogMaxEntriesIntent = async (max_entries: number): Promise<b
 	return sendUiIntent({
 		kind: 'setLogMaxEntries',
 		max_entries: Math.max(1, Math.round(max_entries))
+	});
+};
+
+export const sendCreateUserItemIntent = async (
+	parent: NodeId,
+	item: UiCreatableUserItem
+): Promise<boolean> => {
+	return sendUiIntent({
+		kind: 'createUserItem',
+		parent,
+		node_type: item.node_type,
+		label: item.label
 	});
 };
 

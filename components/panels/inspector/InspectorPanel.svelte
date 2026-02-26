@@ -8,13 +8,14 @@
 		writePanelPersistedState
 	} from '../../../dockview/panel-persistence';
 	import type { PanelProps, PanelState } from '../../../dockview/panel-types.ts';
+	import type { UiCreatableUserItem } from '$lib/golden_ui/types';
 	import { slide } from 'svelte/transition';
 	import { getIconURLForNode } from '$lib/golden_ui/store/node-types';
-	import { sendPatchMetaIntent } from '$lib/golden_ui/store/ui-intents';
+	import { sendCreateUserItemIntent, sendPatchMetaIntent } from '$lib/golden_ui/store/ui-intents';
 	import EnableButton from '../../common/EnableButton.svelte';
 	import Watcher from '../../common/Watcher.svelte';
 	import type { WatcherUiSettings } from '../../common/watcher/watcher-utils';
-	import ScriptNodeInspector from './ScriptNodeInspector.svelte';
+	import addIcon from '../../../style/icons/node/add.svg';
 
 	let { panelApi, panelId, panelType, title, params }: PanelProps = $props();
 
@@ -34,6 +35,8 @@
 
 	let selectedNodes = $derived(session?.getSelectedNodes() ?? []);
 	let node = $derived(selectedNodes.length === 1 ? selectedNodes[0] : null);
+	let creatableItems = $derived(node?.creatable_user_items ?? []);
+	let canCreateItems = $derived(creatableItems.length > 0);
 	let iconURL = $derived(selectedNodes.length === 1 ? getIconURLForNode(selectedNodes[0]) : null);
 	let isNameChangeable = $derived(node?.meta.user_permissions.can_edit_name ?? false);
 	let warnings = $derived(
@@ -49,6 +52,9 @@
 
 	let dataInspectorCollapsed = $state(true);
 	let watcherSettingsByParam = $state<Record<string, Partial<WatcherUiSettings>>>({});
+	let addMenuOpen = $state(false);
+	let addMenuElem: HTMLDivElement | null = $state(null as HTMLDivElement | null);
+	let addMenuNodeId = $state<number | null>(null);
 
 	const WATCHER_SETTINGS_CACHE_LIMIT = 256;
 	const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -90,6 +96,42 @@
 	const persistState = (nextState: Partial<InspectorPersistedState>): void => {
 		writePanelPersistedState(panelApi, nextState);
 	};
+
+	$effect(() => {
+		const nodeId = node?.node_id ?? null;
+		if (addMenuNodeId === nodeId) {
+			return;
+		}
+		addMenuNodeId = nodeId;
+		addMenuOpen = false;
+	});
+
+	$effect(() => {
+		if (!addMenuOpen || typeof window === 'undefined') {
+			return;
+		}
+
+		const handlePointerDown = (event: PointerEvent): void => {
+			const target = event.target as globalThis.Node | null;
+			if (target && addMenuElem?.contains(target)) {
+				return;
+			}
+			addMenuOpen = false;
+		};
+
+		const handleKeyDown = (event: KeyboardEvent): void => {
+			if (event.key === 'Escape') {
+				addMenuOpen = false;
+			}
+		};
+
+		window.addEventListener('pointerdown', handlePointerDown, true);
+		window.addEventListener('keydown', handleKeyDown, true);
+		return () => {
+			window.removeEventListener('pointerdown', handlePointerDown, true);
+			window.removeEventListener('keydown', handleKeyDown, true);
+		};
+	});
 
 	const toggleDataInspector = (): void => {
 		dataInspectorCollapsed = !dataInspectorCollapsed;
@@ -183,6 +225,21 @@
 		renamingState.isRenaming = false;
 	};
 
+	const toggleAddMenu = (): void => {
+		if (!canCreateItems) {
+			return;
+		}
+		addMenuOpen = !addMenuOpen;
+	};
+
+	const createItem = async (item: UiCreatableUserItem): Promise<void> => {
+		if (!node) {
+			return;
+		}
+		addMenuOpen = false;
+		await sendCreateUserItemIntent(node.node_id, item);
+	};
+
 	$effect(() => {
 		panel = {
 			panelId,
@@ -240,6 +297,37 @@
 					{node.meta.label}
 				</span>
 			{/if}
+
+			{#if canCreateItems}
+				<div class="add-item-menu" bind:this={addMenuElem}>
+					<button
+						class="add-item-trigger"
+						type="button"
+						aria-label="Add child item"
+						title="Add item"
+						aria-expanded={addMenuOpen}
+						onclick={toggleAddMenu}>
+						<img src={addIcon} alt="" />
+					</button>
+					{#if addMenuOpen}
+						<div class="add-item-dropdown" role="menu" aria-label="Creatable items">
+							{#each creatableItems as item (`${item.node_type}:${item.item_kind}`)}
+								<button
+									type="button"
+									class="add-item-option"
+									role="menuitem"
+									title={`Add ${item.label}`}
+									onclick={() => {
+										void createItem(item);
+									}}>
+									{item.label}
+								</button>
+							{/each}
+						</div>
+					{/if}
+				</div>
+			{/if}
+
 			<div class="node-id-badge">
 				<span class="node-id">{node.decl_id}</span>
 				<button
@@ -275,9 +363,6 @@
 						persistedSettings={selectedWatcherSettings}
 						onSettingsChange={persistWatcherSettingsForSelectedParam} />
 				</div>
-			{/if}
-			{#if node && node.node_type === 'script'}
-				<ScriptNodeInspector {node} />
 			{/if}
 			<NodeInspector nodes={selectedNodes} level={0} />
 		</div>
@@ -317,7 +402,6 @@
 		display: flex;
 		align-items: center;
 		gap: 0.5rem;
-		padding: 0.3rem;
 	}
 
 	.inspector-header .header-icon img {
@@ -367,6 +451,61 @@
 
 	.inspector-header .copy-button:hover {
 		opacity: 1;
+	}
+
+	.inspector-header .add-item-menu {
+		position: relative;
+		display: inline-flex;
+	}
+
+	.inspector-header .add-item-trigger {
+		width: 1.45rem;
+		height: 1.45rem;
+		padding: 0.15rem;
+		border: solid 0.06rem rgba(255, 255, 255, 0.15);
+		border-radius: 0.35rem;
+		background-color: rgba(255, 255, 255, 0.08);
+		cursor: pointer;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+	}
+
+	.inspector-header .add-item-trigger img {
+		width: 100%;
+		height: 100%;
+		display: block;
+	}
+
+	.inspector-header .add-item-dropdown {
+		position: absolute;
+		top: calc(100% + 0.25rem);
+		right: 0;
+		min-width: 10rem;
+		display: flex;
+		flex-direction: column;
+		gap: 0.15rem;
+		padding: 0.2rem;
+		border-radius: 0.35rem;
+		border: solid 0.06rem rgba(255, 255, 255, 0.15);
+		background-color: rgba(30, 30, 30, 0.96);
+		box-shadow: 0 0.4rem 1.2rem rgba(0, 0, 0, 0.45);
+		z-index: 10;
+	}
+
+	.inspector-header .add-item-option {
+		border: none;
+		border-radius: 0.25rem;
+		background: transparent;
+		color: var(--text-color);
+		font-size: 0.72rem;
+		text-align: left;
+		padding: 0.3rem 0.4rem;
+		cursor: pointer;
+	}
+
+	.inspector-header .add-item-option:hover {
+		background-color: rgba(255, 255, 255, 0.12);
 	}
 
 	.warning-info {

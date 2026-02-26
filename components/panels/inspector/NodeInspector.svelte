@@ -8,6 +8,7 @@
 	import { getIconURLForNode } from '$lib/golden_ui/store/node-types';
 	import EnableButton from '../../common/EnableButton.svelte';
 	import NodeWarningBadge from '../../common/NodeWarningBadge.svelte';
+	import { resolveNodeInspector, type NodeInspectorOrder } from './node-inspector-registry';
 
 	let {
 		nodes = [],
@@ -16,15 +17,16 @@
 	} = $props<{
 		nodes: UiNodeDto[];
 		level: number;
-		order?: 'first' | 'last' | 'solo' | '';
+		order?: NodeInspectorOrder;
 	}>();
 
 	let session = $derived(appState.session);
-	let node = $derived(nodes.length > 0 ? (session?.graph.state.nodesById.get(nodes[0].node_id) ?? nodes[0]) : null);
+	let node = $derived(
+		nodes.length > 0 ? (session?.graph.state.nodesById.get(nodes[0].node_id) ?? nodes[0]) : null
+	);
 
 	let isRoot = $derived(level === 0);
 	let isFirstLevel = $derived(level === 1);
-
 	let collapsed = $derived(level > 3);
 
 	//for now default to level
@@ -45,9 +47,12 @@
 	let isNameChangeable = $derived(node?.meta?.user_permissions.can_edit_name ?? false);
 	let iconURL = $derived(getIconURLForNode(node));
 	let warnings = $derived(node ? session?.getNodeVisibleWarnings(node.node_id) : null);
+	let customInspectorEntry = $derived(
+		node && showAsContainer ? resolveNodeInspector(node.node_type) : null
+	);
+	let CustomInspectorComponent = $derived(customInspectorEntry?.component ?? null);
 
 	let titleTextElem: HTMLSpanElement | null = $state(null as HTMLSpanElement | null);
-	let arrowElem: HTMLSpanElement | null = $state(null as HTMLSpanElement | null);
 	let renameInputElem: HTMLInputElement | null = $state(null as HTMLInputElement | null);
 	let renamingState = $state({
 		isRenaming: false,
@@ -95,101 +100,109 @@
 		await sendPatchMetaIntent(node.node_id, { label: nextName });
 		renamingState.isRenaming = false;
 	};
+
+	const toggleCollapsed = (): void => {
+		collapsed = !collapsed;
+	};
+
+	const setCollapsed = (nextCollapsed: boolean): void => {
+		collapsed = nextCollapsed;
+	};
 </script>
 
 {#if node}
 	<div
-		class="node-inspector {node?.data.kind} 
+		class="node-inspector {node.data.kind} 
 			{isRoot ? 'root' : !isFirstLevel ? 'nested' : ''}
 		{isParameter ? 'parameter' : 'container'}"
 		data-node-id={node.node_id}
 		style="--container-color: {color}">
-		{#if showAsContainer && !isRoot}
-			<div class="node-header">
-				<span
-					class="node-title"
-					role="switch"
-					class:name-changeable={isNameChangeable}
-					aria-checked={!collapsed}
-					tabindex="0"
-					onclick={(e) => {
-						if (renamingState.isRenaming) {
-							return;
-						}
-						
-						const target = e.target as HTMLElement;
-						const clickedTitle = Boolean(titleTextElem && target && titleTextElem.contains(target));
-						if (!isNameChangeable || !clickedTitle) {
-							collapsed = !collapsed;
-						}
-					}}
-					onkeydown={(e) => {
-						if (renamingState.isRenaming) {
-							return;
-						}
-						if (e.key === 'Enter' || e.key === ' ') {
-							collapsed = !collapsed;
-						}
-					}}>
-					{#if hasChildren}
-						<span class="arrow {collapsed ? '' : 'down'}" bind:this={arrowElem}></span>
-					{/if}
-					<span class="header-icon">
-						<img src={iconURL} alt="" />
-					</span>
+		{#snippet builtInHeader()}
+			{#if !isRoot}
+				<div class="node-header">
+					<span
+						class="node-title"
+						role="switch"
+						class:name-changeable={isNameChangeable}
+						aria-checked={!collapsed}
+						tabindex="0"
+						onclick={(e) => {
+							if (renamingState.isRenaming) {
+								return;
+							}
 
-					{#if canBeDisabled}
-						<EnableButton {node} />
-					{/if}
-
-					{#if renamingState.isRenaming}
-						<input
-							class="node-title-input"
-							bind:this={renameInputElem}
-							bind:value={renamingState.renameDraft}
-							onclick={(e) => {
-								e.stopPropagation();
-							}}
-							onblur={() => {
-								void commitRename();
-							}}
-							onkeydown={(e) => {
-								if (e.key === 'Enter') {
-									void commitRename();
-									return;
-								}
-								if (e.key === 'Escape') {
-									cancelRename();
-								}
-							}} />
-					{:else}
-						<span
-							class="title-text"
-							bind:this={titleTextElem}
-							role="textbox"
-							tabindex="-1"
-							ondblclick={(e) => {
-								if (!isNameChangeable) {
-									return;
-								}
-								e.stopPropagation();
-								startRename();
-							}}
-							title={isNameChangeable ? 'Double-click to rename' : undefined}>
-							{node.meta.label || 'Container'}
+							const target = e.target as HTMLElement;
+							const clickedTitle = Boolean(
+								titleTextElem && target && titleTextElem.contains(target)
+							);
+							if (!isNameChangeable || !clickedTitle) {
+								toggleCollapsed();
+							}
+						}}
+						onkeydown={(e) => {
+							if (renamingState.isRenaming) {
+								return;
+							}
+							if (e.key === 'Enter' || e.key === ' ') {
+								toggleCollapsed();
+							}
+						}}>
+						{#if hasChildren}
+							<span class="arrow {collapsed ? '' : 'down'}"></span>
+						{/if}
+						<span class="header-icon">
+							<img src={iconURL} alt="" />
 						</span>
-					{/if}
 
-					<NodeWarningBadge {warnings} />
-				</span>
-			</div>
-		{/if}
+						{#if canBeDisabled}
+							<EnableButton {node} />
+						{/if}
 
-		{#if isParameter}
-			<ParameterInspector {node} {level} {order} />
-		{/if}
+						{#if renamingState.isRenaming}
+							<input
+								class="node-title-input"
+								bind:this={renameInputElem}
+								bind:value={renamingState.renameDraft}
+								onclick={(e) => {
+									e.stopPropagation();
+								}}
+								onblur={() => {
+									void commitRename();
+								}}
+								onkeydown={(e) => {
+									if (e.key === 'Enter') {
+										void commitRename();
+										return;
+									}
+									if (e.key === 'Escape') {
+										cancelRename();
+									}
+								}} />
+						{:else}
+							<span
+								class="title-text"
+								bind:this={titleTextElem}
+								role="textbox"
+								tabindex="-1"
+								ondblclick={(e) => {
+									if (!isNameChangeable) {
+										return;
+									}
+									e.stopPropagation();
+									startRename();
+								}}
+								title={isNameChangeable ? 'Double-click to rename' : undefined}>
+								{node.meta.label || 'Container'}
+							</span>
+						{/if}
 
-		{#if showAsContainer}
+						<NodeWarningBadge {warnings} />
+					</span>
+				</div>
+			{/if}
+		{/snippet}
+
+		{#snippet builtInChildren()}
 			<div class="node-inspector-children">
 				{#if !collapsed}
 					<div class="node-inspector-children-wrapper" transition:slide={{ duration: 200 }}>
@@ -207,6 +220,31 @@
 						{/each}
 					</div>
 				{/if}
+			</div>
+		{/snippet}
+
+		{#if isParameter}
+			<ParameterInspector {node} {level} {order} />
+		{:else if CustomInspectorComponent}
+			<CustomInspectorComponent
+				{node}
+				{level}
+				{order}
+				{collapsed}
+				{hasChildren}
+				{toggleCollapsed}
+				{setCollapsed}>
+				{#snippet defaultHeader()}
+					{@render builtInHeader()}
+				{/snippet}
+				{#snippet defaultChildren()}
+					{@render builtInChildren()}
+				{/snippet}
+			</CustomInspectorComponent>
+		{:else}
+			{@render builtInHeader()}
+			<div class="node-inspector-content">
+				{@render builtInChildren()}
 			</div>
 		{/if}
 	</div>
@@ -280,7 +318,7 @@
 			box-sizing: border-box;
 			border-left: solid 2px var(--container-color);
 			vertical-align: middle;
-			cursor:pointer;
+			cursor: pointer;
 		}
 
 		.node-title .title-text {
@@ -289,7 +327,7 @@
 			vertical-align: text-top;
 		}
 
-		.node-inspector-children {
+		:global(.node-inspector-content) {
 			min-height: 0.5rem;
 			border-radius: 0 0.5rem 0.5rem 0.5rem;
 			background-color: rgba(from var(--container-color) r g b / 5%);
@@ -319,15 +357,15 @@
 	}
 
 	.node-title-input {
-		height: .9rem;
+		height: 0.9rem;
 		min-width: 8rem;
 		background-color: var(--bg-color);
 		color: var(--text-color);
 		font-size: 0.7rem;
-		outline: 1px solid rgba(255,255,255,.2);
+		outline: 1px solid rgba(255, 255, 255, 0.2);
 		/* border-radius: 0.25rem; */
 		padding: 0 0.15rem;
 		box-sizing: border-box;
-		margin:0;
+		margin: 0;
 	}
 </style>

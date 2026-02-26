@@ -2,6 +2,7 @@ import type { UiNodeDto } from "../types";
 import nodeAddIcon from "../style/icons/node/add.svg";
 import folderIcon from "../style/icons/node/folder.svg";
 import nodeManagerIcon from "../style/icons/node/manager.svg";
+import scriptIcon from "../style/icons/node/script.svg";
 import parameterBoolIcon from "../style/icons/parameter/bool.svg";
 import parameterColorIcon from "../style/icons/parameter/color.svg";
 import parameterEnumIcon from "../style/icons/parameter/enum.svg";
@@ -12,6 +13,7 @@ import parameterTriggerIcon from "../style/icons/parameter/trigger.svg";
 import parameterVec2Icon from "../style/icons/parameter/vec2.svg";
 import parameterVec3Icon from "../style/icons/parameter/vec3.svg";
 import parameterReferenceIcon from "../style/icons/parameter/reference.svg";
+import parameterFileIcon from "../style/icons/parameter/file.svg";
 
 const DEFAULT_FALLBACK_ICON = nodeAddIcon;
 const DEFAULT_MANAGER_ICON = nodeManagerIcon;
@@ -40,6 +42,7 @@ const defaultNodeIcons: ResolvedNodeIconSet = {
     nodeTypes: {
         add: nodeAddIcon,
         folder: folderIcon,
+        script: scriptIcon,
     },
     parameterKinds: {
         bool: parameterBoolIcon,
@@ -48,7 +51,7 @@ const defaultNodeIcons: ResolvedNodeIconSet = {
         float: parameterFloatIcon,
         int: parameterIntIcon,
         str: parameterStringIcon,
-        file: parameterStringIcon,
+        file: parameterFileIcon,
         trigger: parameterTriggerIcon,
         vec2: parameterVec2Icon,
         vec3: parameterVec3Icon,

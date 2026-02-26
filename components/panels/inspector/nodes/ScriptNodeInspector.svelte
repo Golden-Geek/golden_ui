@@ -4,16 +4,14 @@
 		sendReloadScript,
 		sendSetScriptConfig
 	} from '$lib/golden_ui/store/ui-intents';
+	import type { NodeInspectorComponentProps } from '../node-inspector-registry';
 	import type {
-		UiNodeDto,
 		UiScriptConfig,
 		UiScriptRuntimeKind,
 		UiScriptState
 	} from '$lib/golden_ui/types';
 
-	let { node } = $props<{
-		node: UiNodeDto;
-	}>();
+	let { node, defaultHeader, defaultChildren } = $props<NodeInspectorComponentProps>();
 
 	let session = $derived(appState.session);
 	let liveNode = $derived(session?.graph.state.nodesById.get(node.node_id) ?? node);
@@ -278,7 +276,8 @@
 </script>
 
 {#if liveNode.node_type === 'script'}
-	<div class="script-node-inspector">
+	{@render defaultHeader?.()}
+	<div class="node-inspector-content script-node-inspector">
 		<div class="toolbar">
 			<button type="button" class="ghost" disabled={loading} onclick={() => void loadScriptState()}>
 				Refresh
@@ -470,6 +469,8 @@
 			{/if}
 		{/if}
 	</div>
+
+	{@render defaultChildren?.()}
 {/if}
 
 <style>
@@ -478,7 +479,6 @@
 		flex-direction: column;
 		gap: 0.4rem;
 		padding: 0.35rem;
-		margin: 0.2rem 0.15rem 0;
 		border-radius: 0.45rem;
 		border: solid 0.06rem rgba(255, 255, 255, 0.08);
 		background: rgba(255, 255, 255, 0.02);
