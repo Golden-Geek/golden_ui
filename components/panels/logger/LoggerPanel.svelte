@@ -69,6 +69,7 @@
 	let tagFilter = $state('');
 	let contentFilter = $state('');
 	let collapseDuplicates = $state(true);
+	let collapseAllDuplicates = $state(false);
 
 	let normalizedSourceFilter = $derived(normalizeSearchText(sourceFilter));
 	let normalizedTagFilter = $derived(normalizeSearchText(tagFilter));
@@ -93,14 +94,6 @@
 			? Math.min(rawEntryLimit, LIVE_TAIL_RENDER_LIMIT)
 			: rawEntryLimit
 	);
-	let isWindowedView = $derived(
-		followLatest &&
-			focusedRecordKey === null &&
-			!isFiltered &&
-			(collapseDuplicates
-				? records.length > effectiveRenderLimit
-				: rawEntryLimit > effectiveRenderLimit)
-	);
 
 	interface CachedRecordDecorations {
 		timestampMs: number;
@@ -111,8 +104,25 @@
 		formattedTime: string;
 	}
 
+	interface DisplayedEntriesResult {
+		entries: LoggerEntry[];
+		collapsedGroupCount: number;
+	}
+
+	interface CollapsedGroup {
+		signature: string;
+		key: string;
+		record: UiLogRecord;
+		repeatCount: number;
+		latestRecordIndex: number;
+	}
+
 	const sourceLabelCache = new Map<NodeId, string>();
 	const recordDecorationsCache = new Map<number, CachedRecordDecorations>();
+	const superCollapseTotalRepeatBySignature = new Map<string, number>();
+	const superCollapseObservedRepeatByRecordId = new Map<number, number>();
+	const superCollapseObservedSignatureByRecordId = new Map<number, string>();
+	let superCollapseStatsVersion = $state(0);
 	let lastSessionRef: typeof session = null;
 
 	const resolveSourceLabel = (record: UiLogRecord): string => {
@@ -190,11 +200,30 @@
 		return `r:${recordId}:d${duplicateIndex}`;
 	};
 
+	const collapseSignatureForRecord = (record: UiLogRecord): string => {
+		return JSON.stringify([record.level, record.tag, record.origin ?? null, record.message]);
+	};
+
+	const resetSuperCollapseStats = (): void => {
+		if (
+			superCollapseTotalRepeatBySignature.size === 0 &&
+			superCollapseObservedRepeatByRecordId.size === 0 &&
+			superCollapseObservedSignatureByRecordId.size === 0
+		) {
+			return;
+		}
+		superCollapseTotalRepeatBySignature.clear();
+		superCollapseObservedRepeatByRecordId.clear();
+		superCollapseObservedSignatureByRecordId.clear();
+		superCollapseStatsVersion += 1;
+	};
+
 	$effect(() => {
 		if (session !== lastSessionRef) {
 			lastSessionRef = session;
 			sourceLabelCache.clear();
 			recordDecorationsCache.clear();
+			resetSuperCollapseStats();
 		}
 	});
 
@@ -213,9 +242,113 @@
 		}
 	});
 
-	let displayedEntries = $derived.by<LoggerEntry[]>(() => {
+	$effect(() => {
+		if (records.length === 0) {
+			resetSuperCollapseStats();
+			return;
+		}
+
+		let hasKnownRetainedRecord = false;
+		for (const record of records) {
+			if (superCollapseObservedRepeatByRecordId.has(record.id)) {
+				hasKnownRetainedRecord = true;
+				break;
+			}
+		}
+
+		if (!hasKnownRetainedRecord && superCollapseObservedRepeatByRecordId.size > 0) {
+			resetSuperCollapseStats();
+		}
+
+		let didUpdateStats = false;
+		const retainedSignatures = new Set<string>();
+
+		for (const record of records) {
+			const signature = collapseSignatureForRecord(record);
+			retainedSignatures.add(signature);
+
+			const repeatCount = repeatCountForRecord(record);
+			const previousRepeat = superCollapseObservedRepeatByRecordId.get(record.id);
+			const previousSignature = superCollapseObservedSignatureByRecordId.get(record.id);
+
+			if (previousRepeat === undefined || previousSignature === undefined) {
+				const currentTotal = superCollapseTotalRepeatBySignature.get(signature) ?? 0;
+				superCollapseTotalRepeatBySignature.set(signature, currentTotal + repeatCount);
+				didUpdateStats = true;
+			} else if (previousSignature === signature && repeatCount > previousRepeat) {
+				const increment = repeatCount - previousRepeat;
+				const currentTotal = superCollapseTotalRepeatBySignature.get(signature) ?? 0;
+				superCollapseTotalRepeatBySignature.set(signature, currentTotal + increment);
+				didUpdateStats = true;
+			}
+
+			superCollapseObservedRepeatByRecordId.set(record.id, repeatCount);
+			superCollapseObservedSignatureByRecordId.set(record.id, signature);
+		}
+
+		const oldestRetainedId = records[0].id;
+		for (const observedId of superCollapseObservedRepeatByRecordId.keys()) {
+			if (observedId >= oldestRetainedId) {
+				break;
+			}
+			superCollapseObservedRepeatByRecordId.delete(observedId);
+			superCollapseObservedSignatureByRecordId.delete(observedId);
+		}
+
+		for (const signature of superCollapseTotalRepeatBySignature.keys()) {
+			if (retainedSignatures.has(signature)) {
+				continue;
+			}
+			superCollapseTotalRepeatBySignature.delete(signature);
+			didUpdateStats = true;
+		}
+
+		if (didUpdateStats) {
+			superCollapseStatsVersion += 1;
+		}
+	});
+
+	let displayedEntriesResult = $derived.by<DisplayedEntriesResult>(() => {
 		const renderLimit = effectiveRenderLimit;
 		if (collapseDuplicates) {
+			if (collapseAllDuplicates) {
+				void superCollapseStatsVersion;
+				const groupsBySignature = new Map<string, CollapsedGroup>();
+
+				for (let recordIndex = 0; recordIndex < records.length; recordIndex += 1) {
+					const record = records[recordIndex];
+					const signature = collapseSignatureForRecord(record);
+					const repeatCount =
+						superCollapseTotalRepeatBySignature.get(signature) ?? repeatCountForRecord(record);
+					const existing = groupsBySignature.get(signature);
+					if (existing) {
+						existing.record = record;
+						existing.latestRecordIndex = recordIndex;
+						existing.repeatCount = repeatCount;
+					} else {
+						groupsBySignature.set(signature, {
+							signature,
+							key: `g:${record.id}`,
+							record,
+							repeatCount,
+							latestRecordIndex: recordIndex
+						});
+					}
+				}
+
+				const sortedGroups = [...groupsBySignature.values()].sort(
+					(left, right) => left.latestRecordIndex - right.latestRecordIndex
+				);
+				const startIndex = Math.max(0, sortedGroups.length - renderLimit);
+				const entries = sortedGroups
+					.slice(startIndex)
+					.map((group) => makeEntry(group.record, group.key, group.repeatCount));
+				return {
+					entries,
+					collapsedGroupCount: sortedGroups.length
+				};
+			}
+
 			const entries: LoggerEntry[] = [];
 			const duplicateCountById = new Map<number, number>();
 			const startIndex = Math.max(0, records.length - renderLimit);
@@ -227,7 +360,10 @@
 					makeEntry(record, uniqueRecordKey(record.id, duplicateIndex), repeatCountForRecord(record))
 				);
 			}
-			return entries;
+			return {
+				entries,
+				collapsedGroupCount: entries.length
+			};
 		}
 
 		let remaining = renderLimit;
@@ -255,8 +391,24 @@
 		}
 
 		reversedEntries.reverse();
-		return reversedEntries;
+		return {
+			entries: reversedEntries,
+			collapsedGroupCount: 0
+		};
 	});
+
+	let displayedEntries = $derived(displayedEntriesResult.entries);
+	let collapsedGroupCount = $derived(displayedEntriesResult.collapsedGroupCount);
+	let isWindowedView = $derived(
+		followLatest &&
+			focusedRecordKey === null &&
+			!isFiltered &&
+			(collapseDuplicates
+				? collapseAllDuplicates
+					? collapsedGroupCount > effectiveRenderLimit
+					: records.length > effectiveRenderLimit
+				: rawEntryLimit > effectiveRenderLimit)
+	);
 
 	let filteredEntries = $derived.by<LoggerEntry[]>(() => {
 		if (!isFiltered) {
@@ -472,6 +624,10 @@
 		collapseDuplicates = !collapseDuplicates;
 	};
 
+	const toggleSuperCollapse = (): void => {
+		collapseAllDuplicates = !collapseAllDuplicates;
+	};
+
 	const applyMaxEntries = (): void => {
 		const normalized = Math.max(1, Math.round(Number(desiredMaxEntries)));
 		if (!Number.isFinite(normalized)) {
@@ -649,6 +805,14 @@
 			onclick={toggleCollapse}>
 			Collapse
 		</button>
+		<button
+			type="button"
+			class={`toolbar-button super-collapse${collapseAllDuplicates ? ' is-active' : ''}`}
+			title="Aggregate all matching messages, not just consecutive ones."
+			onclick={toggleSuperCollapse}
+			disabled={!collapseDuplicates}>
+			All duplicates
+		</button>
 
 		<button
 			type="button"
@@ -720,6 +884,7 @@
 	}
 
 	.toolbar-button.collapse.is-active,
+	.toolbar-button.super-collapse.is-active,
 	.toolbar-button.live.is-active {
 		border-color: color-mix(in srgb, var(--gc-color-focus) 60%, transparent);
 		background: color-mix(in srgb, var(--gc-color-focus-muted) 70%, black);
