@@ -22,7 +22,7 @@
 
 	let session = $derived(appState.session);
 	let node = $derived(
-		nodes.length > 0 ? (session?.graph.state.nodesById.get(nodes[0].node_id) ?? nodes[0]) : null
+		nodes.length > 0 ? (session?.graph.state.nodesById.get(nodes[0]?.node_id) ?? nodes[0]) : null
 	);
 
 	let isRoot = $derived(level === 0);
@@ -273,6 +273,12 @@
 
 	.node-inspector.root {
 		padding-top: 0.2rem;
+		box-sizing: border-box;
+		flex: 1;
+
+		:global(.node-inspector-content) {
+			flex: 1;
+		}
 	}
 
 	.node-inspector.nested {

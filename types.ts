@@ -56,9 +56,6 @@ export type UiScriptSource =
 export interface UiScriptConfig {
 	source: UiScriptSource;
 	runtime_hint?: UiScriptRuntimeKind;
-	auto_reload: boolean;
-	enabled: boolean;
-	requested_update_rate_hz?: number;
 	project_root?: string;
 }
 

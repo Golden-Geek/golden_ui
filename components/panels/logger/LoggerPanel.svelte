@@ -183,6 +183,13 @@
 		};
 	};
 
+	const uniqueRecordKey = (recordId: number, duplicateIndex: number): string => {
+		if (duplicateIndex <= 0) {
+			return `r:${recordId}`;
+		}
+		return `r:${recordId}:d${duplicateIndex}`;
+	};
+
 	$effect(() => {
 		if (session !== lastSessionRef) {
 			lastSessionRef = session;
@@ -210,16 +217,22 @@
 		const renderLimit = effectiveRenderLimit;
 		if (collapseDuplicates) {
 			const entries: LoggerEntry[] = [];
+			const duplicateCountById = new Map<number, number>();
 			const startIndex = Math.max(0, records.length - renderLimit);
 			for (let recordIndex = startIndex; recordIndex < records.length; recordIndex += 1) {
 				const record = records[recordIndex];
-				entries.push(makeEntry(record, `r:${record.id}`, repeatCountForRecord(record)));
+				const duplicateIndex = duplicateCountById.get(record.id) ?? 0;
+				duplicateCountById.set(record.id, duplicateIndex + 1);
+				entries.push(
+					makeEntry(record, uniqueRecordKey(record.id, duplicateIndex), repeatCountForRecord(record))
+				);
 			}
 			return entries;
 		}
 
 		let remaining = renderLimit;
 		const reversedEntries: LoggerEntry[] = [];
+		const duplicateCountById = new Map<number, number>();
 
 		for (let recordIndex = records.length - 1; recordIndex >= 0; recordIndex -= 1) {
 			if (remaining <= 0) {
@@ -227,12 +240,15 @@
 			}
 
 			const record = records[recordIndex];
+			const duplicateIndex = duplicateCountById.get(record.id) ?? 0;
+			duplicateCountById.set(record.id, duplicateIndex + 1);
+			const recordKey = uniqueRecordKey(record.id, duplicateIndex);
 			const repeatCount = repeatCountForRecord(record);
 			const takeCount = Math.min(remaining, repeatCount);
 
 			for (let offset = 0; offset < takeCount; offset += 1) {
 				const occurrenceIndex = repeatCount - 1 - offset;
-				reversedEntries.push(makeEntry(record, `r:${record.id}:${occurrenceIndex}`, 1));
+				reversedEntries.push(makeEntry(record, `${recordKey}:o${occurrenceIndex}`, 1));
 			}
 
 			remaining -= takeCount;

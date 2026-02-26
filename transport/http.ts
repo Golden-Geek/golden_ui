@@ -85,9 +85,6 @@ type RustScriptSource =
 interface RustScriptConfig {
 	source: RustScriptSource;
 	runtime_hint?: string;
-	auto_reload: boolean;
-	enabled: boolean;
-	requested_update_rate_hz?: number;
 	project_root?: string;
 }
 
@@ -501,22 +498,13 @@ const toRustScriptSource = (source: UiScriptSource): RustScriptSource => {
 const fromRustScriptConfig = (config: unknown): UiScriptConfig => {
 	if (!isRecord(config)) {
 		return {
-			source: { kind: 'inline', text: '' },
-			auto_reload: true,
-			enabled: true
+			source: { kind: 'inline', text: '' }
 		};
 	}
 
 	return {
 		source: fromRustScriptSource(config.source),
 		runtime_hint: normalizeScriptRuntimeKind(config.runtime_hint),
-		auto_reload: Boolean(config.auto_reload ?? true),
-		enabled: Boolean(config.enabled ?? true),
-		requested_update_rate_hz:
-			typeof config.requested_update_rate_hz === 'number' &&
-			Number.isFinite(config.requested_update_rate_hz)
-				? Math.max(1, Math.round(config.requested_update_rate_hz))
-				: undefined,
 		project_root:
 			typeof config.project_root === 'string' && config.project_root.trim().length > 0
 				? config.project_root
@@ -527,13 +515,6 @@ const fromRustScriptConfig = (config: unknown): UiScriptConfig => {
 const toRustScriptConfig = (config: UiScriptConfig): RustScriptConfig => ({
 	source: toRustScriptSource(config.source),
 	runtime_hint: config.runtime_hint,
-	auto_reload: config.auto_reload,
-	enabled: config.enabled,
-	requested_update_rate_hz:
-		typeof config.requested_update_rate_hz === 'number' &&
-		Number.isFinite(config.requested_update_rate_hz)
-			? Math.max(1, Math.round(config.requested_update_rate_hz))
-			: undefined,
 	project_root:
 		typeof config.project_root === 'string' && config.project_root.trim().length > 0
 			? config.project_root.trim()

@@ -1,15 +1,8 @@
 <script lang="ts">
 	import { appState } from '$lib/golden_ui/store/workbench.svelte';
-	import {
-		sendReloadScript,
-		sendSetScriptConfig
-	} from '$lib/golden_ui/store/ui-intents';
+	import { sendReloadScript, sendSetScriptConfig } from '$lib/golden_ui/store/ui-intents';
 	import type { NodeInspectorComponentProps } from '../node-inspector-registry';
-	import type {
-		UiScriptConfig,
-		UiScriptRuntimeKind,
-		UiScriptState
-	} from '$lib/golden_ui/types';
+	import type { UiScriptConfig, UiScriptRuntimeKind, UiScriptState } from '$lib/golden_ui/types';
 
 	let { node, defaultHeader, defaultChildren } = $props<NodeInspectorComponentProps>();
 
@@ -41,9 +34,6 @@
 	const configsEqual = (left: UiScriptConfig, right: UiScriptConfig): boolean => {
 		if (
 			left.runtime_hint !== right.runtime_hint ||
-			left.auto_reload !== right.auto_reload ||
-			left.enabled !== right.enabled ||
-			left.requested_update_rate_hz !== right.requested_update_rate_hz ||
 			(left.project_root ?? '') !== (right.project_root ?? '')
 		) {
 			return false;
@@ -178,29 +168,7 @@
 		patchDraft((config) => ({
 			...config,
 			runtime_hint:
-				value === 'luau' || value === 'quickJs'
-					? (value as UiScriptRuntimeKind)
-					: undefined
-		}));
-	};
-
-	const setRateEnabled = (enabled: boolean): void => {
-		patchDraft((config) => ({
-			...config,
-			requested_update_rate_hz: enabled
-				? Math.max(1, Math.round(config.requested_update_rate_hz ?? 60))
-				: undefined
-		}));
-	};
-
-	const setRateValue = (raw: string): void => {
-		const parsed = Math.round(Number(raw));
-		if (!Number.isFinite(parsed) || parsed <= 0) {
-			return;
-		}
-		patchDraft((config) => ({
-			...config,
-			requested_update_rate_hz: parsed
+				value === 'luau' || value === 'quickJs' ? (value as UiScriptRuntimeKind) : undefined
 		}));
 	};
 
@@ -221,7 +189,12 @@
 	};
 
 	const browseFile = async (): Promise<void> => {
-		if (!draftConfig || draftConfig.source.kind !== 'projectFile' || !hasDesktopDialog || browsing) {
+		if (
+			!draftConfig ||
+			draftConfig.source.kind !== 'projectFile' ||
+			!hasDesktopDialog ||
+			browsing
+		) {
 			return;
 		}
 
@@ -334,55 +307,6 @@
 						<option value="quickJs">QuickJS</option>
 					</select>
 				</label>
-
-				<label class="toggle">
-					<input
-						type="checkbox"
-						checked={draftConfig.enabled}
-						onchange={(event) => {
-							patchDraft((config) => ({
-								...config,
-								enabled: (event.target as HTMLInputElement).checked
-							}));
-						}} />
-					<span>Script Enabled</span>
-				</label>
-
-				<label class="toggle">
-					<input
-						type="checkbox"
-						checked={draftConfig.auto_reload}
-						onchange={(event) => {
-							patchDraft((config) => ({
-								...config,
-								auto_reload: (event.target as HTMLInputElement).checked
-							}));
-						}} />
-					<span>Auto Reload</span>
-				</label>
-
-				<label class="toggle">
-					<input
-						type="checkbox"
-						checked={draftConfig.requested_update_rate_hz !== undefined}
-						onchange={(event) => {
-							setRateEnabled((event.target as HTMLInputElement).checked);
-						}} />
-					<span>Custom Update Rate</span>
-				</label>
-
-				<label>
-					<span>Update Hz</span>
-					<input
-						type="number"
-						min="1"
-						step="1"
-						disabled={draftConfig.requested_update_rate_hz === undefined}
-						value={draftConfig.requested_update_rate_hz ?? ''}
-						onchange={(event) => {
-							setRateValue((event.target as HTMLInputElement).value);
-						}} />
-				</label>
 			</div>
 
 			{#if draftConfig.source.kind === 'inline'}
@@ -445,7 +369,9 @@
 				<div><strong>Runtime:</strong> {scriptState.runtime_kind ?? 'not loaded'}</div>
 				<div>
 					<strong>Effective Update Rate:</strong>
-					{scriptState.effective_update_rate_hz ? `${scriptState.effective_update_rate_hz} Hz` : 'passive'}
+					{scriptState.effective_update_rate_hz
+						? `${scriptState.effective_update_rate_hz} Hz`
+						: 'passive'}
 				</div>
 				<div>
 					<strong>Manifest API:</strong>
@@ -522,6 +448,7 @@
 		flex-direction: column;
 		gap: 0.2rem;
 		min-width: 0;
+		flex:1;
 	}
 
 	label > span {
@@ -529,21 +456,9 @@
 		opacity: 0.8;
 	}
 
-	.toggle {
-		flex-direction: row;
-		align-items: center;
-		gap: 0.35rem;
-	}
-
-	.toggle > span {
-		font-size: 0.68rem;
-		opacity: 1;
-	}
-
 	input,
 	select,
 	textarea {
-		background: rgba(0, 0, 0, 0.32);
 		border: solid 0.06rem rgba(255, 255, 255, 0.16);
 		border-radius: 0.25rem;
 		color: var(--text-color);
@@ -552,11 +467,18 @@
 		box-sizing: border-box;
 	}
 
+	input,
+	textarea {
+		background-color: var(--bg-color);
+		line-height: 1.3;
+	}
+
 	textarea {
 		min-height: 12rem;
 		resize: vertical;
 		font-family: 'Cascadia Code', 'Consolas', monospace;
 		line-height: 1.3;
+		flex:1;
 	}
 
 	.source-label,
