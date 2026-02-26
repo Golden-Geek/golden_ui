@@ -56,6 +56,8 @@
 	let addMenuElem: HTMLDivElement | null = $state(null as HTMLDivElement | null);
 	let addMenuNodeId = $state<number | null>(null);
 
+	let badgeOver = $state(false);
+
 	const WATCHER_SETTINGS_CACHE_LIMIT = 256;
 	const isRecord = (value: unknown): value is Record<string, unknown> =>
 		typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -143,9 +145,7 @@
 		selectedWatcherParamKey ? (watcherSettingsByParam[selectedWatcherParamKey] ?? {}) : {}
 	);
 
-	const persistWatcherSettingsForSelectedParam = (
-		nextPatch: Partial<WatcherUiSettings>
-	): void => {
+	const persistWatcherSettingsForSelectedParam = (nextPatch: Partial<WatcherUiSettings>): void => {
 		if (!selectedWatcherParamKey) {
 			return;
 		}
@@ -298,6 +298,28 @@
 				</span>
 			{/if}
 
+			
+
+			<div
+				class="node-id-badge"
+				role="button"
+				tabindex="-1"
+				onmouseenter={() => (badgeOver = true)}
+				onmouseleave={() => (badgeOver = false)}>
+				<button
+					class="copy-button"
+					title="Copy path to Clipboard"
+					onclick={() => {
+						if (node) {
+							navigator.clipboard.writeText(node.uuid);
+						}
+					}}>📋</button>
+				{#if badgeOver}
+					<div class="node-id" transition:slide={{ duration: 200, axis: 'x' }}>{node.decl_id}</div>
+				{/if}
+			</div>
+
+			<div class="spacer"></div>
 			{#if canCreateItems}
 				<div class="add-item-menu" bind:this={addMenuElem}>
 					<button
@@ -310,7 +332,7 @@
 						<img src={addIcon} alt="" />
 					</button>
 					{#if addMenuOpen}
-						<div class="add-item-dropdown" role="menu" aria-label="Creatable items">
+						<div class="add-item-dropdown" role="menu" aria-label="Creatable items" transition:slide={{ duration: 200 }}>
 							{#each creatableItems as item (`${item.node_type}:${item.item_kind}`)}
 								<button
 									type="button"
@@ -327,18 +349,6 @@
 					{/if}
 				</div>
 			{/if}
-
-			<div class="node-id-badge">
-				<span class="node-id">{node.decl_id}</span>
-				<button
-					class="copy-button"
-					title="Copy path to Clipboard"
-					onclick={() => {
-						if (node) {
-							navigator.clipboard.writeText(node.uuid);
-						}
-					}}>📋</button>
-			</div>
 		</div>
 
 		{#if warningCount > 0}
@@ -355,7 +365,6 @@
 		{/if}
 
 		<div class="inspector-content">
-
 			{#if node && node.data.kind === 'parameter'}
 				<div class="watcher-wrapper">
 					<Watcher
@@ -439,6 +448,7 @@
 		background-color: rgb(255, 255, 255, 0.1);
 		border: solid 1px rgba(255, 255, 255, 0.07);
 		color: var(--text-color);
+		cursor: pointer;
 	}
 
 	.inspector-header .copy-button {
@@ -462,9 +472,7 @@
 		width: 1.45rem;
 		height: 1.45rem;
 		padding: 0.15rem;
-		border: solid 0.06rem rgba(255, 255, 255, 0.15);
 		border-radius: 0.35rem;
-		background-color: rgba(255, 255, 255, 0.08);
 		cursor: pointer;
 		display: inline-flex;
 		align-items: center;
@@ -508,6 +516,10 @@
 		background-color: rgba(255, 255, 255, 0.12);
 	}
 
+	.inspector-header .spacer {
+		flex: 1 1 auto;
+	}
+
 	.warning-info {
 		display: flex;
 		flex-direction: column;
@@ -525,8 +537,6 @@
 	}
 
 	.inspector-content {
-		display:flex;
-		flex-direction: column;
 		flex: 1 1 auto;
 		min-height: 0;
 		overflow-x: hidden;

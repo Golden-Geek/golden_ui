@@ -115,9 +115,10 @@
 		class="node-inspector {node.data.kind} 
 			{isRoot ? 'root' : !isFirstLevel ? 'nested' : ''}
 		{isParameter ? 'parameter' : 'container'}"
+		class:custom-component={!!CustomInspectorComponent}
 		data-node-id={node.node_id}
 		style="--container-color: {color}">
-		{#snippet builtInHeader()}
+		{#snippet builtInHeader(headerExtra?: import('svelte').Snippet)}
 			{#if !isRoot}
 				<div class="node-header">
 					<span
@@ -197,6 +198,10 @@
 						{/if}
 
 						<NodeWarningBadge {warnings} />
+
+						{#if headerExtra}
+							{@render headerExtra()}
+						{/if}
 					</span>
 				</div>
 			{/if}
@@ -234,8 +239,8 @@
 				{hasChildren}
 				{toggleCollapsed}
 				{setCollapsed}>
-				{#snippet defaultHeader()}
-					{@render builtInHeader()}
+				{#snippet defaultHeader(headerExtra?: import('svelte').Snippet)}
+					{@render builtInHeader(headerExtra)}
 				{/snippet}
 				{#snippet defaultChildren()}
 					{@render builtInChildren()}
@@ -274,11 +279,14 @@
 	.node-inspector.root {
 		padding-top: 0.2rem;
 		box-sizing: border-box;
-		flex: 1;
 
 		:global(.node-inspector-content) {
 			flex: 1;
 		}
+	}
+
+	.node-inspector.root.custom-component {
+		height: 100%;
 	}
 
 	.node-inspector.nested {

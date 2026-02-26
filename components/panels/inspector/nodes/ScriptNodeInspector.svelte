@@ -3,6 +3,7 @@
 	import { sendReloadScript, sendSetScriptConfig } from '$lib/golden_ui/store/ui-intents';
 	import type { NodeInspectorComponentProps } from '../node-inspector-registry';
 	import type { UiScriptConfig, UiScriptRuntimeKind, UiScriptState } from '$lib/golden_ui/types';
+	import SelectNodeButton from '../../../common/SelectNodeButton.svelte';
 
 	let { node, defaultHeader, defaultChildren } = $props<NodeInspectorComponentProps>();
 
@@ -248,8 +249,12 @@
 	};
 </script>
 
+{#snippet scriptHeaderExtra()}
+	<SelectNodeButton {node} />
+{/snippet}
+
 {#if liveNode.node_type === 'script'}
-	{@render defaultHeader?.()}
+	{@render defaultHeader?.(scriptHeaderExtra)}
 	<div class="node-inspector-content script-node-inspector">
 		<div class="toolbar">
 			<button type="button" class="ghost" disabled={loading} onclick={() => void loadScriptState()}>
@@ -448,7 +453,7 @@
 		flex-direction: column;
 		gap: 0.2rem;
 		min-width: 0;
-		flex:1;
+		flex: 1;
 	}
 
 	label > span {
@@ -478,7 +483,7 @@
 		resize: vertical;
 		font-family: 'Cascadia Code', 'Consolas', monospace;
 		line-height: 1.3;
-		flex:1;
+		flex: 1;
 	}
 
 	.source-label,
