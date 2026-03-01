@@ -377,7 +377,7 @@
 								: 'passive'}
 						</div>
 						<div>
-							<strong>Manifest API:</strong>
+							<strong>Script API:</strong>
 							{scriptState.manifest ? scriptState.manifest.api_version : 'not loaded'}
 						</div>
 					</div>
