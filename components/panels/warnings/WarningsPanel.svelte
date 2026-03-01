@@ -196,6 +196,7 @@
 		margin: 0;
 		font-size: 0.78rem;
 		line-height: 1.3;
+		user-select: text;
 		word-break: break-word;
 	}
 
@@ -204,6 +205,7 @@
 		font-size: 0.68rem;
 		line-height: 1.3;
 		opacity: 0.8;
+		user-select: text;
 		word-break: break-word;
 	}
 </style>

@@ -202,7 +202,8 @@
 		display: flex;
 		align-items: center;
 		justify-content: right;
-		flex-basis: 50%;
+		flex:1;
+		max-width:15rem;
 	}
 
 	.parameter-wrapper.readonly, .parameter-wrapper.disabled {

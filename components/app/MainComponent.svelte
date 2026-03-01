@@ -36,7 +36,6 @@
 	import { loadPersistedDockLayout, savePersistedDockLayout } from '../../store/ui-persistence';
 	import { appState } from '../../store/workbench.svelte';
 
-	import MainViewPanel from '../panels/MainViewPanel.svelte';
 	import UnknownPanel from '../panels/UnknownPanel.svelte';
 	import Outliner from '../panels/outliner/OutlinerPanel.svelte';
 	import InspectorPanel from '../panels/inspector/InspectorPanel.svelte';
@@ -60,16 +59,6 @@
 			panelType: 'inspector',
 			title: 'Inspector',
 			component: InspectorPanel,
-			origin: 'golden'
-		},
-		mainView: {
-			panelType: 'mainView',
-			title: 'Main View',
-			component: MainViewPanel,
-			defaultParams: {
-				mode: 'graph',
-				nodeCount: 3
-			},
 			origin: 'golden'
 		},
 
@@ -635,24 +624,6 @@
 				maximumWidth: remToPx(30)
 			},
 			{
-				panelId: 'panel-main',
-				panelType: 'mainView',
-				position: {
-					referencePanelId: 'outliner',
-					direction: 'right'
-				}
-			},
-			{
-				panelId: 'inspector',
-				panelType: 'inspector',
-				initialWidth: remToPx(35),
-				minimumWidth: remToPx(22),
-				position: {
-					referencePanelId: 'panel-main',
-					direction: 'right'
-				}
-			},
-			{
 				panelId: 'logger',
 				panelType: 'logger',
 				initialHeight: remToPx(20),
@@ -670,7 +641,18 @@
 					direction: 'within'
 				},
 				inactive: true
-			}
+			},
+			{
+				panelId: 'inspector',
+				panelType: 'inspector',
+				initialWidth: remToPx(35),
+				minimumWidth: remToPx(22),
+				position: {
+					referencePanelId: 'logger',
+					direction: 'right'
+				}
+			},
+			
 		];
 	};
 
