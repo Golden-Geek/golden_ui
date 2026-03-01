@@ -516,9 +516,6 @@
 		background-color: rgba(255, 255, 255, 0.12);
 	}
 
-	.inspector-header .spacer {
-		flex: 1 1 auto;
-	}
 
 	.warning-info {
 		display: flex;

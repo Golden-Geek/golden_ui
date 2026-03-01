@@ -10,7 +10,7 @@
 	const GROUP_EXTENSIONS: Record<UiFileTypeGroup, string[]> = {
 		audio: ['wav', 'wave', 'aif', 'aiff', 'flac', 'mp3', 'ogg', 'opus', 'm4a', 'aac', 'wma'],
 		video: ['mp4', 'm4v', 'mov', 'avi', 'mkv', 'webm', 'mpg', 'mpeg', 'ts', 'm2ts', 'flv'],
-		script: ['lua', 'luau', 'js', 'mjs', 'cjs']
+		script: ['js', 'mjs', 'cjs']
 	};
 
 	let session = $derived(appState.session);

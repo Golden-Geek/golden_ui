@@ -82,6 +82,19 @@ type PendingLogMutation =
 const formatEventTime = (value: { tick: number; micro: number; seq: number }): string =>
 	`${value.tick}:${value.micro}:${value.seq}`;
 
+const compareEventTime = (
+	left: { tick: number; micro: number; seq: number },
+	right: { tick: number; micro: number; seq: number }
+): number => {
+	if (left.tick !== right.tick) {
+		return left.tick - right.tick;
+	}
+	if (left.micro !== right.micro) {
+		return left.micro - right.micro;
+	}
+	return left.seq - right.seq;
+};
+
 const isEditableTarget = (target: EventTarget | null): boolean => {
 	if (!(target instanceof HTMLElement)) {
 		return false;
@@ -197,6 +210,7 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 
 	let mountedCleanup: (() => void) | null = null;
 	let resyncInFlight = false;
+	let resyncQueued = false;
 	let intentQueueTail: Promise<void> = Promise.resolve();
 
 	const client = createWebSocketUiClient({
@@ -672,20 +686,39 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 
 	const resyncSnapshot = async (successStatus: string): Promise<void> => {
 		if (resyncInFlight) {
+			resyncQueued = true;
 			return;
 		}
 		resyncInFlight = true;
 		try {
-			const snapshot = await client.snapshot(scope);
-			graph.loadSnapshot(snapshot);
-			invalidateWarningCaches();
-			restorePersistedSelection();
-			reconcileSelection();
-			applyHistoryState(snapshot.history);
-			resetPendingLogMutations();
-			logMaxEntries = snapshot.logger.max_entries;
-			logRecords = [...snapshot.logger.records];
-			status = successStatus;
+			while (true) {
+				resyncQueued = false;
+				const lastKnownEventTime = graph.state.lastEventTime;
+				const snapshot = await client.snapshot(scope);
+				const latestAppliedEventTime = graph.state.lastEventTime ?? lastKnownEventTime;
+
+				// Ignore stale snapshots that were captured before already-applied events.
+				if (
+					latestAppliedEventTime &&
+					compareEventTime(snapshot.at, latestAppliedEventTime) < 0
+				) {
+					resyncQueued = true;
+				} else {
+					graph.loadSnapshot(snapshot);
+					invalidateWarningCaches();
+					restorePersistedSelection();
+					reconcileSelection();
+					applyHistoryState(snapshot.history);
+					resetPendingLogMutations();
+					logMaxEntries = snapshot.logger.max_entries;
+					logRecords = [...snapshot.logger.records];
+					status = successStatus;
+				}
+
+				if (!resyncQueued) {
+					break;
+				}
+			}
 		} catch (error) {
 			const message = error instanceof Error ? error.message : 'unknown resync error';
 			status = `Resync failed: ${message}`;

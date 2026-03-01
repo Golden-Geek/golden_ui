@@ -60,10 +60,6 @@ html {
     -webkit-app-region: no-drag;
 }
 
-.gc-header .spacer {
-    flex: 1 1 auto;
-    height: 100%;
-}
 
 .gc-header.tauri {
     cursor: grab;
@@ -307,6 +303,10 @@ select {
 
 ::-webkit-scrollbar-thumb:hover {
     background-color: rgba(255, 255, 255, 0.45);
+}
+
+.spacer {
+    flex: 1 1 auto;
 }
 
 /* NODES */

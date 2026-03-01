@@ -855,9 +855,6 @@
 		width:5rem;
 	}
 
-	.spacer {
-		flex: 1;
-	}
 
 	footer 
 	{

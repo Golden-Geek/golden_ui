@@ -21,7 +21,6 @@ import type {
 	UiReferenceRoot,
 	UiScriptConfig,
 	UiScriptManifest,
-	UiScriptRuntimeKind,
 	UiScriptSource,
 	UiScriptState,
 	UiSnapshot,
@@ -84,8 +83,6 @@ type RustScriptSource =
 
 interface RustScriptConfig {
 	source: RustScriptSource;
-	runtime_hint?: string;
-	project_root?: string;
 }
 
 interface RustScriptManifest {
@@ -102,7 +99,6 @@ interface RustScriptManifest {
 
 interface RustScriptState {
 	config: RustScriptConfig;
-	runtime_kind?: string;
 	effective_update_rate_hz?: number;
 	export_names?: string[];
 	manifest?: RustScriptManifest;
@@ -469,13 +465,6 @@ const fromRustFileConstraints = (file: RustUiParamDto['constraints']['file']): U
 	};
 };
 
-const normalizeScriptRuntimeKind = (value: unknown): UiScriptRuntimeKind | undefined => {
-	if (value === 'luau' || value === 'quickJs') {
-		return value;
-	}
-	return undefined;
-};
-
 const fromRustScriptSource = (source: unknown): UiScriptSource => {
 	if (isRecord(source)) {
 		if (source.kind === 'projectFile') {
@@ -503,22 +492,12 @@ const fromRustScriptConfig = (config: unknown): UiScriptConfig => {
 	}
 
 	return {
-		source: fromRustScriptSource(config.source),
-		runtime_hint: normalizeScriptRuntimeKind(config.runtime_hint),
-		project_root:
-			typeof config.project_root === 'string' && config.project_root.trim().length > 0
-				? config.project_root
-				: undefined
+		source: fromRustScriptSource(config.source)
 	};
 };
 
 const toRustScriptConfig = (config: UiScriptConfig): RustScriptConfig => ({
-	source: toRustScriptSource(config.source),
-	runtime_hint: config.runtime_hint,
-	project_root:
-		typeof config.project_root === 'string' && config.project_root.trim().length > 0
-			? config.project_root.trim()
-			: undefined
+	source: toRustScriptSource(config.source)
 });
 
 const fromRustScriptManifest = (manifest: unknown): UiScriptManifest | undefined => {
@@ -568,7 +547,6 @@ const fromRustScriptManifest = (manifest: unknown): UiScriptManifest | undefined
 
 const fromRustScriptState = (state: RustScriptState): UiScriptState => ({
 	config: fromRustScriptConfig(state.config),
-	runtime_kind: normalizeScriptRuntimeKind(state.runtime_kind),
 	effective_update_rate_hz:
 		typeof state.effective_update_rate_hz === 'number' &&
 		Number.isFinite(state.effective_update_rate_hz)

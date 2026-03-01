@@ -32,7 +32,7 @@
 
 {#if safeCount > 0}
 	<button
-		transition:fade ={{ duration: 100 }}
+		transition:fade={{ duration: 100 }}
 		class="warning-badge"
 		title={computedTitle}
 		aria-label={computedTitle}
@@ -51,8 +51,10 @@
 			<div class="warning-icon"></div>
 
 			{#if showMessage}
-				<div class="warning-message" transition:slide={{ duration: 150, axis: 'x' }}>
-					{computedTitle}
+				<div class="message-wrapper" transition:slide={{ duration: 150, axis: 'x' }}>
+					<div class="warning-message">
+						{computedTitle}
+					</div>
 				</div>
 			{/if}
 		</div>
@@ -84,15 +86,21 @@
 		padding: 0.1rem 0.3rem;
 		border-radius: 0.45rem;
 		gap: 0.2rem;
-		z-index: 100;
+		z-index: 1000;
 	}
 
 	.warning-badge:hover .warning-wrapper {
 		background-color: hsl(from var(--gc-color-warning) h s calc(l * 0.4));
 	}
 
+	.message-wrapper{
+		z-index: 1000;
+	}
+
 	.warning-message {
 		max-height: 100%;
-		white-space: nowrap;
+		width: 15rem;
+		overflow: hidden;
+		/* white-space: nowrap; */
 	}
 </style>

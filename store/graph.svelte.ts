@@ -136,6 +136,14 @@ const applyMetaPatch = (node: UiNodeDto, patch: Partial<UiNodeMetaDto>): UiNodeD
 	}
 });
 
+const shouldIgnoreTransportResync = (payload: unknown): boolean => {
+	if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) {
+		return false;
+	}
+	const reason = (payload as { reason?: unknown }).reason;
+	return reason === 'script_config_updated' || reason === 'script_reload_requested';
+};
+
 const reduceEvent = (state: GraphState, event: UiEventDto): GraphState => {
 	const next: GraphState = {
 		...state,
@@ -225,6 +233,9 @@ const reduceEvent = (state: GraphState, event: UiEventDto): GraphState => {
 		}
 		case 'custom': {
 			if (event.kind.topic === '__transport.resync_required') {
+				if (shouldIgnoreTransportResync(event.kind.payload)) {
+					break;
+				}
 				next.requiresResync = true;
 			}
 			break;

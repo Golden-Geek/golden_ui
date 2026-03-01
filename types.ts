@@ -47,16 +47,12 @@ export interface UiReferenceConstraints {
 	default_search_filter?: string;
 }
 
-export type UiScriptRuntimeKind = 'luau' | 'quickJs';
-
 export type UiScriptSource =
 	| { kind: 'inline'; text: string }
 	| { kind: 'projectFile'; path: string };
 
 export interface UiScriptConfig {
 	source: UiScriptSource;
-	runtime_hint?: UiScriptRuntimeKind;
-	project_root?: string;
 }
 
 export interface UiScriptFnSignature {
@@ -77,7 +73,6 @@ export interface UiScriptManifest {
 
 export interface UiScriptState {
 	config: UiScriptConfig;
-	runtime_kind?: UiScriptRuntimeKind;
 	effective_update_rate_hz?: number;
 	export_names: string[];
 	manifest?: UiScriptManifest;
