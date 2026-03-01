@@ -1,38 +1,38 @@
 <script lang="ts">
+	import { historyField } from '@codemirror/commands';
 	import { Compartment, EditorState, type Extension } from '@codemirror/state';
-	import { EditorView, placeholder as codeMirrorPlaceholder } from '@codemirror/view';
 	import { javascript } from '@codemirror/lang-javascript';
 	import { css } from '@codemirror/lang-css';
 	import { oneDark } from '@codemirror/theme-one-dark';
+	import { EditorView, placeholder as codeMirrorPlaceholder } from '@codemirror/view';
 	import { basicSetup } from 'codemirror';
-	import { onMount } from 'svelte';
 
 	type CodeLanguage = 'javascript' | 'css' | 'plain';
 
-	interface PersistedEditorState {
-		anchor: number;
-		head: number;
+	interface PersistedEditorSession {
+		json: unknown;
+		doc: string;
 		scrollTop: number;
 		scrollLeft: number;
 		hadFocus: boolean;
 	}
 
 	const PERSISTED_EDITOR_STATE_LIMIT = 64;
-	const persistedEditorStates = new Map<string, PersistedEditorState>();
+	const persistedEditorSessions = new Map<string, PersistedEditorSession>();
 
 	const normalizePersistKey = (value: string): string => value.trim();
 
-	const persistEditorState = (key: string, state: PersistedEditorState): void => {
-		if (persistedEditorStates.has(key)) {
-			persistedEditorStates.delete(key);
+	const persistEditorSession = (key: string, session: PersistedEditorSession): void => {
+		if (persistedEditorSessions.has(key)) {
+			persistedEditorSessions.delete(key);
 		}
-		persistedEditorStates.set(key, state);
-		if (persistedEditorStates.size <= PERSISTED_EDITOR_STATE_LIMIT) {
+		persistedEditorSessions.set(key, session);
+		if (persistedEditorSessions.size <= PERSISTED_EDITOR_STATE_LIMIT) {
 			return;
 		}
-		const oldestKey = persistedEditorStates.keys().next().value;
+		const oldestKey = persistedEditorSessions.keys().next().value;
 		if (typeof oldestKey === 'string') {
-			persistedEditorStates.delete(oldestKey);
+			persistedEditorSessions.delete(oldestKey);
 		}
 	};
 
@@ -151,75 +151,90 @@
 		onchange?.(nextValue);
 	});
 
-	const buildEditor = (host: HTMLDivElement): EditorView => {
-		const state = EditorState.create({
-			doc: value,
-			extensions: [
-				basicSetup,
-				oneDark,
-				interactionHandlers,
-				changeListener,
-				EditorView.lineWrapping,
-				EditorView.theme({
-					'&': {
-						height: '100%',
-						minHeight: 'var(--code-editor-min-height)'
-					},
-					'.cm-scroller': {
-						fontFamily: "'Cascadia Code', 'Consolas', monospace",
-						fontSize: '0.72rem',
-						lineHeight: '1.35'
-					}
-				}),
-				languageCompartment.of(resolveLanguageExtension(language)),
-				editableCompartment.of(EditorView.editable.of(!readonly)),
-				placeholderCompartment.of(resolvePlaceholderExtension(placeholder))
-			]
-		});
-		return new EditorView({ state, parent: host });
+	const buildExtensions = (): Extension[] => [
+		basicSetup,
+		oneDark,
+		interactionHandlers,
+		changeListener,
+		EditorView.lineWrapping,
+		EditorView.theme({
+			'&': {
+				height: '100%',
+				minHeight: 'var(--code-editor-min-height)'
+			},
+			'.cm-scroller': {
+				fontFamily: "'Cascadia Code', 'Consolas', monospace",
+				fontSize: '0.72rem',
+				lineHeight: '1.35'
+			}
+		}),
+		languageCompartment.of(resolveLanguageExtension(language)),
+		editableCompartment.of(EditorView.editable.of(!readonly)),
+		placeholderCompartment.of(resolvePlaceholderExtension(placeholder))
+	];
+
+	const restorePersistedViewState = (
+		view: EditorView,
+		session: PersistedEditorSession | undefined
+	): void => {
+		if (!session) {
+			return;
+		}
+		const apply = (): void => {
+			view.scrollDOM.scrollTop = session.scrollTop;
+			view.scrollDOM.scrollLeft = session.scrollLeft;
+			if (session.hadFocus) {
+				view.focus();
+			}
+		};
+		queueMicrotask(apply);
+		requestAnimationFrame(apply);
 	};
 
-	const captureEditorState = (view: EditorView): void => {
+	const buildEditor = (host: HTMLDivElement): EditorView => {
+		const normalizedKey = normalizePersistKey(persistKey);
+		const persistedSession =
+			normalizedKey.length > 0 ? persistedEditorSessions.get(normalizedKey) : undefined;
+		const extensions = buildExtensions();
+
+		let state: EditorState;
+		if (persistedSession && persistedSession.doc === value) {
+			try {
+				state = EditorState.fromJSON(
+					persistedSession.json as object,
+					{ extensions },
+					{ history: historyField }
+				);
+			} catch (_error) {
+				state = EditorState.create({
+					doc: value,
+					extensions
+				});
+			}
+		} else {
+			state = EditorState.create({
+				doc: value,
+				extensions
+			});
+		}
+
+		const view = new EditorView({ state, parent: host });
+		restorePersistedViewState(view, persistedSession);
+		return view;
+	};
+
+	const captureEditorSession = (view: EditorView): void => {
 		const normalizedKey = normalizePersistKey(persistKey);
 		if (normalizedKey.length === 0) {
 			return;
 		}
-		const selection = view.state.selection.main;
-		persistEditorState(normalizedKey, {
-			anchor: selection.anchor,
-			head: selection.head,
+		persistEditorSession(normalizedKey, {
+			json: view.state.toJSON({ history: historyField }),
+			doc: view.state.doc.toString(),
 			scrollTop: view.scrollDOM.scrollTop,
 			scrollLeft: view.scrollDOM.scrollLeft,
 			hadFocus: view.hasFocus
 		});
-	};
-
-	const restoreEditorState = (view: EditorView): void => {
-		const normalizedKey = normalizePersistKey(persistKey);
-		if (normalizedKey.length === 0) {
-			return;
-		}
-		const persisted = persistedEditorStates.get(normalizedKey);
-		if (!persisted) {
-			return;
-		}
-
-		const docLength = view.state.doc.length;
-		const anchor = Math.max(0, Math.min(docLength, persisted.anchor));
-		const head = Math.max(0, Math.min(docLength, persisted.head));
-		view.dispatch({
-			selection: { anchor, head }
-		});
-
-		const restoreViewport = (): void => {
-			view.scrollDOM.scrollTop = persisted.scrollTop;
-			view.scrollDOM.scrollLeft = persisted.scrollLeft;
-			if (persisted.hadFocus) {
-				view.focus();
-			}
-		};
-		queueMicrotask(restoreViewport);
-		requestAnimationFrame(restoreViewport);
 	};
 
 	$effect(() => {
@@ -230,35 +245,12 @@
 
 		const view = buildEditor(host);
 		editorView = view;
-		restoreEditorState(view);
 		return () => {
-			captureEditorState(view);
+			captureEditorSession(view);
 			view.destroy();
 			if (editorView === view) {
 				editorView = null;
 			}
-		};
-	});
-
-	$effect(() => {
-		const view = editorView;
-		if (!view || typeof window === 'undefined') {
-			return;
-		}
-
-		const onWindowKeydown = (event: KeyboardEvent): void => {
-			if (!view.hasFocus || !saveShortcutTriggered(event)) {
-				return;
-			}
-			event.preventDefault();
-			event.stopPropagation();
-			event.stopImmediatePropagation();
-			commitCurrentValue({ keepFocus: true });
-		};
-
-		window.addEventListener('keydown', onWindowKeydown, true);
-		return () => {
-			window.removeEventListener('keydown', onWindowKeydown, true);
 		};
 	});
 
@@ -323,10 +315,6 @@
 		view.dispatch({
 			effects: placeholderCompartment.reconfigure(resolvePlaceholderExtension(placeholder))
 		});
-	});
-	
-	onMount(() => {
-		console.log("CodeEditor mounted");
 	});
 </script>
 

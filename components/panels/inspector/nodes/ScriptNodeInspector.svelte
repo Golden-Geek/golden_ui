@@ -199,7 +199,7 @@
 
 	const handleInlineEditorCommit = async (nextValue: string): Promise<void> => {
 		handleInlineEditorChange(nextValue);
-		await saveConfig(false, { refreshRuntimeState: false });
+		await saveConfig(false);
 	};
 
 	const invokeAppCommand = async (
@@ -242,11 +242,7 @@
 		}
 	};
 
-	const saveConfig = async (
-		forceReload: boolean,
-		options: { refreshRuntimeState?: boolean } = {}
-	): Promise<void> => {
-		const { refreshRuntimeState = true } = options;
+	const saveConfig = async (forceReload: boolean): Promise<void> => {
 		if (!draftConfig || applying || (!forceReload && !hasDraftChanges())) {
 			return;
 		}
@@ -268,7 +264,7 @@
 			};
 		}
 
-		if (refreshRuntimeState) {
+		if (forceReload) {
 			await loadScriptState({ preserveDraft: true });
 		}
 	};
@@ -339,7 +335,7 @@
 								language="javascript"
 								minHeight="0rem"
 								fill={true}
-								persistKey={`script-inline-${liveNode.node_uuid}`}
+								persistKey={`script-inline-${liveNode.node_id}`}
 								commitOnBlur={true}
 								oncommit={handleInlineEditorCommit} />
 						</div>
