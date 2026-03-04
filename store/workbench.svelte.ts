@@ -572,7 +572,7 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 	};
 
 	const pendingLogTailId = (): number | undefined => {
-		let tailId = logRecords[logRecords.length - 1]?.id;
+		let tailId:number | undefined = logRecords[logRecords.length - 1]?.id;
 		for (const mutation of pendingLogMutations) {
 			if (mutation.kind === 'clear') {
 				tailId = undefined;

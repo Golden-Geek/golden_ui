@@ -5,6 +5,7 @@ import type {
 	ParamValue,
 	UiEditIntent,
 	UiNodeMetaDto,
+	UiParameterControlState,
 	UiScriptConfig
 } from '../types';
 import { appState } from './workbench.svelte';
@@ -47,6 +48,17 @@ export const sendSetParamIntent = async (
 		node,
 		value,
 		behaviour
+	});
+};
+
+export const sendSetParamControlStateIntent = async (
+	node: NodeId,
+	state: UiParameterControlState
+): Promise<boolean> => {
+	return sendUiIntent({
+		kind: 'setParamControlState',
+		node,
+		state
 	});
 };
 

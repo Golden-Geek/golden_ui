@@ -172,6 +172,23 @@ const reduceEvent = (state: GraphState, event: UiEventDto): GraphState => {
 			});
 			break;
 		}
+		case 'paramControlChanged': {
+			const node = next.nodesById.get(event.kind.param);
+			if (!node || node.data.kind !== 'parameter') {
+				next.requiresResync = true;
+				break;
+			}
+			const updatedParam = {
+				...node.data.param,
+				control: event.kind.new_state
+			};
+			next.paramsById.set(event.kind.param, updatedParam);
+			next.nodesById.set(event.kind.param, {
+				...node,
+				data: { kind: 'parameter', param: updatedParam }
+			});
+			break;
+		}
 		case 'childAdded': {
 			addToChildren(next.childrenById, event.kind.parent, event.kind.child);
 			next.parentById.set(event.kind.child, event.kind.parent);

@@ -13,6 +13,10 @@ import type {
 	UiNodeDto,
 	UiHistoryState,
 	UiNodeMetaDto,
+	UiNodeReferenceValue,
+	UiParameterControlMode,
+	UiParameterControlSpec,
+	UiParameterControlState,
 	UiParamConstraints,
 	UiParamDto,
 	UiFileConstraints,
@@ -144,6 +148,7 @@ interface RustUiParamDto {
 		widget?: string;
 		unit?: string;
 	};
+	control?: unknown;
 }
 
 interface RustUiLogRecord extends UiLogRecord {}
@@ -189,13 +194,24 @@ type RustUiEventDto =
 						old_value: RustParamValue;
 						new_value: RustParamValue;
 				  }
-				| Exclude<UiEventDto['kind'], { kind: 'paramChanged' }>;
+				| {
+						kind: 'paramControlChanged';
+						param: number;
+						old_state: unknown;
+						new_state: unknown;
+				  }
+				| Exclude<
+						UiEventDto['kind'],
+						{ kind: 'paramChanged' } | { kind: 'paramControlChanged' }
+				  >;
 	  })
 	| (Omit<UiEventDto, 'kind'> & {
 			kind: UiEventDto['kind']['kind'];
 			param?: number;
 			old_value?: RustParamValue;
 			new_value?: RustParamValue;
+			old_state?: unknown;
+			new_state?: unknown;
 			parent?: number;
 			child?: number;
 			decl_id?: string;
@@ -611,6 +627,158 @@ const fromRustConstraints = (constraints: RustUiParamDto['constraints']): UiPara
 	file: fromRustFileConstraints(constraints.file)
 });
 
+const NIL_UUID = '00000000-0000-0000-0000-000000000000';
+
+const isUiParameterControlMode = (value: unknown): value is UiParameterControlMode =>
+	value === 'manual' ||
+	value === 'contextLink' ||
+	value === 'templateText' ||
+	value === 'expression' ||
+	value === 'proxy' ||
+	value === 'binding' ||
+	value === 'animation';
+
+const fromRustNodeReference = (value: unknown): UiNodeReferenceValue => {
+	if (!isRecord(value)) {
+		return { uuid: NIL_UUID };
+	}
+
+	const uuid = typeof value.uuid === 'string' ? value.uuid : NIL_UUID;
+	const cachedId = value.cached_id;
+	const cachedName = value.cached_name;
+	const relativePath = value.relative_path_from_root;
+
+	return {
+		uuid,
+		cached_id: typeof cachedId === 'number' ? cachedId : undefined,
+		cached_name: typeof cachedName === 'string' ? cachedName : undefined,
+		relative_path_from_root: Array.isArray(relativePath)
+			? relativePath.filter((segment): segment is string => typeof segment === 'string')
+			: undefined
+	};
+};
+
+const defaultControlSpecForMode = (mode: UiParameterControlMode): UiParameterControlSpec => {
+	switch (mode) {
+		case 'contextLink':
+			return { mode: 'contextLink', symbol: '' };
+		case 'templateText':
+			return { mode: 'templateText', template: '' };
+		case 'expression':
+			return { mode: 'expression', expression: '' };
+		case 'proxy':
+			return { mode: 'proxy', target: { uuid: NIL_UUID } };
+		case 'binding':
+			return { mode: 'binding', target: { uuid: NIL_UUID } };
+		case 'animation':
+			return {
+				mode: 'animation',
+				animation: {
+					waveform: 'sine',
+					frequency_hz: 1,
+					amplitude: 1,
+					offset: 0,
+					phase: 0
+				}
+			};
+		case 'manual':
+		default:
+			return { mode: 'manual' };
+	}
+};
+
+const fromRustControlSpec = (
+	mode: UiParameterControlMode,
+	controlPayload: unknown
+): UiParameterControlSpec => {
+	if (!isRecord(controlPayload)) {
+		return defaultControlSpecForMode(mode);
+	}
+
+	switch (mode) {
+		case 'contextLink':
+			return {
+				mode: 'contextLink',
+				symbol: typeof controlPayload.symbol === 'string' ? controlPayload.symbol : ''
+			};
+		case 'templateText':
+			return {
+				mode: 'templateText',
+				template: typeof controlPayload.template === 'string' ? controlPayload.template : ''
+			};
+		case 'expression':
+			return {
+				mode: 'expression',
+				expression:
+					typeof controlPayload.expression === 'string' ? controlPayload.expression : ''
+			};
+		case 'proxy':
+			return {
+				mode: 'proxy',
+				target: fromRustNodeReference(controlPayload.target)
+			};
+		case 'binding':
+			return {
+				mode: 'binding',
+				target: fromRustNodeReference(controlPayload.target)
+			};
+		case 'animation': {
+			const animation = isRecord(controlPayload.animation)
+				? controlPayload.animation
+				: {};
+			const waveformRaw = animation.waveform;
+			const waveform =
+				waveformRaw === 'triangle' ||
+				waveformRaw === 'saw' ||
+				waveformRaw === 'square' ||
+				waveformRaw === 'sine'
+					? waveformRaw
+					: 'sine';
+			return {
+				mode: 'animation',
+				animation: {
+					waveform,
+					frequency_hz: Number(animation.frequency_hz ?? 1),
+					amplitude: Number(animation.amplitude ?? 1),
+					offset: Number(animation.offset ?? 0),
+					phase: Number(animation.phase ?? 0)
+				}
+			};
+		}
+		case 'manual':
+		default:
+			return { mode: 'manual' };
+	}
+};
+
+const fromRustControlState = (control: unknown): UiParameterControlState => {
+	if (!isRecord(control)) {
+		return {
+			mode: 'manual',
+			spec: { mode: 'manual' },
+			diagnostics: []
+		};
+	}
+
+	const modeRaw = control.mode;
+	const mode: UiParameterControlMode = isUiParameterControlMode(modeRaw) ? modeRaw : 'manual';
+	const diagnostics = Array.isArray(control.diagnostics)
+		? control.diagnostics
+				.filter((item): item is Record<string, unknown> => isRecord(item))
+				.map((item) => ({
+					code: typeof item.code === 'string' ? item.code : 'unknown',
+					message: typeof item.message === 'string' ? item.message : '',
+					detail: typeof item.detail === 'string' ? item.detail : undefined
+				}))
+		: [];
+
+	return {
+		mode,
+		spec: fromRustControlSpec(mode, control.spec),
+		diagnostics
+	};
+};
+
 const fromRustParam = (param: RustUiParamDto): UiParamDto => ({
 	value: fromRustParamValue(param.value),
 	default_value: fromRustParamValue(param.default_value ?? param.value),
@@ -618,6 +786,7 @@ const fromRustParam = (param: RustUiParamDto): UiParamDto => ({
 	read_only: param.read_only,
 	constraints: fromRustConstraints(param.constraints),
 	ui_hints: { ...(param.ui_hints ?? {}) },
+	control: fromRustControlState(param.control),
 	reference_allowed_targets: [...(param.reference_allowed_targets ?? [])],
 	reference_visible_nodes: [...(param.reference_visible_nodes ?? [])]
 });
@@ -673,6 +842,17 @@ const fromRustEvent = (event: RustUiEventDto): UiEventDto => {
 				}
 			};
 		}
+		if (nestedKind.kind === 'paramControlChanged') {
+			return {
+				...(event as Omit<UiEventDto, 'kind'>),
+				kind: {
+					kind: 'paramControlChanged',
+					param: Number(nestedKind.param ?? 0),
+					old_state: fromRustControlState(nestedKind.old_state),
+					new_state: fromRustControlState(nestedKind.new_state)
+				}
+			};
+		}
 		return event as UiEventDto;
 	}
 
@@ -688,6 +868,17 @@ const fromRustEvent = (event: RustUiEventDto): UiEventDto => {
 				param: Number((event as Record<string, unknown>).param ?? 0),
 				old_value: fromRustParamValue((event as Record<string, unknown>).old_value),
 				new_value: fromRustParamValue((event as Record<string, unknown>).new_value)
+			}
+		};
+	}
+	if (nestedKind === 'paramControlChanged') {
+		return {
+			...(event as Omit<UiEventDto, 'kind'>),
+			kind: {
+				kind: 'paramControlChanged',
+				param: Number((event as Record<string, unknown>).param ?? 0),
+				old_state: fromRustControlState((event as Record<string, unknown>).old_state),
+				new_state: fromRustControlState((event as Record<string, unknown>).new_state)
 			}
 		};
 	}
@@ -744,6 +935,16 @@ export const toRustIntent = (intent: UiEditIntent): unknown => {
 		return {
 			...intent,
 			value: toRustParamValue(intent.value)
+		};
+	}
+	if (intent.kind === 'setParamControlState') {
+		return {
+			...intent,
+			state: {
+				mode: intent.state.mode,
+				spec: intent.state.spec,
+				diagnostics: []
+			}
 		};
 	}
 	return intent;

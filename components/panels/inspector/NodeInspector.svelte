@@ -261,6 +261,10 @@
 		flex-direction: column;
 		border-radius: 0.5rem;
 		font-size: 0.7rem;
+		overflow: visible;
+	}
+
+	.node-inspector.container {
 		overflow: hidden;
 	}
 

@@ -2,14 +2,14 @@
 	import { appState } from '$lib/golden_ui/store/workbench.svelte';
 	import { sendReloadScript, sendSetScriptConfig } from '$lib/golden_ui/store/ui-intents';
 	import type { NodeInspectorComponentProps } from '../node-inspector-registry';
-	import type { UiScriptConfig, UiScriptState } from '$lib/golden_ui/types';
+	import type { UiNodeDto, UiScriptConfig, UiScriptState } from '$lib/golden_ui/types';
 	import SelectNodeButton from '../../../common/SelectNodeButton.svelte';
 	import CodeEditor from '../../../common/CodeEditor.svelte';
 
 	let { node, defaultHeader, defaultChildren, level } = $props<NodeInspectorComponentProps>();
 
 	let session = $derived(appState.session);
-	let liveNode = $derived(session?.graph.state.nodesById.get(node.node_id) ?? node);
+	let liveNode: UiNodeDto = $derived(session?.graph.state.nodesById.get(node.node_id) ?? node);
 	let hasDesktopDialog = $derived(
 		typeof window !== 'undefined' && Boolean(window.__TAURI_INTERNALS__?.invoke)
 	);

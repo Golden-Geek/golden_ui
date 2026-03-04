@@ -495,7 +495,7 @@
 			if (listEndMarker) {
 				listEndMarker.scrollIntoView({ block: 'end' });
 			}
-			loggerList.scrollTop = loggerList.scrollHeight;
+			if(loggerList) loggerList.scrollTop = loggerList?.scrollHeight ?? 0;
 		});
 		requestAnimationFrame(() => {
 			if (!loggerList || !followLatest || focusedRecordKey !== null || isListAtBottom()) {
@@ -505,7 +505,7 @@
 				if (listEndMarker) {
 					listEndMarker.scrollIntoView({ block: 'end' });
 				}
-				loggerList.scrollTop = loggerList.scrollHeight;
+				if(loggerList) loggerList.scrollTop = loggerList?.scrollHeight ?? 0;
 			});
 		});
 	};

@@ -14,7 +14,7 @@
 	};
 
 	let session = $derived(appState.session);
-	let liveNode = $derived(session?.graph.state.nodesById.get(node.node_id) ?? node);
+	let liveNode: UiNodeDto = $derived(session?.graph.state.nodesById.get(node.node_id) ?? node);
 	let param = $derived(liveNode.data.kind === 'parameter' ? liveNode.data.param : null);
 	let fileConstraints = $derived(param?.constraints.file);
 	let value = $derived(param?.value.kind === 'file' ? param.value.value : '');
@@ -182,7 +182,9 @@
 		<div class="constraints">{allowedExtensionsLabel}</div>
 	{/if}
 	{#if !hasDesktopDialog}
-		<div class="desktop-hint">Desktop file browser unavailable in this client. Enter a path manually.</div>
+		<div class="desktop-hint">
+			Desktop file browser unavailable in this client. Enter a path manually.
+		</div>
 	{/if}
 </div>
 

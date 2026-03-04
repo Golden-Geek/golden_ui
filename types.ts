@@ -4,6 +4,14 @@ export type ParamEventBehaviour = 'Coalesce' | 'Append';
 export type ParamConstraintPolicy = 'ClampAdapt' | 'Reject';
 export type UiAckStatus = 'applied' | 'staged' | 'rejected';
 export type UiLogLevel = 'info' | 'warning' | 'error' | 'success';
+export type UiParameterControlMode =
+	| 'manual'
+	| 'contextLink'
+	| 'templateText'
+	| 'expression'
+	| 'proxy'
+	| 'binding'
+	| 'animation';
 
 export type ParamValue =
 	| { kind: 'trigger' }
@@ -157,6 +165,42 @@ export interface UiParamHints {
 	unit?: string;
 }
 
+export interface UiParameterControlDiagnostic {
+	code: string;
+	message: string;
+	detail?: string;
+}
+
+export interface UiNodeReferenceValue {
+	uuid: string;
+	cached_id?: NodeId;
+	cached_name?: string;
+	relative_path_from_root?: string[];
+}
+
+export interface UiAnimationControlSpec {
+	waveform: 'sine' | 'triangle' | 'saw' | 'square';
+	frequency_hz: number;
+	amplitude: number;
+	offset: number;
+	phase: number;
+}
+
+export type UiParameterControlSpec =
+	| { mode: 'manual' }
+	| { mode: 'contextLink'; symbol: string }
+	| { mode: 'templateText'; template: string }
+	| { mode: 'expression'; expression: string }
+	| { mode: 'proxy'; target: UiNodeReferenceValue }
+	| { mode: 'binding'; target: UiNodeReferenceValue }
+	| { mode: 'animation'; animation: UiAnimationControlSpec };
+
+export interface UiParameterControlState {
+	mode: UiParameterControlMode;
+	spec: UiParameterControlSpec;
+	diagnostics: UiParameterControlDiagnostic[];
+}
+
 export interface UiParamDto {
 	value: ParamValue;
 	default_value: ParamValue;
@@ -164,6 +208,7 @@ export interface UiParamDto {
 	read_only: boolean;
 	constraints: UiParamConstraints;
 	ui_hints: UiParamHints;
+	control: UiParameterControlState;
 	reference_allowed_targets: NodeId[];
 	reference_visible_nodes: NodeId[];
 }
@@ -240,6 +285,12 @@ export interface UiSnapshot {
 
 export type UiEventKind =
 	| { kind: 'paramChanged'; param: NodeId; old_value: ParamValue; new_value: ParamValue }
+	| {
+			kind: 'paramControlChanged';
+			param: NodeId;
+			old_state: UiParameterControlState;
+			new_state: UiParameterControlState;
+	  }
 	| { kind: 'childAdded'; parent: NodeId; child: NodeId; decl_id: string }
 	| { kind: 'childRemoved'; parent: NodeId; child: NodeId }
 	| { kind: 'childReplaced'; parent: NodeId; old: NodeId; new: NodeId; decl_id: string }
@@ -265,6 +316,7 @@ export type UiEditIntent =
 	| { kind: 'beginEdit'; client_edit_id: string; label?: string }
 	| { kind: 'endEdit'; client_edit_id: string }
 	| { kind: 'setParam'; node: NodeId; value: ParamValue; behaviour: ParamEventBehaviour }
+	| { kind: 'setParamControlState'; node: NodeId; state: UiParameterControlState }
 	| { kind: 'moveNode'; node: NodeId; new_parent: NodeId; new_prev_sibling?: NodeId }
 	| { kind: 'removeNode'; node: NodeId }
 	| { kind: 'createUserItem'; parent: NodeId; node_type: string; label?: string }
