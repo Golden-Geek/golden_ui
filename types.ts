@@ -24,12 +24,13 @@ export type ParamValue =
 	| { kind: 'vec3'; value: [number, number, number] }
 	| { kind: 'color'; value: [number, number, number, number] }
 	| {
-			kind: 'reference';
-			uuid: string;
-			cached_id?: NodeId;
-			cached_name?: string;
-			relative_path_from_root?: string[];
-	  };
+				kind: 'reference';
+				uuid: string;
+				projection?: UiParamValueProjection;
+				cached_id?: NodeId;
+				cached_name?: string;
+				relative_path_from_root?: string[];
+		  };
 
 export type UiReferenceRoot =
 	| { kind: 'engineRoot' }
@@ -50,6 +51,7 @@ export interface UiReferenceConstraints {
 	target_kind: UiReferenceTargetKind;
 	allowed_node_types: string[];
 	allowed_parameter_types: string[];
+	allow_projections: boolean;
 	custom_filter_key?: string;
 	default_search_filter?: string;
 }
@@ -183,6 +185,35 @@ export type UiUserContextValueType =
 	| 'color'
 	| 'reference';
 
+export type UiParamValueProjection =
+	| 'floatToVec2X0'
+	| 'floatToVec20Y'
+	| 'floatToVec2XX'
+	| 'floatToVec3X00'
+	| 'floatToVec30Y0'
+	| 'floatToVec300Z'
+	| 'floatToVec3XXX'
+	| 'vec2X'
+	| 'vec2Y'
+	| 'vec2ToVec3XY0'
+	| 'vec2ToVec3X0Y'
+	| 'vec2ToColorHs'
+	| 'vec3X'
+	| 'vec3Y'
+	| 'vec3Z'
+	| 'vec3ToVec2XY'
+	| 'vec3ToVec2XZ'
+	| 'vec3ToVec2YZ'
+	| 'vec3ToColorRgb'
+	| 'vec3ToColorHsv'
+	| 'colorR'
+	| 'colorG'
+	| 'colorB'
+	| 'colorA'
+	| 'colorToVec3Rgb'
+	| 'colorToVec3Hsv'
+	| 'colorToVec2Hs';
+
 export interface UiUserContextCandidate {
 	symbol: string;
 	value_type: UiUserContextValueType;
@@ -191,6 +222,7 @@ export interface UiUserContextCandidate {
 	entry_param: NodeId;
 	compatible: boolean;
 	shadowed: boolean;
+	projections: UiParamValueProjection[];
 }
 
 export interface UiTokenSuggestion {
@@ -200,6 +232,7 @@ export interface UiTokenSuggestion {
 export interface UiParamControlCandidate {
 	param: NodeId;
 	compatible: boolean;
+	projections: UiParamValueProjection[];
 }
 
 export interface UiParamControlInfo {
@@ -214,6 +247,7 @@ export interface UiParamControlInfo {
 
 export interface UiNodeReferenceValue {
 	uuid: string;
+	projection?: UiParamValueProjection;
 	cached_id?: NodeId;
 	cached_name?: string;
 	relative_path_from_root?: string[];
@@ -229,7 +263,7 @@ export interface UiAnimationControlSpec {
 
 export type UiParameterControlSpec =
 	| { mode: 'manual' }
-	| { mode: 'contextLink'; symbol: string }
+	| { mode: 'contextLink'; symbol: string; projection?: UiParamValueProjection }
 	| { mode: 'templateText'; template: string }
 	| { mode: 'expression'; expression: string }
 	| { mode: 'link' }
@@ -256,6 +290,13 @@ export interface UiParamDto {
 export interface UiReferenceTargets {
 	allowed_target_ids: NodeId[];
 	visible_node_ids: NodeId[];
+	candidates: UiReferenceTargetCandidate[];
+}
+
+export interface UiReferenceTargetCandidate {
+	target_id: NodeId;
+	direct: boolean;
+	projections: UiParamValueProjection[];
 }
 
 export type UiNodeDataDto =

@@ -2,7 +2,13 @@
 	import { appState } from '$lib/golden_ui/store/workbench.svelte';
 	import { openNodePickerModal } from '$lib/golden_ui/store/node-picker-modal.svelte';
 	import { sendSetParamIntent } from '$lib/golden_ui/store/ui-intents';
-	import type { NodeId, UiNodeDto, UiReferenceConstraints } from '$lib/golden_ui/types';
+	import type {
+		NodeId,
+		UiNodeDto,
+		UiParamValueProjection,
+		UiReferenceConstraints,
+		UiReferenceTargetCandidate
+	} from '$lib/golden_ui/types';
 
 	let { node } = $props<{
 		node: UiNodeDto;
@@ -19,10 +25,19 @@
 	let enabled = $derived(liveNode.meta.enabled);
 	let readOnly = $derived(Boolean(param?.read_only));
 	let hasCustomReferenceFilter = $derived(Boolean(constraints?.custom_filter_key));
-	let customAllowedTargetIds = $state<NodeId[]>([]);
-	let customVisibleNodeIds = $state<NodeId[]>([]);
-	let customAllowedTargetIdSet = $derived.by(() => new Set(customAllowedTargetIds));
-	let customVisibleNodeIdSet = $derived.by(() => new Set(customVisibleNodeIds));
+	let referenceTargetIds = $state<NodeId[]>([]);
+	let referenceVisibleNodeIds = $state<NodeId[]>([]);
+	let referenceTargetCandidates = $state<UiReferenceTargetCandidate[]>([]);
+	let referenceTargetsResolved = $state(false);
+	let referenceTargetIdSet = $derived.by(() => new Set(referenceTargetIds));
+	let referenceVisibleNodeIdSet = $derived.by(() => new Set(referenceVisibleNodeIds));
+	let referenceCandidateById = $derived.by(() => {
+		const byId = new Map<NodeId, UiReferenceTargetCandidate>();
+		for (const candidate of referenceTargetCandidates) {
+			byId.set(candidate.target_id, candidate);
+		}
+		return byId;
+	});
 
 	let linkStatus = $derived.by(() => {
 		if (!value || value.uuid.length === 0 || value.uuid === NIL_UUID) {
@@ -149,8 +164,11 @@
 		candidate: UiNodeDto,
 		referenceConstraints: UiReferenceConstraints | undefined
 	): boolean => {
+		if (referenceTargetsResolved) {
+			return referenceTargetIdSet.has(candidate.node_id);
+		}
 		if (hasCustomReferenceFilter) {
-			return customAllowedTargetIdSet.has(candidate.node_id);
+			return false;
 		}
 		if (!referenceConstraints) {
 			return true;
@@ -179,8 +197,14 @@
 	};
 
 	const candidateVisibleInPicker = (candidate: UiNodeDto): boolean => {
+		if (referenceTargetsResolved) {
+			if (referenceVisibleNodeIds.length > 0) {
+				return referenceVisibleNodeIdSet.has(candidate.node_id);
+			}
+			return referenceTargetIdSet.has(candidate.node_id);
+		}
 		if (hasCustomReferenceFilter) {
-			return customVisibleNodeIdSet.has(candidate.node_id);
+			return false;
 		}
 		return candidateAllowedByConstraints(candidate, constraints);
 	};
@@ -191,28 +215,39 @@
 		if (fallbackAllowed.length === 0 && fallbackVisible.length === 0) {
 			return false;
 		}
-		customAllowedTargetIds = [...fallbackAllowed];
-		customVisibleNodeIds = [...fallbackVisible];
+		referenceTargetIds = [...fallbackAllowed];
+		referenceVisibleNodeIds = [...fallbackVisible];
+		referenceTargetCandidates = fallbackAllowed.map((targetId: NodeId) => ({
+			target_id: targetId,
+			direct: true,
+			projections: []
+		}));
+		referenceTargetsResolved = true;
 		return true;
 	};
 
-	const loadCustomReferenceTargets = async (): Promise<boolean> => {
-		if (!hasCustomReferenceFilter) {
-			customAllowedTargetIds = [];
-			customVisibleNodeIds = [];
-			return true;
-		}
+	const loadReferenceTargets = async (): Promise<boolean> => {
+		referenceTargetsResolved = false;
 		if (!session) {
 			return applyLegacySnapshotTargets();
 		}
 		try {
 			const targets = await session.client.referenceTargets(liveNode.node_id);
-			customAllowedTargetIds = [...targets.allowed_target_ids];
-			customVisibleNodeIds = [...targets.visible_node_ids];
+			referenceTargetIds = [...targets.allowed_target_ids];
+			referenceVisibleNodeIds = [...targets.visible_node_ids];
+			referenceTargetCandidates = [...targets.candidates];
+			referenceTargetsResolved = true;
 			return true;
 		} catch (error) {
 			console.error('Failed to load reference picker targets', error);
-			return applyLegacySnapshotTargets();
+			if (applyLegacySnapshotTargets()) {
+				return true;
+			}
+			referenceTargetIds = [];
+			referenceVisibleNodeIds = [];
+			referenceTargetCandidates = [];
+			referenceTargetsResolved = false;
+			return !hasCustomReferenceFilter;
 		}
 	};
 
@@ -235,7 +270,83 @@
 
 	let triggerElement = $state<HTMLButtonElement | null>(null);
 
-	const applyReference = async (target: UiNodeDto): Promise<void> => {
+	const projectionLabel = (projection: UiParamValueProjection): string => {
+		switch (projection) {
+			case 'floatToVec2X0':
+				return 'Float -> Vec2 (v,0)';
+			case 'floatToVec20Y':
+				return 'Float -> Vec2 (0,v)';
+			case 'floatToVec2XX':
+				return 'Float -> Vec2 (v,v)';
+			case 'floatToVec3X00':
+				return 'Float -> Vec3 (v,0,0)';
+			case 'floatToVec30Y0':
+				return 'Float -> Vec3 (0,v,0)';
+			case 'floatToVec300Z':
+				return 'Float -> Vec3 (0,0,v)';
+			case 'floatToVec3XXX':
+				return 'Float -> Vec3 (v,v,v)';
+			case 'vec2X':
+				return 'Vec2 X';
+			case 'vec2Y':
+				return 'Vec2 Y';
+			case 'vec2ToVec3XY0':
+				return 'Vec2 -> Vec3 (X,Y,0)';
+			case 'vec2ToVec3X0Y':
+				return 'Vec2 -> Vec3 (X,0,Y)';
+			case 'vec2ToColorHs':
+				return 'Vec2 -> Color (Hue,Sat)';
+			case 'vec3X':
+				return 'Vec3 X';
+			case 'vec3Y':
+				return 'Vec3 Y';
+			case 'vec3Z':
+				return 'Vec3 Z';
+			case 'vec3ToVec2XY':
+				return 'Vec3 -> Vec2 (X,Y)';
+			case 'vec3ToVec2XZ':
+				return 'Vec3 -> Vec2 (X,Z)';
+			case 'vec3ToVec2YZ':
+				return 'Vec3 -> Vec2 (Y,Z)';
+			case 'vec3ToColorRgb':
+				return 'Vec3 -> Color (RGB)';
+			case 'vec3ToColorHsv':
+				return 'Vec3 -> Color (HSV)';
+			case 'colorR':
+				return 'Color R';
+			case 'colorG':
+				return 'Color G';
+			case 'colorB':
+				return 'Color B';
+			case 'colorA':
+				return 'Color A';
+			case 'colorToVec3Rgb':
+				return 'Color -> Vec3 (RGB)';
+			case 'colorToVec3Hsv':
+				return 'Color -> Vec3 (HSV)';
+			case 'colorToVec2Hs':
+				return 'Color -> Vec2 (Hue,Sat)';
+		}
+	};
+
+	const projectionOptionsForCandidate = (
+		candidate: UiNodeDto
+	): UiParamValueProjection[] => {
+		return referenceCandidateById.get(candidate.node_id)?.projections ?? [];
+	};
+
+	const projectionRequiredForCandidate = (candidate: UiNodeDto): boolean => {
+		const compatibility = referenceCandidateById.get(candidate.node_id);
+		if (!compatibility) {
+			return false;
+		}
+		return !compatibility.direct && compatibility.projections.length > 0;
+	};
+
+	const applyReference = async (
+		target: UiNodeDto,
+		projection: UiParamValueProjection | undefined
+	): Promise<void> => {
 		if (!param || param.value.kind !== 'reference' || !enabled || readOnly) {
 			return;
 		}
@@ -248,6 +359,7 @@
 			{
 				kind: 'reference',
 				uuid: target.uuid,
+				projection,
 				cached_name: target.meta.label,
 				relative_path_from_root: relativePathFromRoot
 			},
@@ -274,19 +386,15 @@
 		if (!enabled || readOnly || !graph) {
 			return;
 		}
-		if (hasCustomReferenceFilter) {
-			const loadedTargets = await loadCustomReferenceTargets();
-			if (!loadedTargets) {
-				return;
-			}
-		} else {
-			customAllowedTargetIds = [];
-			customVisibleNodeIds = [];
+		const loadedTargets = await loadReferenceTargets();
+		if (!loadedTargets) {
+			return;
 		}
 
 		const result = await openNodePickerModal({
 			rootNode,
 			selectedNodeId: selectedNode?.node_id ?? null,
+			selectedProjection: value?.projection ?? null,
 			title: 'Select reference target',
 			placeholder: 'No reference',
 			searchPlaceholder: 'Search label, type, path',
@@ -296,11 +404,14 @@
 			nodeFilter: pickerFilter,
 			nodeVisibilityFilter: pickerVisibilityFilter,
 			nodeSearchText: pickerSearchText,
+			projectionOptions: (candidate) => projectionOptionsForCandidate(candidate),
+			projectionRequired: (candidate) => projectionRequiredForCandidate(candidate),
+			projectionLabel,
 			anchorElement: triggerElement
 		});
 
 		if (result.kind === 'pick') {
-			await applyReference(result.node);
+			await applyReference(result.node, result.projection);
 			return;
 		}
 
@@ -339,6 +450,9 @@
 		}}>
 		{#if selectedNode}
 			{selectedNode.meta.label}
+			{#if value?.projection}
+				<span class="projection-label">({projectionLabel(value.projection)})</span>
+			{/if}
 		{:else}
 			<span class="placeholder">{ghostReferenceName}</span>
 		{/if}
@@ -378,5 +492,10 @@
 
 	.placeholder {
 		opacity: 0.6;
+	}
+
+	.projection-label {
+		opacity: 0.8;
+		font-size: 0.8em;
 	}
 </style>

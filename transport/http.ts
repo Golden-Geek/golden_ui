@@ -33,7 +33,8 @@ import type {
 	UiTokenSuggestion,
 	UiUserContextCandidate,
 	UiUserContextValueType,
-	UiParamControlCandidate
+	UiParamControlCandidate,
+	UiParamValueProjection
 } from '../types';
 import { wholeGraphScope } from '../types';
 
@@ -64,6 +65,7 @@ export interface RustReferenceTargetsRequest {
 export interface RustReferenceTargetsResponse {
 	allowed_targets?: number[];
 	visible_nodes?: number[];
+	candidates?: unknown[];
 }
 
 export interface RustParamControlInfoRequest {
@@ -150,14 +152,15 @@ interface RustUiParamDto {
 			ordering?: number;
 		}>;
 		policy: ParamConstraintPolicy;
-		reference?: {
-			root?: unknown;
-			target_kind?: string;
-			allowed_node_types?: string[];
-			allowed_parameter_types?: string[];
-			custom_filter_key?: string;
-			default_search_filter?: string;
-		};
+			reference?: {
+				root?: unknown;
+				target_kind?: string;
+				allowed_node_types?: string[];
+				allowed_parameter_types?: string[];
+				allow_projections?: boolean;
+				custom_filter_key?: string;
+				default_search_filter?: string;
+			};
 		file?: {
 			allowed_types?: string[];
 			allowed_extensions?: string[];
@@ -293,7 +296,13 @@ export const fromRustScope = (scope: unknown): UiSubscriptionScope => {
 
 const fromRustReferencePayload = (
 	payload: unknown
-): { uuid: string; cached_id?: number; cached_name?: string; relative_path_from_root?: string[] } => {
+): {
+	uuid: string;
+	projection?: unknown;
+	cached_id?: number;
+	cached_name?: string;
+	relative_path_from_root?: string[];
+} => {
 	if (typeof payload === 'string') {
 		return { uuid: payload };
 	}
@@ -312,11 +321,17 @@ const fromRustReferencePayload = (
 		const cachedName = payload.cached_name;
 		const cached_name = typeof cachedName === 'string' ? cachedName : undefined;
 		const relativePathRaw = payload.relative_path_from_root;
-		const relative_path_from_root = Array.isArray(relativePathRaw)
-			? relativePathRaw.filter((segment): segment is string => typeof segment === 'string')
-			: undefined;
-		return { uuid, cached_id, cached_name, relative_path_from_root };
-	}
+			const relative_path_from_root = Array.isArray(relativePathRaw)
+				? relativePathRaw.filter((segment): segment is string => typeof segment === 'string')
+				: undefined;
+			return {
+				uuid,
+				projection: payload.projection,
+				cached_id,
+				cached_name,
+				relative_path_from_root
+			};
+		}
 
 	return { uuid: '' };
 };
@@ -385,6 +400,9 @@ const fromRustParamValue = (value: unknown): ParamValue => {
 		return {
 			kind: 'reference',
 			uuid: reference.uuid,
+			projection: isUiParamValueProjection(reference.projection)
+				? reference.projection
+				: undefined,
 			cached_id: reference.cached_id,
 			cached_name: reference.cached_name,
 			relative_path_from_root: reference.relative_path_from_root
@@ -423,6 +441,7 @@ const toRustParamValue = (value: ParamValue): RustParamValue => {
 			return {
 				Reference: {
 					uuid: value.uuid,
+					projection: value.projection,
 					cached_name: value.cached_name,
 					relative_path_from_root: value.relative_path_from_root ?? []
 				}
@@ -475,6 +494,10 @@ const fromRustReferenceConstraints = (reference: RustUiParamDto['constraints']['
 		target_kind,
 		allowed_node_types: [...(reference.allowed_node_types ?? [])],
 		allowed_parameter_types: [...(reference.allowed_parameter_types ?? [])],
+		allow_projections:
+			typeof reference.allow_projections === 'boolean'
+				? reference.allow_projections
+				: true,
 		custom_filter_key:
 			typeof reference.custom_filter_key === 'string' ? reference.custom_filter_key : undefined,
 		default_search_filter:
@@ -669,6 +692,35 @@ const isUiUserContextValueType = (value: unknown): value is UiUserContextValueTy
 	value === 'color' ||
 	value === 'reference';
 
+const isUiParamValueProjection = (value: unknown): value is UiParamValueProjection =>
+	value === 'floatToVec2X0' ||
+	value === 'floatToVec20Y' ||
+	value === 'floatToVec2XX' ||
+	value === 'floatToVec3X00' ||
+	value === 'floatToVec30Y0' ||
+	value === 'floatToVec300Z' ||
+	value === 'floatToVec3XXX' ||
+	value === 'vec2X' ||
+	value === 'vec2Y' ||
+	value === 'vec2ToVec3XY0' ||
+	value === 'vec2ToVec3X0Y' ||
+	value === 'vec2ToColorHs' ||
+	value === 'vec3X' ||
+	value === 'vec3Y' ||
+	value === 'vec3Z' ||
+	value === 'vec3ToVec2XY' ||
+	value === 'vec3ToVec2XZ' ||
+	value === 'vec3ToVec2YZ' ||
+	value === 'vec3ToColorRgb' ||
+	value === 'vec3ToColorHsv' ||
+	value === 'colorR' ||
+	value === 'colorG' ||
+	value === 'colorB' ||
+	value === 'colorA' ||
+	value === 'colorToVec3Rgb' ||
+	value === 'colorToVec3Hsv' ||
+	value === 'colorToVec2Hs';
+
 const fromRustControlDiagnostics = (
 	value: unknown
 ): UiParameterControlDiagnostic[] =>
@@ -695,7 +747,12 @@ const fromRustUserContextCandidate = (value: unknown): UiUserContextCandidate | 
 		lexical_depth: Number(value.lexical_depth ?? 0),
 		entry_param: Number(value.entry_param ?? 0),
 		compatible: Boolean(value.compatible),
-		shadowed: Boolean(value.shadowed)
+		shadowed: Boolean(value.shadowed),
+		projections: Array.isArray(value.projections)
+			? value.projections.filter((projection): projection is UiParamValueProjection =>
+					isUiParamValueProjection(projection)
+				)
+			: []
 	};
 };
 
@@ -714,14 +771,36 @@ const fromRustParamControlCandidate = (
 	}
 	return {
 		param: Number(value.param ?? 0),
-		compatible: Boolean(value.compatible)
+		compatible: Boolean(value.compatible),
+		projections: Array.isArray(value.projections)
+			? value.projections.filter((projection): projection is UiParamValueProjection =>
+					isUiParamValueProjection(projection)
+				)
+			: []
+	};
+};
+
+const fromRustReferenceTargetCandidate = (
+	value: unknown
+): { target_id: number; direct: boolean; projections: UiParamValueProjection[] } | null => {
+	if (!isRecord(value)) {
+		return null;
+	}
+	return {
+		target_id: Number(value.target ?? 0),
+		direct: Boolean(value.direct),
+		projections: Array.isArray(value.projections)
+			? value.projections.filter((projection): projection is UiParamValueProjection =>
+					isUiParamValueProjection(projection)
+				)
+			: []
 	};
 };
 
 const defaultControlSpecForMode = (mode: UiParameterControlMode): UiParameterControlSpec => {
 	switch (mode) {
 		case 'contextLink':
-			return { mode: 'contextLink', symbol: '' };
+			return { mode: 'contextLink', symbol: '', projection: undefined };
 		case 'templateText':
 			return { mode: 'templateText', template: '' };
 		case 'expression':
@@ -748,7 +827,10 @@ const fromRustControlSpec = (
 		case 'contextLink':
 			return {
 				mode: 'contextLink',
-				symbol: typeof controlPayload.symbol === 'string' ? controlPayload.symbol : ''
+				symbol: typeof controlPayload.symbol === 'string' ? controlPayload.symbol : '',
+				projection: isUiParamValueProjection(controlPayload.projection)
+					? controlPayload.projection
+					: undefined
 			};
 		case 'templateText':
 			return {
@@ -939,7 +1021,15 @@ export const fromRustReferenceTargets = (
 	payload: RustReferenceTargetsResponse
 ): UiReferenceTargets => ({
 	allowed_target_ids: [...(payload.allowed_targets ?? [])],
-	visible_node_ids: [...(payload.visible_nodes ?? [])]
+	visible_node_ids: [...(payload.visible_nodes ?? [])],
+	candidates: Array.isArray(payload.candidates)
+		? payload.candidates
+				.map((entry) => fromRustReferenceTargetCandidate(entry))
+				.filter(
+					(entry): entry is { target_id: number; direct: boolean; projections: UiParamValueProjection[] } =>
+						entry !== null
+				)
+		: []
 });
 
 export const fromRustParamControlInfo = (

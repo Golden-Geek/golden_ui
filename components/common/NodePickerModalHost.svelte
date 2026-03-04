@@ -7,7 +7,7 @@
 		nodePickerModalState,
 		resolveNodePickerModal
 	} from '$lib/golden_ui/store/node-picker-modal.svelte';
-	import type { UiNodeDto } from '$lib/golden_ui/types';
+	import type { UiNodeDto, UiParamValueProjection } from '$lib/golden_ui/types';
 	import { fade, slide } from 'svelte/transition';
 	import {
 		computeAnchoredModalPlacement,
@@ -26,6 +26,8 @@
 	let modalHeightPx = $state(0);
 	let panelResizeObserver = $state<ResizeObserver | null>(null);
 	let graphState = $derived(appState.session?.graph.state ?? null);
+	let selectedNodeId = $state<number | null>(null);
+	let selectedProjection = $state<UiParamValueProjection | undefined>(undefined);
 
 	const getLiveAnchorRect = (): ViewportRect | null => {
 		if (!options) {
@@ -65,7 +67,6 @@
 	};
 
 	const scrollToSelectedNode = (): void => {
-		const selectedNodeId = options?.selectedNodeId ?? null;
 		if (!treeElement || selectedNodeId === null) {
 			return;
 		}
@@ -75,12 +76,92 @@
 		target?.scrollIntoView({ block: 'center', inline: 'nearest' });
 	};
 
+	const nodeById = (nodeId: number | null): UiNodeDto | null => {
+		if (nodeId === null || !graphState) {
+			return null;
+		}
+		return graphState.nodesById.get(nodeId) ?? null;
+	};
+
+	const projectionOptionsForNode = (candidate: UiNodeDto | null): UiParamValueProjection[] => {
+		if (!candidate || !options?.projectionOptions) {
+			return [];
+		}
+		return options.projectionOptions(candidate) ?? [];
+	};
+
+	const projectionRequiredForNode = (candidate: UiNodeDto | null): boolean => {
+		if (!candidate || !options?.projectionRequired) {
+			return false;
+		}
+		return options.projectionRequired(candidate);
+	};
+
+	const projectionLabel = (projection: UiParamValueProjection): string => {
+		return options?.projectionLabel?.(projection) ?? projection;
+	};
+
+	let selectedNode = $derived.by(() => nodeById(selectedNodeId));
+	let selectedProjectionOptions = $derived.by(() =>
+		projectionOptionsForNode(selectedNode)
+	);
+	let selectedProjectionRequired = $derived.by(() =>
+		projectionRequiredForNode(selectedNode)
+	);
+	let canConfirmPick = $derived.by(() => {
+		if (!selectedNode) {
+			return false;
+		}
+		if (!options?.projectionOptions) {
+			return true;
+		}
+		if (!selectedProjectionRequired) {
+			return true;
+		}
+		return selectedProjection !== undefined;
+	});
+
+	const alignProjectionForNode = (candidate: UiNodeDto | null): void => {
+		if (!options?.projectionOptions || !candidate) {
+			selectedProjection = undefined;
+			return;
+		}
+		const projectionOptions = projectionOptionsForNode(candidate);
+		const projectionRequired = projectionRequiredForNode(candidate);
+		if (
+			selectedProjection !== undefined &&
+			projectionOptions.includes(selectedProjection)
+		) {
+			return;
+		}
+		if (projectionRequired && projectionOptions.length === 1) {
+			selectedProjection = projectionOptions[0];
+			return;
+		}
+		selectedProjection = undefined;
+	};
+
+	const confirmPick = (): void => {
+		if (!selectedNode || !canConfirmPick) {
+			return;
+		}
+		resolveNodePickerModal({
+			kind: 'pick',
+			node: selectedNode,
+			projection: selectedProjection
+		});
+	};
+
 	$effect(() => {
 		if (!isOpen) {
 			query = '';
+			selectedNodeId = null;
+			selectedProjection = undefined;
 			return;
 		}
 		query = options?.defaultSearchQuery ?? '';
+		selectedNodeId = options?.selectedNodeId ?? null;
+		selectedProjection = options?.selectedProjection ?? undefined;
 		void tick().then(() => {
 			recomputePosition();
 			scrollToSelectedNode();
@@ -92,6 +173,13 @@
 				scrollToSelectedNode();
 			}, 120);
 		});
+	});
+
+	$effect(() => {
+		if (!isOpen) {
+			return;
+		}
+		alignProjectionForNode(selectedNode);
 	});
 
 	$effect(() => {
@@ -258,32 +346,65 @@
 				bind:value={query} />
 			<div class="picker-tree" bind:this={treeElement}>
 				{#if options.rootNode}
-					<OutlinerItem
-						node={options.rootNode}
-						mode="tree"
-						initiallyExpandedDepth={options.initiallyExpandedDepth}
-						transitionDurationMs={90}
-						focusedNodeId={options.selectedNodeId ?? null}
-						autoExpandToNodeId={options.selectedNodeId ?? null}
-						nodeFilter={passesFilter}
-						nodeSelectable={selectableByConstraints}
-						onSelectNode={(candidate) => {
-							resolveNodePickerModal({ kind: 'pick', node: candidate });
-						}} />
-				{:else}
-					<div class="picker-empty">No root available</div>
+						<OutlinerItem
+							node={options.rootNode}
+							mode="tree"
+							initiallyExpandedDepth={options.initiallyExpandedDepth}
+							transitionDurationMs={90}
+							focusedNodeId={selectedNodeId}
+							autoExpandToNodeId={selectedNodeId}
+							nodeFilter={passesFilter}
+							nodeSelectable={selectableByConstraints}
+							onSelectNode={(candidate) => {
+								if (!options.projectionOptions) {
+									resolveNodePickerModal({ kind: 'pick', node: candidate });
+									return;
+								}
+								selectedNodeId = candidate.node_id;
+								alignProjectionForNode(candidate);
+							}} />
+					{:else}
+						<div class="picker-empty">No root available</div>
+					{/if}
+				</div>
+				{#if options.projectionOptions}
+					<div class="projection-controls">
+						<span class="projection-label">Projection</span>
+						<select
+							class="projection-select"
+							disabled={!selectedNode}
+							value={selectedProjection ?? ''}
+							onchange={(event) => {
+								const value = (event.target as HTMLSelectElement).value;
+								selectedProjection =
+									value.length > 0
+										? (value as UiParamValueProjection)
+										: undefined;
+							}}>
+							{#if !selectedProjectionRequired}
+								<option value="">Auto</option>
+							{/if}
+							{#each selectedProjectionOptions as projection}
+								<option value={projection}>{projectionLabel(projection)}</option>
+							{/each}
+						</select>
+					</div>
 				{/if}
+				<footer class="picker-actions">
+					{#if options.clearable}
+						<button type="button" onclick={() => resolveNodePickerModal({ kind: 'clear' })}>
+							Clear
+						</button>
+					{/if}
+					{#if options.projectionOptions}
+						<button type="button" disabled={!canConfirmPick} onclick={confirmPick}>
+							Select
+						</button>
+					{/if}
+					<button type="button" onclick={() => closeNodePickerModal()}>Cancel</button>
+				</footer>
 			</div>
-			<footer class="picker-actions">
-				{#if options.clearable}
-					<button type="button" onclick={() => resolveNodePickerModal({ kind: 'clear' })}>
-						Clear
-					</button>
-				{/if}
-				<button type="button" onclick={() => closeNodePickerModal()}>Cancel</button>
-			</footer>
 		</div>
-	</div>
 {/if}
 
 <style>
@@ -345,5 +466,20 @@
 		display: flex;
 		justify-content: flex-end;
 		gap: 0.4rem;
+	}
+
+	.projection-controls {
+		display: flex;
+		align-items: center;
+		gap: 0.4rem;
+	}
+
+	.projection-label {
+		font-size: 0.74rem;
+		opacity: 0.75;
+	}
+
+	.projection-select {
+		flex: 1 1 auto;
 	}
 </style>

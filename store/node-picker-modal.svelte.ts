@@ -1,4 +1,4 @@
-import type { NodeId, UiNodeDto } from '$lib/golden_ui/types';
+import type { NodeId, UiNodeDto, UiParamValueProjection } from '$lib/golden_ui/types';
 
 export interface ViewportAnchorRect {
 	left: number;
@@ -12,6 +12,7 @@ export interface ViewportAnchorRect {
 export interface NodePickerModalOptions {
 	rootNode: UiNodeDto | null;
 	selectedNodeId?: NodeId | null;
+	selectedProjection?: UiParamValueProjection | null;
 	title?: string;
 	placeholder?: string;
 	searchPlaceholder?: string;
@@ -21,12 +22,15 @@ export interface NodePickerModalOptions {
 	nodeFilter?: (candidate: UiNodeDto) => boolean;
 	nodeVisibilityFilter?: (candidate: UiNodeDto) => boolean;
 	nodeSearchText?: (candidate: UiNodeDto) => string;
+	projectionOptions?: (candidate: UiNodeDto) => UiParamValueProjection[];
+	projectionRequired?: (candidate: UiNodeDto) => boolean;
+	projectionLabel?: (projection: UiParamValueProjection) => string;
 	anchorElement?: HTMLElement | null;
 	anchorRect?: ViewportAnchorRect | null;
 }
 
 export type NodePickerModalResult =
-	| { kind: 'pick'; node: UiNodeDto }
+	| { kind: 'pick'; node: UiNodeDto; projection?: UiParamValueProjection }
 	| { kind: 'clear' }
 	| { kind: 'cancel' };
 
@@ -58,6 +62,7 @@ const normalizeOptions = (options: NodePickerModalOptions): NodePickerModalOptio
 		options.anchorRect ?? (options.anchorElement ? toAnchorRect(options.anchorElement.getBoundingClientRect()) : null);
 	return {
 		selectedNodeId: null,
+		selectedProjection: null,
 		title: 'Select node',
 		placeholder: 'Select node',
 		searchPlaceholder: 'Search...',
@@ -68,6 +73,9 @@ const normalizeOptions = (options: NodePickerModalOptions): NodePickerModalOptio
 		nodeVisibilityFilter: (_candidate: UiNodeDto) => true,
 		nodeSearchText: (candidate: UiNodeDto) =>
 			`${candidate.meta.label} ${candidate.meta.short_name} ${candidate.node_type}`,
+		projectionOptions: undefined,
+		projectionRequired: undefined,
+		projectionLabel: undefined,
 		anchorElement: null,
 		...options,
 		anchorRect
