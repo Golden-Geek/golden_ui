@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { slide } from 'svelte/transition';
+	import { slide, type SlideParams } from 'svelte/transition';
 	import type { UiNodeDto } from '$lib/golden_ui/types';
 	import Self from './NodeInspector.svelte';
 	import { appState } from '$lib/golden_ui/store/workbench.svelte';
@@ -108,6 +108,7 @@
 	const setCollapsed = (nextCollapsed: boolean): void => {
 		collapsed = nextCollapsed;
 	};
+
 </script>
 
 {#if node}
@@ -268,9 +269,7 @@
 		overflow: visible;
 	}
 
-	.node-inspector.container {
-		/* overflow: visible; */
-	}
+
 
 	.node-inspector.nested {
 		margin-left: 0.3rem;

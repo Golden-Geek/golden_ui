@@ -18,9 +18,10 @@
 	import EnableButton from '../../common/EnableButton.svelte';
 	import NodeWarningBadge from '../../common/NodeWarningBadge.svelte';
 	import { propertiesInspectorClass } from './inspector.svelte';
+	import { projectionLabel } from '../../../projection-labels';
 	import resetIcon from '../../../style/icons/reset.svg';
 	import referenceIcon from '../../../style/icons/parameter/reference.svg';
-	import { fade } from 'svelte/transition';
+	import { fade, slide } from 'svelte/transition';
 	import type { Snippet } from 'svelte';
 
 	let { node, level, order, defaultChildren } = $props<{
@@ -84,11 +85,15 @@
 		fallback.delete('templateText');
 		return fallback;
 	});
+
+	let manualControlModeOnly = $derived(
+		availableControlModes.size === 1 && availableControlModes.has('manual')
+	);
+
 	let displayedControlModeOptions = $derived.by(
 		(): ReadonlyArray<{ mode: UiParameterControlMode; label: string }> =>
 			controlModeOptions.filter(
-				(option) =>
-					availableControlModes.has(option.mode) || option.mode === currentControlMode
+				(option) => availableControlModes.has(option.mode) || option.mode === currentControlMode
 			)
 	);
 	let hasCompatibleContextCandidates = $derived.by((): boolean => {
@@ -305,65 +310,6 @@
 		controlMenuOpen = false;
 	};
 
-	const projectionLabel = (projection: UiParamValueProjection): string => {
-		switch (projection) {
-			case 'floatToVec2X0':
-				return 'Float -> Vec2 (v,0)';
-			case 'floatToVec20Y':
-				return 'Float -> Vec2 (0,v)';
-			case 'floatToVec2XX':
-				return 'Float -> Vec2 (v,v)';
-			case 'floatToVec3X00':
-				return 'Float -> Vec3 (v,0,0)';
-			case 'floatToVec30Y0':
-				return 'Float -> Vec3 (0,v,0)';
-			case 'floatToVec300Z':
-				return 'Float -> Vec3 (0,0,v)';
-			case 'floatToVec3XXX':
-				return 'Float -> Vec3 (v,v,v)';
-			case 'vec2X':
-				return 'Vec2 X';
-			case 'vec2Y':
-				return 'Vec2 Y';
-			case 'vec2ToVec3XY0':
-				return 'Vec2 -> Vec3 (X,Y,0)';
-			case 'vec2ToVec3X0Y':
-				return 'Vec2 -> Vec3 (X,0,Y)';
-			case 'vec2ToColorHs':
-				return 'Vec2 -> Color (Hue,Sat)';
-			case 'vec3X':
-				return 'Vec3 X';
-			case 'vec3Y':
-				return 'Vec3 Y';
-			case 'vec3Z':
-				return 'Vec3 Z';
-			case 'vec3ToVec2XY':
-				return 'Vec3 -> Vec2 (X,Y)';
-			case 'vec3ToVec2XZ':
-				return 'Vec3 -> Vec2 (X,Z)';
-			case 'vec3ToVec2YZ':
-				return 'Vec3 -> Vec2 (Y,Z)';
-			case 'vec3ToColorRgb':
-				return 'Vec3 -> Color (RGB)';
-			case 'vec3ToColorHsv':
-				return 'Vec3 -> Color (HSV)';
-			case 'colorR':
-				return 'Color R';
-			case 'colorG':
-				return 'Color G';
-			case 'colorB':
-				return 'Color B';
-			case 'colorA':
-				return 'Color A';
-			case 'colorToVec3Rgb':
-				return 'Color -> Vec3 (RGB)';
-			case 'colorToVec3Hsv':
-				return 'Color -> Vec3 (HSV)';
-			case 'colorToVec2Hs':
-				return 'Color -> Vec2 (Hue,Sat)';
-		}
-	};
-
 	const applyContextLinkSymbol = async (
 		symbol: string,
 		projection: UiParamValueProjection | undefined = contextProjectionDraft
@@ -434,9 +380,7 @@
 		const enteredContextLink =
 			currentControlMode === 'contextLink' && previousMode !== 'contextLink';
 		const openedMenuOutsideContextLink =
-			controlMenuOpen &&
-			!previousMenuOpen &&
-			currentControlMode !== 'contextLink';
+			controlMenuOpen && !previousMenuOpen && currentControlMode !== 'contextLink';
 		const shouldFetch = nodeChanged || enteredContextLink || openedMenuOutsideContextLink;
 		if (!shouldFetch) {
 			return;
@@ -532,6 +476,7 @@
 						<div class="parameter-wrapper {readOnly ? 'readonly' : ''} {enabled ? '' : 'disabled'}">
 							<EditorComponent node={liveNode} />
 						</div>
+
 						<div
 							class="link-mode-menu"
 							onfocusout={(event) => {
@@ -724,7 +669,6 @@
 					{/if}
 				</div>
 			{/if}
-
 			{@render defaultChildren?.()}
 		{:else}
 			{liveNode.meta.label} has no parameter data.
@@ -736,7 +680,6 @@
 	.parameter-inspector {
 		width: 100%;
 		display: flex;
-		gap: 0.25rem;
 		flex-direction: column;
 		box-sizing: border-box;
 		transition: opacity 0.2s ease;

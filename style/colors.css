@@ -35,6 +35,13 @@
 
 	--gc-color-dropdown-bg: #131313f0;
 
+
+	--gc-color-link: #bcd515;
+	--gc-color-context: #13f0e5;
+	--gc-color-expression: #2be75d;
+	--gc-color-animation: #c72ce6;
+
+
 	/* META */
 	--gc-color-warning: #e4901c;
 	--gc-color-success: #95e554;

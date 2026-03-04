@@ -2,6 +2,7 @@
 	import { appState } from '$lib/golden_ui/store/workbench.svelte';
 	import { openNodePickerModal } from '$lib/golden_ui/store/node-picker-modal.svelte';
 	import { sendSetParamIntent } from '$lib/golden_ui/store/ui-intents';
+	import { projectionLabel } from '$lib/golden_ui/projection-labels';
 	import type {
 		NodeId,
 		UiNodeDto,
@@ -269,65 +270,6 @@
 	});
 
 	let triggerElement = $state<HTMLButtonElement | null>(null);
-
-	const projectionLabel = (projection: UiParamValueProjection): string => {
-		switch (projection) {
-			case 'floatToVec2X0':
-				return 'Float -> Vec2 (v,0)';
-			case 'floatToVec20Y':
-				return 'Float -> Vec2 (0,v)';
-			case 'floatToVec2XX':
-				return 'Float -> Vec2 (v,v)';
-			case 'floatToVec3X00':
-				return 'Float -> Vec3 (v,0,0)';
-			case 'floatToVec30Y0':
-				return 'Float -> Vec3 (0,v,0)';
-			case 'floatToVec300Z':
-				return 'Float -> Vec3 (0,0,v)';
-			case 'floatToVec3XXX':
-				return 'Float -> Vec3 (v,v,v)';
-			case 'vec2X':
-				return 'Vec2 X';
-			case 'vec2Y':
-				return 'Vec2 Y';
-			case 'vec2ToVec3XY0':
-				return 'Vec2 -> Vec3 (X,Y,0)';
-			case 'vec2ToVec3X0Y':
-				return 'Vec2 -> Vec3 (X,0,Y)';
-			case 'vec2ToColorHs':
-				return 'Vec2 -> Color (Hue,Sat)';
-			case 'vec3X':
-				return 'Vec3 X';
-			case 'vec3Y':
-				return 'Vec3 Y';
-			case 'vec3Z':
-				return 'Vec3 Z';
-			case 'vec3ToVec2XY':
-				return 'Vec3 -> Vec2 (X,Y)';
-			case 'vec3ToVec2XZ':
-				return 'Vec3 -> Vec2 (X,Z)';
-			case 'vec3ToVec2YZ':
-				return 'Vec3 -> Vec2 (Y,Z)';
-			case 'vec3ToColorRgb':
-				return 'Vec3 -> Color (RGB)';
-			case 'vec3ToColorHsv':
-				return 'Vec3 -> Color (HSV)';
-			case 'colorR':
-				return 'Color R';
-			case 'colorG':
-				return 'Color G';
-			case 'colorB':
-				return 'Color B';
-			case 'colorA':
-				return 'Color A';
-			case 'colorToVec3Rgb':
-				return 'Color -> Vec3 (RGB)';
-			case 'colorToVec3Hsv':
-				return 'Color -> Vec3 (HSV)';
-			case 'colorToVec2Hs':
-				return 'Color -> Vec2 (Hue,Sat)';
-		}
-	};
 
 	const projectionOptionsForCandidate = (
 		candidate: UiNodeDto
