@@ -229,8 +229,11 @@
 		{/snippet}
 
 		{#if isParameter}
-			<ParameterInspector {node} {level} {order} />
-			{@render builtInChildren()}
+			<ParameterInspector {node} {level} {order}>
+				{#snippet defaultChildren()}
+					{@render builtInChildren()}
+				{/snippet}
+			</ParameterInspector>
 		{:else if CustomInspectorComponent}
 			<CustomInspectorComponent
 				{node}

@@ -21,15 +21,19 @@
 	import resetIcon from '../../../style/icons/reset.svg';
 	import referenceIcon from '../../../style/icons/parameter/reference.svg';
 	import { fade } from 'svelte/transition';
+	import type { Snippet } from 'svelte';
 
-	let { node, level, order } = $props<{
+	let { node, level, order, defaultChildren } = $props<{
 		node: UiNodeDto;
 		level: number;
 		order: 'first' | 'last' | 'solo' | '';
+		defaultChildren?: Snippet;
 	}>();
 
 	let session = $derived(appState.session);
 	let liveNode = $derived(session?.graph.state.nodesById.get(node.node_id) ?? node);
+	let liveNodeId = $derived(liveNode.node_id);
+	let isParameterNode = $derived(liveNode.data.kind === 'parameter');
 
 	let param: UiParamDto | null = $derived(
 		liveNode.data.kind === 'parameter' ? liveNode.data.param : null
@@ -58,6 +62,9 @@
 	let controlInfo = $state<UiParamControlInfo | null>(null);
 	let controlInfoLoading = $state(false);
 	let controlInfoRequestSeq = 0;
+	let controlInfoPrevNodeId = $state<number | null>(null);
+	let controlInfoPrevMode = $state<UiParameterControlMode | null>(null);
+	let controlInfoPrevMenuOpen = $state(false);
 	let graphNodesById = $derived(session?.graph.state.nodesById ?? null);
 	const controlModeOptions: ReadonlyArray<{ mode: UiParameterControlMode; label: string }> = [
 		{ mode: 'manual', label: 'Manual' },
@@ -68,18 +75,24 @@
 		{ mode: 'animation', label: 'Animation' }
 	];
 	let availableControlModes = $derived.by((): Set<UiParameterControlMode> => {
-		if (controlInfo && controlInfo.param === liveNode.node_id) {
+		if (controlInfo && controlInfo.param === liveNodeId) {
 			return new Set(controlInfo.available_modes);
 		}
 
 		const fallback = new Set(controlModeOptions.map((option) => option.mode));
-		if (type !== 'str') {
-			fallback.delete('templateText');
-		}
+		// Template mode is context-dependent; keep it hidden until control info confirms context.
+		fallback.delete('templateText');
 		return fallback;
 	});
+	let displayedControlModeOptions = $derived.by(
+		(): ReadonlyArray<{ mode: UiParameterControlMode; label: string }> =>
+			controlModeOptions.filter(
+				(option) =>
+					availableControlModes.has(option.mode) || option.mode === currentControlMode
+			)
+	);
 	let hasCompatibleContextCandidates = $derived.by((): boolean => {
-		if (!controlInfo || controlInfo.param !== liveNode.node_id) {
+		if (!controlInfo || controlInfo.param !== liveNodeId) {
 			return true;
 		}
 		return controlInfo.context_candidates.some((candidate) => candidate.compatible);
@@ -109,7 +122,7 @@
 	let contextSearchDraft = $state('');
 	let contextProjectionDraft = $state<UiParamValueProjection | undefined>(undefined);
 	let contextCandidates = $derived.by(() => {
-		if (!controlInfo || controlInfo.param !== liveNode.node_id) {
+		if (!controlInfo || controlInfo.param !== liveNodeId) {
 			return [];
 		}
 		const nodesById = graphNodesById;
@@ -144,7 +157,9 @@
 		return (
 			contextCandidates.find(
 				(candidate) => candidate.symbol === activeContextSymbol && !candidate.shadowed
-			) ?? contextCandidates.find((candidate) => candidate.symbol === activeContextSymbol) ?? null
+			) ??
+			contextCandidates.find((candidate) => candidate.symbol === activeContextSymbol) ??
+			null
 		);
 	});
 	let activeContextProjectionOptions = $derived.by((): UiParamValueProjection[] => {
@@ -214,13 +229,13 @@
 					left.value[2] === (right as typeof left).value[2] &&
 					left.value[3] === (right as typeof left).value[3]
 				);
-				case 'reference':
-					return (
-						left.uuid === (right as typeof left).uuid &&
-						left.projection === (right as typeof left).projection
-					);
-			}
+			case 'reference':
+				return (
+					left.uuid === (right as typeof left).uuid &&
+					left.projection === (right as typeof left).projection
+				);
 		}
+	}
 
 	const resetValue = (): void => {
 		if (!param || readOnly || !enabled || !isValueOverridden) {
@@ -286,7 +301,7 @@
 			return;
 		}
 		const nextState = stateForMode(mode);
-		await sendSetParamControlStateIntent(liveNode.node_id, nextState);
+		await sendSetParamControlStateIntent(liveNodeId, nextState);
 		controlMenuOpen = false;
 	};
 
@@ -360,8 +375,7 @@
 		const nextProjection =
 			projection === undefined ||
 			contextCandidates.some(
-				(candidate) =>
-					candidate.symbol === nextSymbol && candidate.projections.includes(projection)
+				(candidate) => candidate.symbol === nextSymbol && candidate.projections.includes(projection)
 			)
 				? projection
 				: undefined;
@@ -372,7 +386,7 @@
 		}
 		contextSymbolDraft = nextSymbol;
 		contextProjectionDraft = nextProjection;
-		await sendSetParamControlStateIntent(liveNode.node_id, {
+		await sendSetParamControlStateIntent(liveNodeId, {
 			mode: 'contextLink',
 			spec: {
 				mode: 'contextLink',
@@ -389,23 +403,46 @@
 	});
 
 	$effect(() => {
-		if (!param) {
+		if (!isParameterNode) {
 			controlInfo = null;
 			controlInfoLoading = false;
 			controlInfoRequestSeq += 1;
 			return;
 		}
-		if (controlInfo && controlInfo.param !== liveNode.node_id) {
+		if (controlInfo && controlInfo.param !== liveNodeId) {
 			controlInfo = null;
 		}
 	});
 
 	$effect(() => {
-		if ((!controlMenuOpen && currentControlMode !== 'contextLink') || !param || !session) {
+		const previousNodeId = controlInfoPrevNodeId;
+		const previousMode = controlInfoPrevMode;
+		const previousMenuOpen = controlInfoPrevMenuOpen;
+		controlInfoPrevNodeId = liveNodeId;
+		controlInfoPrevMode = currentControlMode;
+		controlInfoPrevMenuOpen = controlMenuOpen;
+
+		if (
+			(!controlMenuOpen && currentControlMode !== 'contextLink') ||
+			!isParameterNode ||
+			!session
+		) {
 			return;
 		}
 
-		const requestedNodeId = liveNode.node_id;
+		const nodeChanged = previousNodeId !== liveNodeId;
+		const enteredContextLink =
+			currentControlMode === 'contextLink' && previousMode !== 'contextLink';
+		const openedMenuOutsideContextLink =
+			controlMenuOpen &&
+			!previousMenuOpen &&
+			currentControlMode !== 'contextLink';
+		const shouldFetch = nodeChanged || enteredContextLink || openedMenuOutsideContextLink;
+		if (!shouldFetch) {
+			return;
+		}
+
+		const requestedNodeId = liveNodeId;
 		const requestSeq = ++controlInfoRequestSeq;
 		controlInfoLoading = true;
 
@@ -518,10 +555,12 @@
 							</button>
 							{#if controlMenuOpen}
 								<div class="link-mode-dropdown">
-									{#each controlModeOptions as option}
+									{#each displayedControlModeOptions as option}
 										<button
 											type="button"
-											class="link-mode-option {option.mode === currentControlMode ? 'active' : ''} {isControlModeDisabled(option.mode) ? 'disabled' : ''}"
+											class="link-mode-option {option.mode === currentControlMode
+												? 'active'
+												: ''} {isControlModeDisabled(option.mode) ? 'disabled' : ''}"
 											disabled={isControlModeDisabled(option.mode)}
 											onclick={() => {
 												void applyControlMode(option.mode);
@@ -645,8 +684,12 @@
 										}}>
 										<span class="symbol">{candidate.symbol}</span>
 										<span class="meta">
-											{candidate.value_type} {' | '} {candidate.entry_label} {' | '} scope
-											{candidate.scope_label} {' | '} depth {candidate.lexical_depth}
+											{candidate.value_type}
+											{' | '}
+											{candidate.entry_label}
+											{' | '} scope
+											{candidate.scope_label}
+											{' | '} depth {candidate.lexical_depth}
 										</span>
 										{#if candidate.shadowed}
 											<span class="badge shadowed">shadowed</span>
@@ -681,6 +724,8 @@
 					{/if}
 				</div>
 			{/if}
+
+			{@render defaultChildren?.()}
 		{:else}
 			{liveNode.meta.label} has no parameter data.
 		{/if}
@@ -707,7 +752,7 @@
 		z-index: 30;
 	}
 
-	.parameter-inspector:not(.controlled):not(.last):not(.solo):not(.level-0) {
+	.parameter-inspector:not(.last):not(.solo):not(.level-0) {
 		border-bottom: solid 1px rgba(255, 255, 255, 0.05);
 	}
 

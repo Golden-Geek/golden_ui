@@ -87,12 +87,14 @@
 		draftValue = nextValue;
 
 		if (shouldUseTemplateMode) {
-			await sendSetParamControlStateIntent(liveNode.node_id, {
+			const applied = await sendSetParamControlStateIntent(liveNode.node_id, {
 				mode: 'templateText',
 				spec: { mode: 'templateText', template: nextValue },
 				diagnostics: []
 			});
-			return;
+			if (applied) {
+				return;
+			}
 		}
 
 		if (!isManualMode) {
