@@ -9,8 +9,7 @@ export type UiParameterControlMode =
 	| 'contextLink'
 	| 'templateText'
 	| 'expression'
-	| 'proxy'
-	| 'binding'
+	| 'link'
 	| 'animation';
 
 export type ParamValue =
@@ -171,6 +170,48 @@ export interface UiParameterControlDiagnostic {
 	detail?: string;
 }
 
+export type UiUserContextValueType =
+	| 'trigger'
+	| 'int'
+	| 'float'
+	| 'str'
+	| 'file'
+	| 'enum'
+	| 'bool'
+	| 'vec2'
+	| 'vec3'
+	| 'color'
+	| 'reference';
+
+export interface UiUserContextCandidate {
+	symbol: string;
+	value_type: UiUserContextValueType;
+	scope_owner: NodeId;
+	lexical_depth: number;
+	entry_param: NodeId;
+	compatible: boolean;
+	shadowed: boolean;
+}
+
+export interface UiTokenSuggestion {
+	token: string;
+}
+
+export interface UiParamControlCandidate {
+	param: NodeId;
+	compatible: boolean;
+}
+
+export interface UiParamControlInfo {
+	param: NodeId;
+	active_mode: UiParameterControlMode;
+	available_modes: UiParameterControlMode[];
+	diagnostics: UiParameterControlDiagnostic[];
+	context_candidates: UiUserContextCandidate[];
+	token_suggestions: UiTokenSuggestion[];
+	link_candidates: UiParamControlCandidate[];
+}
+
 export interface UiNodeReferenceValue {
 	uuid: string;
 	cached_id?: NodeId;
@@ -191,9 +232,8 @@ export type UiParameterControlSpec =
 	| { mode: 'contextLink'; symbol: string }
 	| { mode: 'templateText'; template: string }
 	| { mode: 'expression'; expression: string }
-	| { mode: 'proxy'; target: UiNodeReferenceValue }
-	| { mode: 'binding'; target: UiNodeReferenceValue }
-	| { mode: 'animation'; animation: UiAnimationControlSpec };
+	| { mode: 'link' }
+	| { mode: 'animation' };
 
 export interface UiParameterControlState {
 	mode: UiParameterControlMode;
@@ -346,6 +386,7 @@ export interface UiClient {
 	sendIntent(intent: UiEditIntent): Promise<UiAck>;
 	replay(scope: UiSubscriptionScope, from?: EventTime): Promise<UiEventBatch>;
 	referenceTargets(paramNodeId: NodeId): Promise<UiReferenceTargets>;
+	paramControlInfo(paramNodeId: NodeId): Promise<UiParamControlInfo>;
 	scriptState(nodeId: NodeId): Promise<UiScriptState>;
 	setScriptConfig(nodeId: NodeId, config: UiScriptConfig, forceReload?: boolean): Promise<void>;
 	reloadScript(nodeId: NodeId): Promise<void>;

@@ -230,6 +230,7 @@
 
 		{#if isParameter}
 			<ParameterInspector {node} {level} {order} />
+			{@render builtInChildren()}
 		{:else if CustomInspectorComponent}
 			<CustomInspectorComponent
 				{node}

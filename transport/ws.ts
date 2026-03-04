@@ -544,6 +544,10 @@ export const createWebSocketUiClient = (options: WebSocketUiClientOptions = {}):
 			return httpClient.referenceTargets(paramNodeId);
 		},
 
+		async paramControlInfo(paramNodeId: number) {
+			return httpClient.paramControlInfo(paramNodeId);
+		},
+
 		async scriptState(nodeId: number) {
 			return httpClient.scriptState(nodeId);
 		},

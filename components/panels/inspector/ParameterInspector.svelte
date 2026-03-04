@@ -2,6 +2,7 @@
 	import type {
 		UiNodeDto,
 		UiNodeMetaDto,
+		UiParamControlInfo,
 		UiParamDto,
 		UiParameterControlMode,
 		UiParameterControlSpec,
@@ -53,16 +54,34 @@
 	let currentControlMode: UiParameterControlMode = $derived(param?.control?.mode ?? 'manual');
 	let canEditControl = $derived(Boolean(param && enabled && !readOnly));
 	let controlMenuOpen = $state(false);
-	const nilUuid = '00000000-0000-0000-0000-000000000000';
+	let controlInfo = $state<UiParamControlInfo | null>(null);
+	let controlInfoLoading = $state(false);
+	let controlInfoRequestSeq = 0;
 	const controlModeOptions: ReadonlyArray<{ mode: UiParameterControlMode; label: string }> = [
 		{ mode: 'manual', label: 'Manual' },
 		{ mode: 'contextLink', label: 'Context Link' },
 		{ mode: 'templateText', label: 'Template' },
 		{ mode: 'expression', label: 'Expression' },
-		{ mode: 'proxy', label: 'Proxy' },
-		{ mode: 'binding', label: 'Binding' },
+		{ mode: 'link', label: 'Link' },
 		{ mode: 'animation', label: 'Animation' }
 	];
+	let availableControlModes = $derived.by((): Set<UiParameterControlMode> => {
+		if (controlInfo && controlInfo.param === liveNode.node_id) {
+			return new Set(controlInfo.available_modes);
+		}
+
+		const fallback = new Set(controlModeOptions.map((option) => option.mode));
+		if (type !== 'str') {
+			fallback.delete('templateText');
+		}
+		return fallback;
+	});
+	let hasCompatibleContextCandidates = $derived.by((): boolean => {
+		if (!controlInfo || controlInfo.param !== liveNode.node_id) {
+			return true;
+		}
+		return controlInfo.context_candidates.some((candidate) => candidate.compatible);
+	});
 
 	let renamingState = $state({
 		isRenaming: false,
@@ -135,21 +154,10 @@
 				return { mode: 'templateText', template: '' };
 			case 'expression':
 				return { mode: 'expression', expression: '' };
-			case 'proxy':
-				return { mode: 'proxy', target: { uuid: nilUuid } };
-			case 'binding':
-				return { mode: 'binding', target: { uuid: nilUuid } };
+			case 'link':
+				return { mode: 'link' };
 			case 'animation':
-				return {
-					mode: 'animation',
-					animation: {
-						waveform: 'sine',
-						frequency_hz: 1,
-						amplitude: 1,
-						offset: 0,
-						phase: 0
-					}
-				};
+				return { mode: 'animation' };
 			case 'manual':
 			default:
 				return { mode: 'manual' };
@@ -172,14 +180,75 @@
 		};
 	}
 
+	function isControlModeDisabled(mode: UiParameterControlMode): boolean {
+		if (!canEditControl) {
+			return true;
+		}
+		if (!availableControlModes.has(mode)) {
+			return true;
+		}
+		if (mode === 'contextLink') {
+			if (controlInfoLoading) {
+				return true;
+			}
+			if (!hasCompatibleContextCandidates) {
+				return true;
+			}
+		}
+		return false;
+	}
+
 	const applyControlMode = async (mode: UiParameterControlMode): Promise<void> => {
-		if (!param || !canEditControl) {
+		if (!param || isControlModeDisabled(mode)) {
 			return;
 		}
 		const nextState = stateForMode(mode);
 		await sendSetParamControlStateIntent(liveNode.node_id, nextState);
 		controlMenuOpen = false;
 	};
+
+	$effect(() => {
+		if (!param) {
+			controlInfo = null;
+			controlInfoLoading = false;
+			controlInfoRequestSeq += 1;
+			return;
+		}
+		if (controlInfo && controlInfo.param !== liveNode.node_id) {
+			controlInfo = null;
+		}
+	});
+
+	$effect(() => {
+		if (!controlMenuOpen || !param || !session) {
+			return;
+		}
+
+		const requestedNodeId = liveNode.node_id;
+		const requestSeq = ++controlInfoRequestSeq;
+		controlInfoLoading = true;
+
+		void session.client
+			.paramControlInfo(requestedNodeId)
+			.then((info) => {
+				if (requestSeq !== controlInfoRequestSeq) {
+					return;
+				}
+				controlInfo = info;
+			})
+			.catch(() => {
+				if (requestSeq !== controlInfoRequestSeq) {
+					return;
+				}
+				controlInfo = null;
+			})
+			.finally(() => {
+				if (requestSeq !== controlInfoRequestSeq) {
+					return;
+				}
+				controlInfoLoading = false;
+			});
+	});
 </script>
 
 {#if visible}
@@ -271,7 +340,8 @@
 									{#each controlModeOptions as option}
 										<button
 											type="button"
-											class="link-mode-option {option.mode === currentControlMode ? 'active' : ''}"
+											class="link-mode-option {option.mode === currentControlMode ? 'active' : ''} {isControlModeDisabled(option.mode) ? 'disabled' : ''}"
+											disabled={isControlModeDisabled(option.mode)}
 											onclick={() => {
 												void applyControlMode(option.mode);
 											}}>
@@ -468,6 +538,18 @@
 	.link-mode-option:hover {
 		background: rgba(255, 255, 255, 0.5);
 		opacity: 1;
+	}
+
+	.link-mode-option.disabled,
+	.link-mode-option:disabled {
+		cursor: default;
+		opacity: 0.35;
+	}
+
+	.link-mode-option.disabled:hover,
+	.link-mode-option:disabled:hover {
+		background: transparent;
+		opacity: 0.35;
 	}
 
 	.link-mode-option.active {

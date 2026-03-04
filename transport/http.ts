@@ -13,10 +13,11 @@ import type {
 	UiNodeDto,
 	UiHistoryState,
 	UiNodeMetaDto,
-	UiNodeReferenceValue,
+	UiParamControlInfo,
 	UiParameterControlMode,
 	UiParameterControlSpec,
 	UiParameterControlState,
+	UiParameterControlDiagnostic,
 	UiParamConstraints,
 	UiParamDto,
 	UiFileConstraints,
@@ -28,7 +29,11 @@ import type {
 	UiScriptSource,
 	UiScriptState,
 	UiSnapshot,
-	UiSubscriptionScope
+	UiSubscriptionScope,
+	UiTokenSuggestion,
+	UiUserContextCandidate,
+	UiUserContextValueType,
+	UiParamControlCandidate
 } from '../types';
 import { wholeGraphScope } from '../types';
 
@@ -59,6 +64,22 @@ export interface RustReferenceTargetsRequest {
 export interface RustReferenceTargetsResponse {
 	allowed_targets?: number[];
 	visible_nodes?: number[];
+}
+
+export interface RustParamControlInfoRequest {
+	param: number;
+}
+
+export interface RustParamControlInfoResponse {
+	param: number;
+	active_mode?: unknown;
+	available_modes?: unknown[];
+	diagnostics?: unknown[];
+	context_candidates?: unknown[];
+	token_suggestions?: unknown[];
+	link_candidates?: unknown[];
+	proxy_candidates?: unknown[];
+	binding_candidates?: unknown[];
 }
 
 export interface RustScriptStateRequest {
@@ -627,34 +648,73 @@ const fromRustConstraints = (constraints: RustUiParamDto['constraints']): UiPara
 	file: fromRustFileConstraints(constraints.file)
 });
 
-const NIL_UUID = '00000000-0000-0000-0000-000000000000';
-
 const isUiParameterControlMode = (value: unknown): value is UiParameterControlMode =>
 	value === 'manual' ||
 	value === 'contextLink' ||
 	value === 'templateText' ||
 	value === 'expression' ||
-	value === 'proxy' ||
-	value === 'binding' ||
+	value === 'link' ||
 	value === 'animation';
 
-const fromRustNodeReference = (value: unknown): UiNodeReferenceValue => {
-	if (!isRecord(value)) {
-		return { uuid: NIL_UUID };
+const isUiUserContextValueType = (value: unknown): value is UiUserContextValueType =>
+	value === 'trigger' ||
+	value === 'int' ||
+	value === 'float' ||
+	value === 'str' ||
+	value === 'file' ||
+	value === 'enum' ||
+	value === 'bool' ||
+	value === 'vec2' ||
+	value === 'vec3' ||
+	value === 'color' ||
+	value === 'reference';
+
+const fromRustControlDiagnostics = (
+	value: unknown
+): UiParameterControlDiagnostic[] =>
+	Array.isArray(value)
+		? value
+				.filter((item): item is Record<string, unknown> => isRecord(item))
+				.map((item) => ({
+					code: typeof item.code === 'string' ? item.code : 'unknown',
+					message: typeof item.message === 'string' ? item.message : '',
+					detail: typeof item.detail === 'string' ? item.detail : undefined
+				}))
+		: [];
+
+const fromRustUserContextCandidate = (value: unknown): UiUserContextCandidate | null => {
+	if (!isRecord(value) || typeof value.symbol !== 'string') {
+		return null;
 	}
 
-	const uuid = typeof value.uuid === 'string' ? value.uuid : NIL_UUID;
-	const cachedId = value.cached_id;
-	const cachedName = value.cached_name;
-	const relativePath = value.relative_path_from_root;
-
+	const valueType = isUiUserContextValueType(value.value_type) ? value.value_type : 'str';
 	return {
-		uuid,
-		cached_id: typeof cachedId === 'number' ? cachedId : undefined,
-		cached_name: typeof cachedName === 'string' ? cachedName : undefined,
-		relative_path_from_root: Array.isArray(relativePath)
-			? relativePath.filter((segment): segment is string => typeof segment === 'string')
-			: undefined
+		symbol: value.symbol,
+		value_type: valueType,
+		scope_owner: Number(value.scope_owner ?? 0),
+		lexical_depth: Number(value.lexical_depth ?? 0),
+		entry_param: Number(value.entry_param ?? 0),
+		compatible: Boolean(value.compatible),
+		shadowed: Boolean(value.shadowed)
+	};
+};
+
+const fromRustTokenSuggestion = (value: unknown): UiTokenSuggestion | null => {
+	if (!isRecord(value) || typeof value.token !== 'string') {
+		return null;
+	}
+	return { token: value.token };
+};
+
+const fromRustParamControlCandidate = (
+	value: unknown
+): UiParamControlCandidate | null => {
+	if (!isRecord(value)) {
+		return null;
+	}
+	return {
+		param: Number(value.param ?? 0),
+		compatible: Boolean(value.compatible)
 	};
 };
 
@@ -666,21 +726,10 @@ const defaultControlSpecForMode = (mode: UiParameterControlMode): UiParameterCon
 			return { mode: 'templateText', template: '' };
 		case 'expression':
 			return { mode: 'expression', expression: '' };
-		case 'proxy':
-			return { mode: 'proxy', target: { uuid: NIL_UUID } };
-		case 'binding':
-			return { mode: 'binding', target: { uuid: NIL_UUID } };
+		case 'link':
+			return { mode: 'link' };
 		case 'animation':
-			return {
-				mode: 'animation',
-				animation: {
-					waveform: 'sine',
-					frequency_hz: 1,
-					amplitude: 1,
-					offset: 0,
-					phase: 0
-				}
-			};
+			return { mode: 'animation' };
 		case 'manual':
 		default:
 			return { mode: 'manual' };
@@ -712,39 +761,10 @@ const fromRustControlSpec = (
 				expression:
 					typeof controlPayload.expression === 'string' ? controlPayload.expression : ''
 			};
-		case 'proxy':
-			return {
-				mode: 'proxy',
-				target: fromRustNodeReference(controlPayload.target)
-			};
-		case 'binding':
-			return {
-				mode: 'binding',
-				target: fromRustNodeReference(controlPayload.target)
-			};
-		case 'animation': {
-			const animation = isRecord(controlPayload.animation)
-				? controlPayload.animation
-				: {};
-			const waveformRaw = animation.waveform;
-			const waveform =
-				waveformRaw === 'triangle' ||
-				waveformRaw === 'saw' ||
-				waveformRaw === 'square' ||
-				waveformRaw === 'sine'
-					? waveformRaw
-					: 'sine';
-			return {
-				mode: 'animation',
-				animation: {
-					waveform,
-					frequency_hz: Number(animation.frequency_hz ?? 1),
-					amplitude: Number(animation.amplitude ?? 1),
-					offset: Number(animation.offset ?? 0),
-					phase: Number(animation.phase ?? 0)
-				}
-			};
-		}
+		case 'link':
+			return { mode: 'link' };
+		case 'animation':
+			return { mode: 'animation' };
 		case 'manual':
 		default:
 			return { mode: 'manual' };
@@ -762,15 +782,7 @@ const fromRustControlState = (control: unknown): UiParameterControlState => {
 
 	const modeRaw = control.mode;
 	const mode: UiParameterControlMode = isUiParameterControlMode(modeRaw) ? modeRaw : 'manual';
-	const diagnostics = Array.isArray(control.diagnostics)
-		? control.diagnostics
-				.filter((item): item is Record<string, unknown> => isRecord(item))
-				.map((item) => ({
-					code: typeof item.code === 'string' ? item.code : 'unknown',
-					message: typeof item.message === 'string' ? item.message : '',
-					detail: typeof item.detail === 'string' ? item.detail : undefined
-				}))
-		: [];
+	const diagnostics = fromRustControlDiagnostics(control.diagnostics);
 
 	return {
 		mode,
@@ -930,6 +942,48 @@ export const fromRustReferenceTargets = (
 	visible_node_ids: [...(payload.visible_nodes ?? [])]
 });
 
+export const fromRustParamControlInfo = (
+	payload: RustParamControlInfoResponse
+): UiParamControlInfo => {
+	const activeMode: UiParameterControlMode = isUiParameterControlMode(payload.active_mode)
+		? payload.active_mode
+		: 'manual';
+	const availableModes = Array.isArray(payload.available_modes)
+		? payload.available_modes.filter((mode): mode is UiParameterControlMode =>
+				isUiParameterControlMode(mode)
+			)
+		: [];
+	if (!availableModes.includes('manual')) {
+		availableModes.unshift('manual');
+	}
+
+	return {
+		param: Number(payload.param ?? 0),
+		active_mode: activeMode,
+		available_modes: availableModes,
+		diagnostics: fromRustControlDiagnostics(payload.diagnostics),
+		context_candidates: Array.isArray(payload.context_candidates)
+			? payload.context_candidates
+					.map((candidate) => fromRustUserContextCandidate(candidate))
+					.filter((candidate): candidate is UiUserContextCandidate => candidate !== null)
+			: [],
+		token_suggestions: Array.isArray(payload.token_suggestions)
+			? payload.token_suggestions
+					.map((entry) => fromRustTokenSuggestion(entry))
+					.filter((entry): entry is UiTokenSuggestion => entry !== null)
+			: [],
+		link_candidates: Array.isArray(payload.link_candidates)
+			? payload.link_candidates
+					.map((entry) => fromRustParamControlCandidate(entry))
+					.filter((entry): entry is UiParamControlCandidate => entry !== null)
+			: Array.isArray(payload.proxy_candidates)
+				? payload.proxy_candidates
+						.map((entry) => fromRustParamControlCandidate(entry))
+						.filter((entry): entry is UiParamControlCandidate => entry !== null)
+			: []
+	};
+};
+
 export const toRustIntent = (intent: UiEditIntent): unknown => {
 	if (intent.kind === 'setParam') {
 		return {
@@ -1054,6 +1108,15 @@ export const createHttpUiClient = (options: HttpClientOptions = {}): UiClient =>
 				request
 			);
 			return fromRustReferenceTargets(response);
+		},
+
+		async paramControlInfo(paramNodeId: number): Promise<UiParamControlInfo> {
+			const request: RustParamControlInfoRequest = { param: paramNodeId };
+			const response = await postJson<RustParamControlInfoResponse>(
+				'/param-control-info',
+				request
+			);
+			return fromRustParamControlInfo(response);
 		},
 
 		async scriptState(nodeId: number): Promise<UiScriptState> {

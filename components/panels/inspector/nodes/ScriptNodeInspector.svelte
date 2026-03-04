@@ -6,7 +6,7 @@
 	import SelectNodeButton from '../../../common/SelectNodeButton.svelte';
 	import CodeEditor from '../../../common/CodeEditor.svelte';
 
-	let { node, defaultHeader, defaultChildren, level } = $props<NodeInspectorComponentProps>();
+	let { node, defaultHeader, defaultChildren, level }: NodeInspectorComponentProps = $props();
 
 	let session = $derived(appState.session);
 	let liveNode: UiNodeDto = $derived(session?.graph.state.nodesById.get(node.node_id) ?? node);
