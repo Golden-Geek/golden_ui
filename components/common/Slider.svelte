@@ -42,12 +42,14 @@
 		1 -
 			(!midZero
 				? relativeValue
-					: value >= 0
-						? relativeZero + relativeValue * (1 - relativeZero)
-						: relativeZero)
+				: value >= 0
+					? relativeZero + relativeValue * (1 - relativeZero)
+					: relativeZero)
 	);
 
-	function startDrag(e: MouseEvent) {
+	let pointerLockId = $state(null as number | null);
+
+	async function startDrag(e: MouseEvent)  {
 		if (disabled || readOnly) {
 			return;
 		}
@@ -61,6 +63,8 @@
 
 		// Hide mouse pointer globally by adding a CSS class
 		document.body.classList.add('slider-hide-cursor');
+
+		// await document.body.requestPointerLock();
 	}
 
 	function dragUpdate(e: MouseEvent) {
@@ -109,6 +113,8 @@
 
 		isDragging = false;
 		onEndEdit && onEndEdit(value);
+
+		// document.exitPointerLock();
 	}
 </script>
 

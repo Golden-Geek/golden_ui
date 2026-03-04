@@ -266,7 +266,7 @@
 	}
 
 	.node-inspector.container {
-		overflow: hidden;
+		/* overflow: visible; */
 	}
 
 	.node-inspector.nested {

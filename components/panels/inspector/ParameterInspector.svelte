@@ -356,9 +356,9 @@
 			</div>
 
 			{#if currentControlMode != 'manual'}
-				<div class="control-mode-line">
+				<!-- <div class="control-mode-line">
 					<small>Control Mode: {currentControlMode}</small>
-				</div>
+				</div> -->
 			{/if}
 		{:else}
 			{liveNode.meta.label} has no parameter data.
