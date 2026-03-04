@@ -40,7 +40,7 @@ html {
 
 .gc-header {
     flex: 0 0 2rem;
-    padding-inline: 0.75rem;
+    padding: 0 1rem;
     display: flex;
     align-items: center;
     background-color: var(--gc-color-header);
@@ -50,9 +50,9 @@ html {
     -webkit-app-region: drag;
     position: relative;
     z-index: 2;
-
     box-shadow: 0 .05rem .6rem rgba(0, 0, 0, .6);
     border-bottom: solid .05rem rgba(255, 255, 255, 0.05);
+    overflow:hidden;
 }
 
 .gc-header :is(button, input, textarea, select, a, [data-no-drag]) {

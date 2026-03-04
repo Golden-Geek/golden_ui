@@ -9,6 +9,7 @@
 	import EnableButton from '../../common/EnableButton.svelte';
 	import NodeWarningBadge from '../../common/NodeWarningBadge.svelte';
 	import { resolveNodeInspector, type NodeInspectorOrder } from './node-inspector-registry';
+	import NodeAddButton from '../../common/NodeAddButton.svelte';
 
 	let {
 		nodes = [],
@@ -59,6 +60,9 @@
 		renameDraft: ''
 	});
 
+	let creatableItems = $derived(node.creatable_user_items ?? []);
+	let showAddButton = $derived(!isRoot && showAsContainer && creatableItems.length > 0);
+
 	$effect(() => {
 		if (!renamingState.isRenaming || !renameInputElem) {
 			return;
@@ -108,7 +112,6 @@
 	const setCollapsed = (nextCollapsed: boolean): void => {
 		collapsed = nextCollapsed;
 	};
-
 </script>
 
 {#if node}
@@ -204,6 +207,13 @@
 							{@render headerExtra()}
 						{/if}
 					</span>
+
+					<span class="spacer"></span>
+					{#if showAddButton}
+						<div class="node-add-button-wrapper">
+							<NodeAddButton {node} />
+						</div>
+					{/if}
 				</div>
 			{/if}
 		{/snippet}
@@ -253,7 +263,7 @@
 			</CustomInspectorComponent>
 		{:else}
 			{@render builtInHeader()}
-			<div class="node-inspector-content">
+			<div class="node-inspector-content {showAddButton ? 'with-add-button' : ''}">
 				{@render builtInChildren()}
 			</div>
 		{/if}
@@ -268,8 +278,6 @@
 		font-size: 0.7rem;
 		overflow: visible;
 	}
-
-
 
 	.node-inspector.nested {
 		margin-left: 0.3rem;
@@ -342,10 +350,20 @@
 			cursor: pointer;
 		}
 
+		.node-header {
+			display: flex;
+		}
+
 		.node-title .title-text {
 			padding: 0 0.15rem;
 			line-height: 0.5rem;
 			vertical-align: text-top;
+		}
+
+		.node-add-button-wrapper {
+			border-radius: 0.5rem 0.5rem 0 0;
+			padding: 0 0.25rem;
+			background-color: rgb(from var(--container-color) r g b / 5%);
 		}
 
 		:global(.node-inspector-content) {
@@ -356,6 +374,10 @@
 			border-left: solid 2px var(--container-color);
 			padding-bottom: 0.25rem;
 			box-sizing: border-box;
+		}
+
+		:global(.node-inspector-content).with-add-button {
+			border-radius: 0 0 0.5rem 0.5rem;
 		}
 	}
 

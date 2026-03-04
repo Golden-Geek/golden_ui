@@ -265,7 +265,7 @@ export type UiParameterControlSpec =
 	| { mode: 'manual' }
 	| { mode: 'contextLink'; symbol: string; projection?: UiParamValueProjection }
 	| { mode: 'templateText'; template: string }
-	| { mode: 'expression'; expression: string }
+	| { mode: 'expression' }
 	| { mode: 'link' }
 	| { mode: 'animation' };
 

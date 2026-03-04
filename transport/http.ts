@@ -804,7 +804,7 @@ const defaultControlSpecForMode = (mode: UiParameterControlMode): UiParameterCon
 		case 'templateText':
 			return { mode: 'templateText', template: '' };
 		case 'expression':
-			return { mode: 'expression', expression: '' };
+			return { mode: 'expression' };
 		case 'link':
 			return { mode: 'link' };
 		case 'animation':
@@ -838,11 +838,7 @@ const fromRustControlSpec = (
 				template: typeof controlPayload.template === 'string' ? controlPayload.template : ''
 			};
 		case 'expression':
-			return {
-				mode: 'expression',
-				expression:
-					typeof controlPayload.expression === 'string' ? controlPayload.expression : ''
-			};
+			return { mode: 'expression' };
 		case 'link':
 			return { mode: 'link' };
 		case 'animation':

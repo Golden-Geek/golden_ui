@@ -256,7 +256,7 @@
 			case 'templateText':
 				return { mode: 'templateText', template: '' };
 			case 'expression':
-				return { mode: 'expression', expression: '' };
+				return { mode: 'expression' };
 			case 'link':
 				return { mode: 'link' };
 			case 'animation':

@@ -57,12 +57,12 @@
 	};
 
 	const startDrag = async (): Promise<void> => {
-		if(platform.isWindows) return; //handle natively
+		if (platform.isWindows) return; //handle natively
 		const result = await invokeAppCommand('start_drag');
-		if(result === undefined)  {
-			console.error('[window-controls] Tauri window API unavailable (start drag)')
+		if (result === undefined) {
+			console.error('[window-controls] Tauri window API unavailable (start drag)');
 		}
-	}
+	};
 
 	const clearUiStorage = (): void => {
 		clearPersistedUiState();
@@ -70,7 +70,6 @@
 			window.location.reload();
 		}
 	};
-	
 
 	onMount(() => {
 		hasTauriWindowApi = Boolean(window.__TAURI_INTERNALS__?.invoke);
@@ -91,9 +90,16 @@
 	});
 </script>
 
-<div class="gc-header {hasTauriWindowApi ? 'tauri' : ''}" >
+<div class="gc-header {hasTauriWindowApi ? 'tauri' : ''}">
 	<div class="app-title">Chataigne 2.0.0</div>
-	<div class="spacer" data-tauri-drag-region role="button" tabindex="-1" onmousedown={startDrag} onkeydown={()=>{}}> </div>
+	<div
+		class="spacer"
+		data-tauri-drag-region
+		role="button"
+		tabindex="-1"
+		onmousedown={startDrag}
+		onkeydown={() => {}}>
+	</div>
 	<div class="controls">
 		<div class="history-actions">
 			<button
@@ -119,7 +125,14 @@
 			</button>
 		</div>
 	</div>
-	<div class="spacer" data-tauri-drag-region role="button" tabindex="-1" onmousedown={startDrag} onkeydown={()=>{}}> </div>
+	<div
+		class="spacer"
+		data-tauri-drag-region
+		role="button"
+		tabindex="-1"
+		onmousedown={startDrag}
+		onkeydown={() => {}}>
+	</div>
 	{#if hasTauriWindowApi}
 		<div class="app-buttons">
 			<button
@@ -141,21 +154,20 @@
 </div>
 
 <style>
-    
-
 	.history-actions {
 		display: flex;
 		gap: 0.25rem;
 	}
 
+	.history-actions button {
+		transition:
+			filter 0.2s ease,
+			opacity 0.2s ease;
+	}
 
-    .history-actions button{
-        transition: filter 0.2s ease, opacity 0.2s ease;
-    }
-
-    .history-actions button:hover:not(:disabled) {
-        filter: brightness(1.2);
-    }
+	.history-actions button:hover:not(:disabled) {
+		filter: brightness(1.2);
+	}
 
 	.clear-ui {
 		background-color: rgb(200 200 200 / 20%);
@@ -196,5 +208,12 @@
 	.app-buttons {
 		width: 20%;
 		text-align: right;
+	}
+
+	.status {
+		white-space: nowrap;
+		max-width: 10rem;
+		font-size: 0.7rem;
+		color: var(--gc-color-text);
 	}
 </style>

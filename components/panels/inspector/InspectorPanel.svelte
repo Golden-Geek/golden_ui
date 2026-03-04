@@ -16,6 +16,7 @@
 	import Watcher from '../../common/Watcher.svelte';
 	import type { WatcherUiSettings } from '../../common/watcher/watcher-utils';
 	import addIcon from '../../../style/icons/node/add.svg';
+	import NodeAddButton from '../../common/NodeAddButton.svelte';
 
 	let { panelApi, panelId, panelType, title, params }: PanelProps = $props();
 
@@ -320,35 +321,7 @@
 			</div>
 
 			<div class="spacer"></div>
-			{#if canCreateItems}
-				<div class="add-item-menu" bind:this={addMenuElem}>
-					<button
-						class="add-item-trigger"
-						type="button"
-						aria-label="Add child item"
-						title="Add item"
-						aria-expanded={addMenuOpen}
-						onclick={toggleAddMenu}>
-						<img src={addIcon} alt="" />
-					</button>
-					{#if addMenuOpen}
-						<div class="add-item-dropdown" role="menu" aria-label="Creatable items" transition:slide={{ duration: 200 }}>
-							{#each creatableItems as item (`${item.node_type}:${item.item_kind}`)}
-								<button
-									type="button"
-									class="add-item-option"
-									role="menuitem"
-									title={`Add ${item.label}`}
-									onclick={() => {
-										void createItem(item);
-									}}>
-									{item.label}
-								</button>
-							{/each}
-						</div>
-					{/if}
-				</div>
-			{/if}
+			<NodeAddButton {node} />
 		</div>
 
 		{#if warningCount > 0}
@@ -462,60 +435,6 @@
 	.inspector-header .copy-button:hover {
 		opacity: 1;
 	}
-
-	.inspector-header .add-item-menu {
-		position: relative;
-		display: inline-flex;
-	}
-
-	.inspector-header .add-item-trigger {
-		width: 1.45rem;
-		height: 1.45rem;
-		padding: 0.15rem;
-		border-radius: 0.35rem;
-		cursor: pointer;
-		display: inline-flex;
-		align-items: center;
-		justify-content: center;
-	}
-
-	.inspector-header .add-item-trigger img {
-		width: 100%;
-		height: 100%;
-		display: block;
-	}
-
-	.inspector-header .add-item-dropdown {
-		position: absolute;
-		top: calc(100% + 0.25rem);
-		right: 0;
-		min-width: 10rem;
-		display: flex;
-		flex-direction: column;
-		gap: 0.15rem;
-		padding: 0.2rem;
-		border-radius: 0.35rem;
-		border: solid 0.06rem rgba(255, 255, 255, 0.15);
-		background-color: rgba(30, 30, 30, 0.96);
-		box-shadow: 0 0.4rem 1.2rem rgba(0, 0, 0, 0.45);
-		z-index: 10;
-	}
-
-	.inspector-header .add-item-option {
-		border: none;
-		border-radius: 0.25rem;
-		background: transparent;
-		color: var(--text-color);
-		font-size: 0.72rem;
-		text-align: left;
-		padding: 0.3rem 0.4rem;
-		cursor: pointer;
-	}
-
-	.inspector-header .add-item-option:hover {
-		background-color: rgba(255, 255, 255, 0.12);
-	}
-
 
 	.warning-info {
 		display: flex;
