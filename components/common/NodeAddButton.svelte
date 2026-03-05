@@ -1,7 +1,8 @@
 <script lang="ts">
 	import { sendCreateUserItemIntent } from '$lib/golden_ui/store/ui-intents';
 	import type { UiCreatableUserItem, UiNodeDto } from '$lib/golden_ui/types';
-	import { slide } from 'svelte/transition';
+	import ContextMenu from './ContextMenu.svelte';
+	import type { ContextMenuAnchor, ContextMenuItem } from './context-menu';
 	import addIcon from '../../style/icons/node/add.svg';
 
 	let { node }: { node: UiNodeDto } = $props();
@@ -10,7 +11,7 @@
 	let canCreateItems = $derived(creatableItems.length > 0);
 
 	let addMenuOpen = $state(false);
-	let addMenuElem: HTMLDivElement | null = $state(null as HTMLDivElement | null);
+	let addMenuTrigger: HTMLButtonElement | null = $state(null);
 	let addMenuNodeId = $state<number | null>(null);
 
 	$effect(() => {
@@ -20,33 +21,6 @@
 		}
 		addMenuNodeId = nodeId;
 		addMenuOpen = false;
-	});
-
-	$effect(() => {
-		if (!addMenuOpen || typeof window === 'undefined') {
-			return;
-		}
-
-		const handlePointerDown = (event: PointerEvent): void => {
-			const target = event.target as globalThis.Node | null;
-			if (target && addMenuElem?.contains(target)) {
-				return;
-			}
-			addMenuOpen = false;
-		};
-
-		const handleKeyDown = (event: KeyboardEvent): void => {
-			if (event.key === 'Escape') {
-				addMenuOpen = false;
-			}
-		};
-
-		window.addEventListener('pointerdown', handlePointerDown, true);
-		window.addEventListener('keydown', handleKeyDown, true);
-		return () => {
-			window.removeEventListener('pointerdown', handlePointerDown, true);
-			window.removeEventListener('keydown', handleKeyDown, true);
-		};
 	});
 
 	const toggleAddMenu = (): void => {
@@ -63,11 +37,34 @@
 		addMenuOpen = false;
 		await sendCreateUserItemIntent(node.node_id, item);
 	};
+
+	let menuAnchor = $derived.by((): ContextMenuAnchor | null => {
+		if (!addMenuTrigger) {
+			return null;
+		}
+		return {
+			kind: 'element',
+			element: addMenuTrigger,
+			placement: 'bottom-end',
+			offsetRem: 0.08
+		};
+	});
+
+	let menuItems = $derived.by((): ContextMenuItem[] => {
+		return creatableItems.map((item) => ({
+			id: `${item.node_type}:${item.item_kind}`,
+			label: item.label,
+			action: () => {
+				void createItem(item);
+			}
+		}));
+	});
 </script>
 
 {#if canCreateItems}
-	<div class="add-item-menu" bind:this={addMenuElem}>
+	<div class="add-item-menu">
 		<button
+			bind:this={addMenuTrigger}
 			class="add-item-trigger"
 			type="button"
 			aria-label="Add child item"
@@ -76,26 +73,13 @@
 			onclick={toggleAddMenu}>
 			<img src={addIcon} alt="" />
 		</button>
-		{#if addMenuOpen}
-			<div
-				class="add-item-dropdown"
-				role="menu"
-				aria-label="Creatable items"
-				transition:slide={{ duration: 200 }}>
-				{#each creatableItems as item (`${item.node_type}:${item.item_kind}`)}
-					<button
-						type="button"
-						class="add-item-option"
-						role="menuitem"
-						title={`Add ${item.label}`}
-						onclick={() => {
-							void createItem(item);
-						}}>
-						{item.label}
-					</button>
-				{/each}
-			</div>
-		{/if}
+		<ContextMenu
+			bind:open={addMenuOpen}
+			items={menuItems}
+			anchor={menuAnchor}
+			insideElements={[addMenuTrigger]}
+			minWidthRem={10}
+			maxWidthCss="min(18rem, calc(100vw - 2rem))" />
 	</div>
 {/if}
 
@@ -106,53 +90,20 @@
 	}
 
 	.add-item-trigger {
-		width: 1.45rem;
-		height: 1.45rem;
+		inline-size: 1.45rem;
+		block-size: 1.45rem;
 		padding: 0.15rem;
 		border-radius: 0.35rem;
 		cursor: pointer;
 		display: inline-flex;
 		align-items: center;
 		justify-content: center;
-        filter: brightness(1) grayscale(.7);
+		filter: brightness(1) grayscale(0.7);
 	}
 
 	.add-item-trigger img {
-		width: 100%;
-		height: 100%;
+		inline-size: 100%;
+		block-size: 100%;
 		display: block;
 	}
-
-	.add-item-dropdown {
-		position: absolute;
-		top: calc(100% + 0.25rem);
-		right: 0;
-		min-width: 10rem;
-		display: flex;
-		flex-direction: column;
-		gap: 0.15rem;
-		padding: 0.2rem;
-		border-radius: 0.35rem;
-		border: solid 0.06rem rgba(255, 255, 255, 0.15);
-		background-color: rgba(30, 30, 30, 0.96);
-		box-shadow: 0 0.4rem 1.2rem rgba(0, 0, 0, 0.45);
-		z-index: 10;
-	}
-
-	.add-item-option {
-		border: none;
-		border-radius: 0.25rem;
-		background: transparent;
-		color: var(--text-color);
-		font-size: 0.72rem;
-		text-align: left;
-		padding: 0.3rem 0.4rem;
-		cursor: pointer;
-	}
-
-	.add-item-option:hover {
-		background-color: rgba(255, 255, 255, 0.12);
-	}
-
-
 </style>

@@ -41,6 +41,7 @@
 	import InspectorPanel from '../panels/inspector/InspectorPanel.svelte';
 	import LoggerPanel from '../panels/logger/LoggerPanel.svelte';
 	import WarningsPanel from '../panels/warnings/WarningsPanel.svelte';
+	import GroupPanelAddAction from './GroupPanelAddAction.svelte';
 
 	let { userPanels, initialPanels, nodeIcons } = $props<{
 		userPanels?: UserPanelDefinitionMap;
@@ -53,6 +54,9 @@
 	});
 
 	type MountedPanel = PanelExports & Record<string, unknown>;
+	type MountedHeaderAction = {
+		closeMenu?: () => void;
+	};
 
 	const goldenPanelDefinitions: Record<string, PanelDefinition> = {
 		inspector: {
@@ -312,10 +316,7 @@
 		}
 
 		if (query.panelId) {
-			const panelById = dockview.getGroupPanel(query.panelId);
-			if (panelById) {
-				return panelById;
-			}
+			return dockview.getGroupPanel(query.panelId);
 		}
 
 		if (query.panelType) {
@@ -435,170 +436,40 @@
 
 	const createGroupAddRenderer = (group: DockviewGroupPanel): IHeaderActionsRenderer => {
 		const element = document.createElement('div');
-		element.className = 'gc-group-panel-add';
+		element.className = 'gc-group-panel-add-host';
 
-		const trigger = document.createElement('button');
-		trigger.type = 'button';
-		trigger.className = 'gc-group-panel-add-trigger';
-		// trigger.textContent = "+";
-		trigger.setAttribute('aria-label', 'Add panel in this group');
-		trigger.setAttribute('title', 'Add panel');
-		trigger.disabled = availablePanelDefinitions.length === 0;
+		let mountedAction: MountedHeaderAction | null = mount(GroupPanelAddAction, {
+			target: element,
+			props: {
+				availablePanels: availablePanelDefinitions,
+				onAddPanel: (panelType: string): void => {
+					addPanel(
+						{ panelType },
+						{
+							referenceGroup: group,
+							direction: 'within'
+						}
+					);
+				}
+			}
+		}) as MountedHeaderAction;
 
-		const menu = document.createElement('div');
-		menu.className = 'gc-group-panel-add-menu';
-		menu.hidden = true;
-
-		const listenerDisposables: DockviewIDisposable[] = [];
 		const dockviewDisposables: DockviewIDisposable[] = [];
-		let hasGlobalListeners = false;
-
-		const positionMenu = (): void => {
-			if (menu.hidden) {
-				return;
-			}
-
-			const viewportPadding = 8;
-			menu.style.transform = '';
-
-			const rect = menu.getBoundingClientRect();
-			let shiftX = 0;
-			const maxRight = window.innerWidth - viewportPadding;
-
-			if (rect.right > maxRight) {
-				shiftX -= rect.right - maxRight;
-			}
-
-			if (rect.left + shiftX < viewportPadding) {
-				shiftX += viewportPadding - (rect.left + shiftX);
-			}
-
-			menu.style.transform = `translateX(${Math.round(shiftX)}px)`;
-		};
-
-		const closeMenu = (): void => {
-			menu.hidden = true;
-			element.classList.remove('is-open');
-			menu.style.transform = '';
-			if (hasGlobalListeners) {
-				document.removeEventListener('pointerdown', onGlobalPointerDown);
-				window.removeEventListener('resize', onViewportResize);
-				hasGlobalListeners = false;
-			}
-		};
-
-		const openMenu = (): void => {
-			if (availablePanelDefinitions.length === 0) {
-				return;
-			}
-
-			if (!hasGlobalListeners) {
-				document.addEventListener('pointerdown', onGlobalPointerDown);
-				window.addEventListener('resize', onViewportResize);
-				hasGlobalListeners = true;
-			}
-
-			menu.hidden = false;
-			element.classList.add('is-open');
-			requestAnimationFrame(positionMenu);
-		};
-
-		const toggleMenu = (): void => {
-			if (menu.hidden) {
-				openMenu();
-				return;
-			}
-
-			closeMenu();
-		};
-
-		const stopMouseDown = (event: MouseEvent): void => {
-			event.preventDefault();
-			event.stopPropagation();
-		};
-
-		const onTriggerClick = (event: MouseEvent): void => {
-			event.preventDefault();
-			event.stopPropagation();
-			toggleMenu();
-		};
-
-		const onGlobalPointerDown = (event: PointerEvent): void => {
-			if (!(event.target instanceof Node)) {
-				closeMenu();
-				return;
-			}
-
-			if (!element.contains(event.target)) {
-				closeMenu();
-			}
-		};
-
-		const onViewportResize = (): void => {
-			positionMenu();
-		};
-
-		trigger.addEventListener('click', onTriggerClick);
-		trigger.addEventListener('mousedown', stopMouseDown);
-		menu.addEventListener('mousedown', stopMouseDown);
-
-		listenerDisposables.push(
-			{
-				dispose: () => {
-					trigger.removeEventListener('click', onTriggerClick);
-					trigger.removeEventListener('mousedown', stopMouseDown);
-				}
-			},
-			{
-				dispose: () => {
-					menu.removeEventListener('mousedown', stopMouseDown);
-				}
-			}
-		);
-
-		for (const panelDefinition of availablePanelDefinitions) {
-			const item = document.createElement('button');
-			item.type = 'button';
-			item.className = 'gc-group-panel-add-item';
-			item.textContent = panelDefinition.title;
-
-			const onItemClick = (event: MouseEvent): void => {
-				event.preventDefault();
-				event.stopPropagation();
-				addPanel(
-					{ panelType: panelDefinition.panelType },
-					{ referenceGroup: group, direction: 'within' }
-				);
-				closeMenu();
-			};
-
-			item.addEventListener('click', onItemClick);
-			item.addEventListener('mousedown', stopMouseDown);
-			listenerDisposables.push({
-				dispose: () => {
-					item.removeEventListener('click', onItemClick);
-					item.removeEventListener('mousedown', stopMouseDown);
-				}
-			});
-
-			menu.append(item);
-		}
-
-		element.append(trigger, menu);
 
 		return {
 			element,
 			init: (parameters: IGroupHeaderProps): void => {
 				dockviewDisposables.push(
 					parameters.group.model.onDidActivePanelChange(() => {
-						closeMenu();
+						mountedAction?.closeMenu?.();
 					})
 				);
 			},
 			dispose: (): void => {
-				closeMenu();
-				for (const disposable of listenerDisposables) {
-					disposable.dispose();
+				mountedAction?.closeMenu?.();
+				if (mountedAction) {
+					void unmount(mountedAction);
+					mountedAction = null;
 				}
 				for (const disposable of dockviewDisposables) {
 					disposable.dispose();
@@ -837,64 +708,3 @@
 <div class="gc-content">
 	<div bind:this={containerElement} class="gc-dockview"></div>
 </div>
-
-<style>
-	:global(.gc-group-panel-add) {
-		position: relative;
-		display: flex;
-		align-items: center;
-		block-size: 100%;
-	}
-
-	:global(.gc-group-panel-add-trigger) {
-		inline-size: 1.4rem;
-		block-size: 1.4rem;
-		border-radius: 0.35rem;
-		/* background: color-mix(in srgb, var(--gc-color-panel-row) 78%, black); */
-		color: inherit;
-		font-size: 0.92rem;
-		line-height: 1;
-		cursor: pointer;
-		padding: 0;
-	}
-
-	:global(.gc-group-panel-add-trigger:disabled) {
-		cursor: default;
-		opacity: 0.45;
-	}
-
-	:global(.gc-group-panel-add-menu) {
-		position: absolute;
-		inset-inline-start: 0;
-		inset-block-start: calc(100% + 0.3rem);
-		min-inline-size: 9rem;
-		max-inline-size: min(14rem, calc(100vw - 1rem));
-		display: grid;
-		padding: 0.3rem;
-		border-radius: 0.45rem;
-		z-index: 20;
-		border: solid 1px rgba(255, 255, 255, 0.1);
-		background: var(--gc-color-panel);
-		backdrop-filter: blur(0.3rem);
-		box-shadow: 0 0.4rem 1rem color-mix(in srgb, black 60%, transparent);
-	}
-
-	:global(.gc-group-panel-add-menu[hidden]) {
-		display: none;
-	}
-
-	:global(.gc-group-panel-add-item) {
-		inline-size: 100%;
-		text-align: start;
-		border: 0;
-		border-radius: 0.3rem;
-		color: inherit;
-		cursor: pointer;
-		font-size: 0.76rem;
-		padding: 0.4rem 0.3rem !important;
-	}
-
-	:global(.gc-group-panel-add-item:hover) {
-		background-color: rgba(200, 200, 200, 1s) !important;
-	}
-</style>

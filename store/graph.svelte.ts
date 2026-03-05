@@ -117,6 +117,33 @@ const replaceInChildren = (
 	);
 };
 
+const sameNodeOrder = (left: NodeId[], right: NodeId[]): boolean => {
+	if (left.length !== right.length) {
+		return false;
+	}
+	for (let index = 0; index < left.length; index += 1) {
+		if (left[index] !== right[index]) {
+			return false;
+		}
+	}
+	return true;
+};
+
+const syncNodeChildren = (state: GraphState, parent: NodeId): void => {
+	const node = state.nodesById.get(parent);
+	if (!node) {
+		return;
+	}
+	const nextChildren = state.childrenById.get(parent) ?? [];
+	if (sameNodeOrder(node.children, nextChildren)) {
+		return;
+	}
+	state.nodesById.set(parent, {
+		...node,
+		children: [...nextChildren]
+	});
+};
+
 const removeSubtree = (state: GraphState, nodeId: NodeId): void => {
 	const children = state.childrenById.get(nodeId) ?? [];
 	for (const child of children) {
@@ -192,6 +219,11 @@ const reduceEvent = (state: GraphState, event: UiEventDto): GraphState => {
 		case 'childAdded': {
 			addToChildren(next.childrenById, event.kind.parent, event.kind.child);
 			next.parentById.set(event.kind.child, event.kind.parent);
+			if (!next.nodesById.has(event.kind.parent)) {
+				next.requiresResync = true;
+			} else {
+				syncNodeChildren(next, event.kind.parent);
+			}
 			if (!next.nodesById.has(event.kind.child)) {
 				next.requiresResync = true;
 			}
@@ -200,6 +232,11 @@ const reduceEvent = (state: GraphState, event: UiEventDto): GraphState => {
 		case 'childRemoved': {
 			removeFromChildren(next.childrenById, event.kind.parent, event.kind.child);
 			next.parentById.delete(event.kind.child);
+			if (!next.nodesById.has(event.kind.parent)) {
+				next.requiresResync = true;
+			} else {
+				syncNodeChildren(next, event.kind.parent);
+			}
 			if (next.nodesById.has(event.kind.child)) {
 				removeSubtree(next, event.kind.child);
 			}
@@ -209,6 +246,11 @@ const reduceEvent = (state: GraphState, event: UiEventDto): GraphState => {
 			replaceInChildren(next.childrenById, event.kind.parent, event.kind.old, event.kind.new);
 			next.parentById.delete(event.kind.old);
 			next.parentById.set(event.kind.new, event.kind.parent);
+			if (!next.nodesById.has(event.kind.parent)) {
+				next.requiresResync = true;
+			} else {
+				syncNodeChildren(next, event.kind.parent);
+			}
 			if (next.nodesById.has(event.kind.old)) {
 				removeSubtree(next, event.kind.old);
 			}
@@ -221,6 +263,12 @@ const reduceEvent = (state: GraphState, event: UiEventDto): GraphState => {
 			removeFromChildren(next.childrenById, event.kind.old_parent, event.kind.child);
 			addToChildren(next.childrenById, event.kind.new_parent, event.kind.child);
 			next.parentById.set(event.kind.child, event.kind.new_parent);
+			if (!next.nodesById.has(event.kind.old_parent) || !next.nodesById.has(event.kind.new_parent)) {
+				next.requiresResync = true;
+			} else {
+				syncNodeChildren(next, event.kind.old_parent);
+				syncNodeChildren(next, event.kind.new_parent);
+			}
 			break;
 		}
 		case 'childReordered': {

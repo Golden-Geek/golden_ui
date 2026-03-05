@@ -52,7 +52,7 @@ html {
     z-index: 2;
     box-shadow: 0 .05rem .6rem rgba(0, 0, 0, .6);
     border-bottom: solid .05rem rgba(255, 255, 255, 0.05);
-    overflow:hidden;
+    overflow: hidden;
 }
 
 .gc-header :is(button, input, textarea, select, a, [data-no-drag]) {
@@ -199,13 +199,18 @@ input[type="checkbox"] {
 
 input[type="checkbox"]:hover {
     border-color: var(--gc-color-checkbox-fg) !important;
-    filter: brightness(1.5);
+    filter: brightness(1);
 }
 
 /* Keep background dark when checked, show pink check mark */
 input[type="checkbox"]:checked {
     border-color: var(--gc-color-checkbox-fg) !important;
     /* pink border when checked */
+
+}
+
+input[type="checkbox"]:checked:hover {
+    filter: brightness(1.3);
 
 }
 
@@ -279,6 +284,10 @@ select {
 
 .arrow.up {
     transform: rotate(-90deg);
+}
+
+.arrow.left {
+    transform: rotate(180deg);
 }
 
 /* Dragging cursor hiding */
@@ -513,6 +522,9 @@ select {
         border: none;
     }
 
+    .dv-tabs-and-actions-container {
+        align-items: center;;
+    }
     .dv-tabs-and-actions-container .dv-tabs-container>.dv-tab {
         transition: background-color .2s, color .2s;
     }

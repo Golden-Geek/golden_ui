@@ -8,14 +8,13 @@
 		writePanelPersistedState
 	} from '../../../dockview/panel-persistence';
 	import type { PanelProps, PanelState } from '../../../dockview/panel-types.ts';
-	import type { UiCreatableUserItem } from '$lib/golden_ui/types';
+	import type { NodeId } from '$lib/golden_ui/types';
 	import { slide } from 'svelte/transition';
 	import { getIconURLForNode } from '$lib/golden_ui/store/node-types';
-	import { sendCreateUserItemIntent, sendPatchMetaIntent } from '$lib/golden_ui/store/ui-intents';
+	import { sendPatchMetaIntent } from '$lib/golden_ui/store/ui-intents';
 	import EnableButton from '../../common/EnableButton.svelte';
 	import Watcher from '../../common/Watcher.svelte';
 	import type { WatcherUiSettings } from '../../common/watcher/watcher-utils';
-	import addIcon from '../../../style/icons/node/add.svg';
 	import NodeAddButton from '../../common/NodeAddButton.svelte';
 
 	let { panelApi, panelId, panelType, title, params }: PanelProps = $props();
@@ -33,16 +32,46 @@
 	};
 
 	let session = $derived(appState.session);
-
+	let graphState = $derived(session?.graph.state ?? null);
 	let selectedNodes = $derived(session?.getSelectedNodes() ?? []);
-	let node = $derived(selectedNodes.length === 1 ? selectedNodes[0] : null);
-	let creatableItems = $derived(node?.creatable_user_items ?? []);
-	let canCreateItems = $derived(creatableItems.length > 0);
-	let iconURL = $derived(selectedNodes.length === 1 ? getIconURLForNode(selectedNodes[0]) : null);
+	let selectedNode = $derived(selectedNodes.length === 1 ? selectedNodes[0] : null);
+
+	let inspectorLocked = $state(false);
+	let lockedNodeId = $state<NodeId | null>(null);
+	let inspectedHistory = $state<NodeId[]>([]);
+	let inspectedHistoryIndex = $state(-1);
+	const INSPECT_HISTORY_LIMIT = 128;
+
+	let inspectedNodeId = $derived.by((): NodeId | null => {
+		if (inspectorLocked) {
+			return lockedNodeId;
+		}
+		return selectedNode?.node_id ?? null;
+	});
+	let node = $derived.by(() => {
+		if (inspectedNodeId === null || !graphState) {
+			return null;
+		}
+		return graphState.nodesById.get(inspectedNodeId) ?? null;
+	});
+	let inspectedNodes = $derived(node ? [node] : []);
+
+	let iconURL = $derived(node ? getIconURLForNode(node) : null);
 	let isNameChangeable = $derived(node?.meta.user_permissions.can_edit_name ?? false);
-	let warnings = $derived(
-		selectedNodes.length === 1 ? session?.getNodeVisibleWarnings(selectedNodes[0].node_id) : null
+	let warnings = $derived(node ? session?.getNodeVisibleWarnings(node.node_id) : null);
+	let parentNodeId = $derived.by((): NodeId | null => {
+		if (!node || !graphState) {
+			return null;
+		}
+		return graphState.parentById.get(node.node_id) ?? null;
+	});
+
+	let canGoHistoryBackward = $derived(inspectedHistoryIndex > 0);
+	let canGoHistoryForward = $derived(
+		inspectedHistoryIndex >= 0 && inspectedHistoryIndex < inspectedHistory.length - 1
 	);
+	let canInspectParent = $derived(parentNodeId !== null);
+	let computedPanelTitle = $derived(node ? `Inspector: ${node.meta.label}` : 'Inspector');
 
 	let warningCount = $derived(warnings ? warnings.length : 0);
 	let renameInputElem: HTMLInputElement | null = $state(null as HTMLInputElement | null);
@@ -53,21 +82,20 @@
 
 	let dataInspectorCollapsed = $state(true);
 	let watcherSettingsByParam = $state<Record<string, Partial<WatcherUiSettings>>>({});
-	let addMenuOpen = $state(false);
-	let addMenuElem: HTMLDivElement | null = $state(null as HTMLDivElement | null);
-	let addMenuNodeId = $state<number | null>(null);
-
 	let badgeOver = $state(false);
 
 	const WATCHER_SETTINGS_CACHE_LIMIT = 256;
+
 	const isRecord = (value: unknown): value is Record<string, unknown> =>
 		typeof value === 'object' && value !== null && !Array.isArray(value);
+
 	const sanitizeWatcherSettingsMap = (
 		value: unknown
 	): Record<string, Partial<WatcherUiSettings>> => {
 		if (!isRecord(value)) {
 			return {};
 		}
+
 		const entries: Array<[string, Partial<WatcherUiSettings>]> = [];
 		for (const [paramKey, rawSettings] of Object.entries(value)) {
 			if (!isRecord(rawSettings)) {
@@ -78,13 +106,23 @@
 		return Object.fromEntries(entries);
 	};
 
+	const sanitizeNodeId = (value: unknown): NodeId | null => {
+		const parsed = Number(value);
+		if (!Number.isFinite(parsed)) {
+			return null;
+		}
+		return Math.floor(parsed) as NodeId;
+	};
+
 	interface InspectorPersistedState {
 		dataInspectorCollapsed?: boolean;
 		watcherSettingsByParam?: Record<string, Partial<WatcherUiSettings>>;
+		inspectorLocked?: boolean;
+		inspectorLockedNodeId?: NodeId | null;
 	}
 
-	const applyPersistedState = (params: PanelState['params']): void => {
-		const persistedState = readPanelPersistedState<InspectorPersistedState>(params);
+	const applyPersistedState = (nextParams: PanelState['params']): void => {
+		const persistedState = readPanelPersistedState<InspectorPersistedState>(nextParams);
 
 		if (
 			typeof persistedState.dataInspectorCollapsed === 'boolean' &&
@@ -94,47 +132,81 @@
 		}
 
 		watcherSettingsByParam = sanitizeWatcherSettingsMap(persistedState.watcherSettingsByParam);
+
+		if (
+			typeof persistedState.inspectorLocked === 'boolean' ||
+			persistedState.inspectorLockedNodeId !== undefined
+		) {
+			const nextLockedNodeId = sanitizeNodeId(persistedState.inspectorLockedNodeId);
+			const nextLocked = Boolean(persistedState.inspectorLocked) && nextLockedNodeId !== null;
+			inspectorLocked = nextLocked;
+			lockedNodeId = nextLocked ? nextLockedNodeId : null;
+		}
 	};
 
 	const persistState = (nextState: Partial<InspectorPersistedState>): void => {
 		writePanelPersistedState(panelApi, nextState);
 	};
 
-	$effect(() => {
-		const nodeId = node?.node_id ?? null;
-		if (addMenuNodeId === nodeId) {
-			return;
-		}
-		addMenuNodeId = nodeId;
-		addMenuOpen = false;
-	});
-
-	$effect(() => {
-		if (!addMenuOpen || typeof window === 'undefined') {
+	const setInspectorLock = (nextLocked: boolean, targetNodeId: NodeId | null): void => {
+		const normalizedLocked = nextLocked && targetNodeId !== null;
+		const normalizedNodeId = normalizedLocked ? targetNodeId : null;
+		if (inspectorLocked === normalizedLocked && lockedNodeId === normalizedNodeId) {
 			return;
 		}
 
-		const handlePointerDown = (event: PointerEvent): void => {
-			const target = event.target as globalThis.Node | null;
-			if (target && addMenuElem?.contains(target)) {
-				return;
-			}
-			addMenuOpen = false;
-		};
+		inspectorLocked = normalizedLocked;
+		lockedNodeId = normalizedNodeId;
+		persistState({
+			inspectorLocked: normalizedLocked,
+			inspectorLockedNodeId: normalizedNodeId
+		});
+	};
 
-		const handleKeyDown = (event: KeyboardEvent): void => {
-			if (event.key === 'Escape') {
-				addMenuOpen = false;
-			}
-		};
+	const lockToNode = (targetNodeId: NodeId | null): void => {
+		if (targetNodeId === null) {
+			return;
+		}
+		setInspectorLock(true, targetNodeId);
+	};
 
-		window.addEventListener('pointerdown', handlePointerDown, true);
-		window.addEventListener('keydown', handleKeyDown, true);
-		return () => {
-			window.removeEventListener('pointerdown', handlePointerDown, true);
-			window.removeEventListener('keydown', handleKeyDown, true);
-		};
-	});
+	const goToHistoryIndex = (targetIndex: number): void => {
+		if (targetIndex < 0 || targetIndex >= inspectedHistory.length) {
+			return;
+		}
+
+		const targetNodeId = inspectedHistory[targetIndex] ?? null;
+		if (targetNodeId === null) {
+			return;
+		}
+
+		inspectedHistoryIndex = targetIndex;
+		lockToNode(targetNodeId);
+	};
+
+	const inspectPreviousNode = (): void => {
+		goToHistoryIndex(inspectedHistoryIndex - 1);
+	};
+
+	const inspectNextNode = (): void => {
+		goToHistoryIndex(inspectedHistoryIndex + 1);
+	};
+
+	const inspectParentNode = (): void => {
+		lockToNode(parentNodeId);
+	};
+
+	const resetToSelectedNode = (): void => {
+		setInspectorLock(false, null);
+	};
+
+	const toggleInspectorLock = (): void => {
+		if (inspectorLocked) {
+			setInspectorLock(false, null);
+			return;
+		}
+		lockToNode(node?.node_id ?? null);
+	};
 
 	const toggleDataInspector = (): void => {
 		dataInspectorCollapsed = !dataInspectorCollapsed;
@@ -193,6 +265,78 @@
 		renameInputElem.select();
 	});
 
+	$effect(() => {
+		const currentNodeId = node?.node_id;
+		if (currentNodeId === undefined) {
+			return;
+		}
+
+		const currentHistoryEntry =
+			inspectedHistoryIndex >= 0 ? inspectedHistory[inspectedHistoryIndex] : null;
+		if (currentHistoryEntry === currentNodeId) {
+			return;
+		}
+
+		const baseHistory =
+			inspectedHistoryIndex >= 0 ? inspectedHistory.slice(0, inspectedHistoryIndex + 1) : [];
+		baseHistory.push(currentNodeId);
+
+		const trimmedHistory =
+			baseHistory.length > INSPECT_HISTORY_LIMIT
+				? baseHistory.slice(baseHistory.length - INSPECT_HISTORY_LIMIT)
+				: baseHistory;
+		inspectedHistory = trimmedHistory;
+		inspectedHistoryIndex = trimmedHistory.length - 1;
+	});
+
+	$effect(() => {
+		if (!graphState || inspectedHistory.length === 0) {
+			return;
+		}
+
+		const validHistory = inspectedHistory.filter((entry) => graphState.nodesById.has(entry));
+		if (validHistory.length === inspectedHistory.length) {
+			return;
+		}
+
+		const currentEntry = inspectedHistory[inspectedHistoryIndex] ?? null;
+		inspectedHistory = validHistory;
+
+		if (validHistory.length === 0) {
+			inspectedHistoryIndex = -1;
+			return;
+		}
+
+		if (currentEntry !== null) {
+			const preservedIndex = validHistory.lastIndexOf(currentEntry);
+			if (preservedIndex >= 0) {
+				inspectedHistoryIndex = preservedIndex;
+				return;
+			}
+		}
+
+		inspectedHistoryIndex = Math.min(inspectedHistoryIndex, validHistory.length - 1);
+	});
+
+	$effect(() => {
+		if (!inspectorLocked || lockedNodeId === null || !graphState) {
+			return;
+		}
+		if (graphState.nodesById.has(lockedNodeId)) {
+			return;
+		}
+		setInspectorLock(false, null);
+	});
+
+	let lastAppliedPanelTitle = $state('');
+	$effect(() => {
+		if (computedPanelTitle === lastAppliedPanelTitle) {
+			return;
+		}
+		lastAppliedPanelTitle = computedPanelTitle;
+		panelApi.setTitle(computedPanelTitle);
+	});
+
 	const startRename = (): void => {
 		if (!node || !isNameChangeable) {
 			return;
@@ -226,21 +370,6 @@
 		renamingState.isRenaming = false;
 	};
 
-	const toggleAddMenu = (): void => {
-		if (!canCreateItems) {
-			return;
-		}
-		addMenuOpen = !addMenuOpen;
-	};
-
-	const createItem = async (item: UiCreatableUserItem): Promise<void> => {
-		if (!node) {
-			return;
-		}
-		addMenuOpen = false;
-		await sendCreateUserItemIntent(node.node_id, item);
-	};
-
 	$effect(() => {
 		panel = {
 			panelId,
@@ -253,12 +382,10 @@
 </script>
 
 <div class="inspector">
-	{#if node == null}
-		<div class="inspector-header">
-			<span>No node selected</span>
-		</div>
-	{:else}
-		<div class="inspector-header" data-node-id={node.node_id}>
+	<div class="inspector-header" data-node-id={node?.node_id}>
+		{#if node == null}
+			<span class="title-text">No node selected</span>
+		{:else}
 			<span class="header-icon">
 				{#if iconURL}
 					<img src={iconURL} alt="" />
@@ -299,9 +426,7 @@
 				</span>
 			{/if}
 
-			
-
-			<div
+			<!-- <div
 				class="node-id-badge"
 				role="button"
 				tabindex="-1"
@@ -309,21 +434,61 @@
 				onmouseleave={() => (badgeOver = false)}>
 				<button
 					class="copy-button"
-					title="Copy path to Clipboard"
+					title="Copy path to clipboard"
 					onclick={() => {
 						if (node) {
 							navigator.clipboard.writeText(node.uuid);
 						}
-					}}>📋</button>
+					}}>
+					Copy
+				</button>
 				{#if badgeOver}
 					<div class="node-id" transition:slide={{ duration: 200, axis: 'x' }}>{node.decl_id}</div>
 				{/if}
-			</div>
+			</div> -->
+		{/if}
 
-			<div class="spacer"></div>
+		<div class="spacer"></div>
+
+		{#if node}
 			<NodeAddButton {node} />
-		</div>
+		{/if}
 
+		<div class="inspector-nav-tools">
+			<button
+				type="button"
+				class="inspector-nav-button arrow up"
+				title="Inspect parent node"
+				disabled={!canInspectParent}
+				onclick={inspectParentNode}>
+			</button>
+			<button
+				type="button"
+				class="inspector-nav-button arrow left"
+				title="Inspect previous node"
+				disabled={!canGoHistoryBackward}
+				onclick={inspectPreviousNode}>
+			</button>
+			<button
+				type="button"
+				class="inspector-nav-button arrow right"
+				title="Inspect next node"
+				disabled={!canGoHistoryForward}
+				onclick={inspectNextNode}>
+			</button>
+
+			<button
+				type="button"
+				class="inspector-nav-button lock-toggle"
+				title={inspectorLocked ? 'Unlock inspector from node' : 'Lock inspector to current node'}
+				disabled={node === null}
+				class:is-active={inspectorLocked}
+				onclick={toggleInspectorLock}>
+			</button>
+		</div>
+	</div>
+
+	{#if node !== null}
 		{#if warningCount > 0}
 			<div class="warning-info" transition:slide={{ duration: 200 }}>
 				{#each warnings as warning}
@@ -338,7 +503,7 @@
 		{/if}
 
 		<div class="inspector-content">
-			{#if node && node.data.kind === 'parameter'}
+			{#if node.data.kind === 'parameter'}
 				<div class="watcher-wrapper">
 					<Watcher
 						{node}
@@ -346,7 +511,7 @@
 						onSettingsChange={persistWatcherSettingsForSelectedParam} />
 				</div>
 			{/if}
-			<NodeInspector nodes={selectedNodes} level={0} />
+			<NodeInspector nodes={inspectedNodes} level={0} />
 		</div>
 
 		<div class="data-inspector {dataInspectorCollapsed ? 'collapsed' : ''}">
@@ -365,7 +530,7 @@
 			</div>
 			{#if !dataInspectorCollapsed}
 				<div class="data-inspector-content" transition:slide|local={{ duration: 200 }}>
-					<NodeDataInspector nodes={selectedNodes} />
+					<NodeDataInspector nodes={inspectedNodes} />
 				</div>
 			{/if}
 		</div>
@@ -384,6 +549,7 @@
 		display: flex;
 		align-items: center;
 		gap: 0.5rem;
+		padding: 0.25rem 0;
 	}
 
 	.inspector-header .header-icon img {
@@ -411,29 +577,47 @@
 		padding: 0 0.35rem;
 	}
 
-	.inspector-header .node-id-badge {
+	.inspector-nav-tools {
 		display: inline-flex;
 		align-items: center;
-		gap: 0.35rem;
-		font-size: 0.8rem;
-		border-radius: 1rem;
-		padding: 0.2rem 0.5rem;
-		background-color: rgb(255, 255, 255, 0.1);
-		border: solid 1px rgba(255, 255, 255, 0.07);
-		color: var(--text-color);
-		cursor: pointer;
 	}
 
-	.inspector-header .copy-button {
-		cursor: pointer;
-		opacity: 0.5;
-		transition: opacity 0.2s ease;
-		cursor: pointer;
-		padding: 0;
+	.inspector-nav-button {
+		border-radius: 0.25rem;
+		font-size: 0.65rem;
+		opacity: 0.6;
+		height: 1rem;
+		width: 1rem;
 	}
 
-	.inspector-header .copy-button:hover {
+	.inspector-nav-button:hover:not(:disabled) {
 		opacity: 1;
+	}
+
+	.inspector-nav-button:disabled {
+		opacity: 0.2;
+		cursor: default;
+	}
+
+	.inspector-nav-button.arrow {
+		margin: 0;
+	}
+
+	.lock-toggle {
+		background-image: url('../../../style/icons/lock.svg');
+		background-repeat: no-repeat;
+		background-position: center;
+		background-size: contain;
+		opacity: 0.8;
+		filter: grayscale(100%);
+		transition:
+			opacity 0.2s ease,
+			filter 0.2s ease;
+	}
+
+	.lock-toggle.is-active {
+		opacity: 1;
+		filter: drop-shadow(0 0 3px rgba(255, 255, 0, 0.6));
 	}
 
 	.warning-info {

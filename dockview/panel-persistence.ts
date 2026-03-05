@@ -1,6 +1,6 @@
 import type { PanelApi, PanelParams } from './panel-types';
 
-const PERSISTED_PANEL_STATE_KEY = '__gc_panel_state';
+export const PERSISTED_PANEL_STATE_KEY = '__gc_panel_state';
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
 	typeof value === 'object' && value !== null && !Array.isArray(value);

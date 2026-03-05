@@ -1,9 +1,11 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { fly, slide } from 'svelte/transition';
+	import { slide } from 'svelte/transition';
+	import ContextMenu from './ContextMenu.svelte';
 	import ColorPicker from './ColorPicker.svelte';
 	import { appState } from '$lib/golden_ui/store/workbench.svelte';
 	import { sendPatchMetaIntent } from '$lib/golden_ui/store/ui-intents';
+	import type { ContextMenuAnchor, ContextMenuItem } from './context-menu';
 	import {
 		closeNodeContextMenu,
 		nodeContextMenuState,
@@ -11,42 +13,41 @@
 	} from '$lib/golden_ui/store/node-context-menu.svelte';
 	import type { NodeId, UiColorDto, UiNodeDto } from '$lib/golden_ui/types';
 	import { getMainViewportBounds, remToPx } from '$lib/golden_ui/components/common/floating-panel';
-
-	type MenuTone = 'default' | 'danger';
-
-	type MenuItem = {
-		id?: string;
-		separator?: boolean;
-		label?: string;
-		tone?: MenuTone;
-		disabled?: boolean;
-		visible?: boolean;
-		keepMenuOpen?: boolean;
-		showsChevron?: boolean;
-		action?: (event: MouseEvent) => void;
-	};
+	import { getPanelByType, showPanel } from '$lib/golden_ui/store/ui-panels';
+	import { PERSISTED_PANEL_STATE_KEY } from '$lib/golden_ui/dockview/panel-persistence';
+	import copyPathIcon from '../../style/icons/copy.svg';
+	import colorIcon from '../../style/icons/parameter/color.svg';
+	import settingsIcon from '../../style/icons/settings.svg';
+	import duplicateIcon from '../../style/icons/duplicate.svg';
+	import deleteIcon from '../../style/icons/delete.svg';
+	import watchIcon from '../../style/icons/watch.svg';
 
 	interface ResolvedNodeTarget {
 		nodeId: NodeId;
 		host: HTMLElement;
 	}
 
+	interface InspectorPanelPersistedState {
+		inspectorLocked: boolean;
+		inspectorLockedNodeId: NodeId;
+	}
+
 	let session = $derived(appState.session);
 	let graphState = $derived(session?.graph.state ?? null);
 	let contextNodeId = $derived(nodeContextMenuState.nodeId);
 	let contextPosition = $derived(nodeContextMenuState.position);
-	let menuDiv: HTMLDivElement | null = $state(null);
+	let menuTreeDiv: HTMLDivElement | null = $state(null);
 	let colorSubMenuDiv: HTMLDivElement | null = $state(null);
+	let colorAnchorElement: HTMLElement | null = $state(null);
 
 	let colorSubMenu = $state({
-		open: false,
-		rowOffsetY: 0
+		open: false
 	});
 	let isColorEditing = $state(false);
 
 	const closeColorSubMenu = (): void => {
 		colorSubMenu.open = false;
-		colorSubMenu.rowOffsetY = 0;
+		colorAnchorElement = null;
 		isColorEditing = false;
 	};
 
@@ -77,36 +78,6 @@
 		};
 	};
 
-	const normalizeMenuItems = (items: MenuItem[]): MenuItem[] => {
-		const visible = items.filter((item) => item.visible !== false);
-		const normalized: MenuItem[] = [];
-		let previousWasSeparator = true;
-
-		for (const item of visible) {
-			if (item.separator) {
-				if (previousWasSeparator) {
-					continue;
-				}
-				normalized.push(item);
-				previousWasSeparator = true;
-				continue;
-			}
-
-			if (!item.label || item.label.trim().length === 0) {
-				continue;
-			}
-
-			normalized.push(item);
-			previousWasSeparator = false;
-		}
-
-		while (normalized.length > 0 && normalized[normalized.length - 1]?.separator) {
-			normalized.pop();
-		}
-
-		return normalized;
-	};
-
 	const clampPosition = (
 		node: HTMLElement,
 		desiredLeft: number,
@@ -133,36 +104,13 @@
 	};
 
 	const updateColorSubMenuPosition = (): void => {
-		if (!menuDiv || !colorSubMenuDiv || !colorSubMenu.open) {
+		if (!colorSubMenuDiv || !colorSubMenu.open || !colorAnchorElement) {
 			return;
 		}
-		const menuRect = menuDiv.getBoundingClientRect();
-		const desiredLeft = menuRect.right + remToPx(0.35);
-		const desiredTop = menuRect.top + colorSubMenu.rowOffsetY;
+		const anchorRect = colorAnchorElement.getBoundingClientRect();
+		const desiredLeft = anchorRect.right + remToPx(0.35);
+		const desiredTop = anchorRect.top;
 		applyPanelPosition(colorSubMenuDiv, desiredLeft, desiredTop);
-	};
-
-	const positionMenu = (x: number, y: number) => {
-		return (node: HTMLDivElement) => {
-			menuDiv = node;
-			node.tabIndex = -1;
-			queueMicrotask(() => {
-				node.focus();
-			});
-
-			let raf = 0;
-			raf = requestAnimationFrame(() => {
-				applyPanelPosition(node, x, y);
-				updateColorSubMenuPosition();
-			});
-
-			return () => {
-				cancelAnimationFrame(raf);
-				if (menuDiv === node) {
-					menuDiv = null;
-				}
-			};
-		};
 	};
 
 	const captureColorSubMenuContainer = () => {
@@ -180,35 +128,15 @@
 		};
 	};
 
-	const updateRootMenuPosition = (): void => {
-		if (contextNodeId === null || !menuDiv) {
-			return;
-		}
-		applyPanelPosition(menuDiv, contextPosition.x, contextPosition.y);
-		updateColorSubMenuPosition();
-	};
-
-	const handleItemClick = (event: MouseEvent, item: MenuItem): void => {
-		event.stopPropagation();
-		if (item.disabled || item.separator) {
-			return;
-		}
-		item.action?.(event);
-		if (!item.keepMenuOpen) {
-			closeMenu();
-		}
-	};
-
-	const handleMenuContextMenu = (event: MouseEvent): void => {
-		event.preventDefault();
-		event.stopPropagation();
+	const captureMenuTree = (node: HTMLDivElement | null): void => {
+		menuTreeDiv = node;
 	};
 
 	const isInsideCurrentMenuTree = (target: EventTarget | null): boolean => {
 		if (!(target instanceof Node)) {
 			return false;
 		}
-		return menuDiv?.contains(target) === true || colorSubMenuDiv?.contains(target) === true;
+		return menuTreeDiv?.contains(target) === true || colorSubMenuDiv?.contains(target) === true;
 	};
 
 	const handleWindowContextMenu = (event: MouseEvent): void => {
@@ -261,7 +189,7 @@
 	};
 
 	const handleWindowViewportChange = (): void => {
-		updateRootMenuPosition();
+		updateColorSubMenuPosition();
 	};
 
 	onMount(() => {
@@ -516,17 +444,14 @@
 	};
 
 	const openColorSubMenu = (event: MouseEvent): void => {
-		if (!canSetColor || !menuDiv) {
+		if (!canSetColor) {
 			return;
 		}
 		const currentTarget = event.currentTarget as HTMLElement | null;
 		if (!currentTarget) {
 			return;
 		}
-
-		const menuRect = menuDiv.getBoundingClientRect();
-		const rowRect = currentTarget.getBoundingClientRect();
-		colorSubMenu.rowOffsetY = rowRect.top - menuRect.top;
+		colorAnchorElement = currentTarget;
 		colorSubMenu.open = true;
 
 		queueMicrotask(() => {
@@ -563,6 +488,7 @@
 
 	const selectCopyScriptControlPath = (_event: MouseEvent): void => {
 		copyScriptControlPath();
+		closeMenu();
 	};
 
 	const selectSetColor = (event: MouseEvent): void => {
@@ -575,25 +501,54 @@
 
 	const selectSetConstraints = (_event: MouseEvent): void => {
 		setConstraints();
+		closeMenu();
 	};
 
 	const selectDuplicateNode = (_event: MouseEvent): void => {
 		duplicateNode();
+		closeMenu();
 	};
 
 	const selectDeleteNode = (_event: MouseEvent): void => {
 		deleteNode();
+		closeMenu();
 	};
 
-	let rootMenuItems = $derived.by((): MenuItem[] => {
+	const spawnLockedInspector = (targetNode: UiNodeDto): void => {
+		const firstInspectorPanel = getPanelByType('inspector');
+		const panelId = `inspector-watch-${targetNode.node_id}-${Date.now().toString(36)}-${Math.floor(
+			Math.random() * 0x100000
+		).toString(36)}`;
+
+		showPanel({
+			panelType: 'inspector',
+			panelId,
+			title: `Inspector: ${targetNode.meta.label}`,
+			params: {
+				[PERSISTED_PANEL_STATE_KEY]: {
+					inspectorLocked: true,
+					inspectorLockedNodeId: targetNode.node_id
+				} satisfies InspectorPanelPersistedState
+			},
+			position: firstInspectorPanel
+				? {
+						referencePanelId: firstInspectorPanel.panelId,
+						direction: 'within'
+					}
+				: undefined
+		});
+	};
+
+	let rootMenuItems = $derived.by((): ContextMenuItem[] => {
 		if (!activeNode) {
 			return [];
 		}
 
-		const items: MenuItem[] = [
+		const items: ContextMenuItem[] = [
 			{
 				id: 'copy-script-control-path',
 				label: 'Copy Script Control Path',
+				icon: copyPathIcon,
 				action: selectCopyScriptControlPath
 			}
 		];
@@ -605,8 +560,8 @@
 			items.push({
 				id: 'set-color',
 				label: 'Set Color',
-				keepMenuOpen: true,
-				// showsChevron: true,
+				icon: colorIcon,
+				className: colorSubMenu.open ? 'gc-node-context-item-open' : '',
 				action: selectSetColor
 			});
 		}
@@ -614,6 +569,7 @@
 			items.push({
 				id: 'set-constraints',
 				label: 'Set Constraints',
+				icon: settingsIcon,
 				action: selectSetConstraints
 			});
 		}
@@ -625,6 +581,7 @@
 			items.push({
 				id: 'duplicate',
 				label: 'Duplicate',
+				icon: duplicateIcon,
 				action: selectDuplicateNode
 			});
 		}
@@ -632,17 +589,56 @@
 			items.push({
 				id: 'delete',
 				label: 'Delete',
-				tone: 'danger',
+				color: 'color-mix(in srgb, #ff8b8b 82%, white 18%)',
+				hoverColor: 'color-mix(in srgb, #ff5c5c 23%, transparent)',
+				icon: deleteIcon,
 				action: selectDeleteNode
 			});
 		}
+		items.push({ separator: true });
+		items.push({
+			id: 'watch',
+			label: 'Watch in Inspector',
+			icon: watchIcon,
+			action: () => {
+				if (!activeNode) {
+					return;
+				}
+				session?.selectNode(activeNode.node_id);
+				closeMenu();
+			}
+		});
+		items.push({
+			id: 'watch-locked-inspector',
+			label: 'Watch in New Locked Inspector',
+			icon: watchIcon,
+			action: () => {
+				if (!activeNode) {
+					return;
+				}
+				spawnLockedInspector(activeNode);
+				closeMenu();
+			}
+		});
 
-		return normalizeMenuItems(items);
+		return items;
 	});
 
+	let menuAnchor = $derived.by((): ContextMenuAnchor | null => {
+		if (contextNodeId === null) {
+			return null;
+		}
+		return {
+			kind: 'point',
+			x: contextPosition.x,
+			y: contextPosition.y
+		};
+	});
 	let menuItems = $derived(rootMenuItems);
 	let showMenu = $derived(contextNodeId !== null && activeNode !== null && menuItems.length > 0);
-	let showColorSubMenu = $derived(showMenu && colorSubMenu.open && canSetColor);
+	let showColorSubMenu = $derived(
+		showMenu && colorSubMenu.open && canSetColor && colorAnchorElement !== null
+	);
 
 	$effect(() => {
 		if (contextNodeId === null) {
@@ -662,6 +658,13 @@
 	});
 
 	$effect(() => {
+		if (showMenu || !colorSubMenu.open) {
+			return;
+		}
+		closeColorSubMenu();
+	});
+
+	$effect(() => {
 		if (!showColorSubMenu) {
 			return;
 		}
@@ -671,32 +674,18 @@
 	});
 </script>
 
-{#if showMenu}
-	<div
-		class="gc-node-context-menu"
-		role="menu"
-		tabindex="-1"
-		{@attach positionMenu(contextPosition.x, contextPosition.y)}
-		transition:fly={{x:-10, duration: 100 }}
-		oncontextmenu={handleMenuContextMenu}>
-		{#each menuItems as item, i (item.id ?? `menu-item-${i}`)}
-			{#if item.separator}
-				<hr class="gc-node-context-separator" />
-			{:else}
-				<button
-					type="button"
-					role="menuitem"
-					class={`gc-node-context-item${item.disabled ? ' gc-node-context-item-disabled' : ''}${item.tone === 'danger' ? ' gc-node-context-item-danger' : ''}${item.id === 'set-color' && showColorSubMenu ? ' gc-node-context-item-open' : ''}`}
-					onclick={(event) => handleItemClick(event, item)}>
-					<span class="gc-node-context-item-label">{item.label}</span>
-					{#if item.showsChevron}
-						<span class="arrow gc-node-context-item-chevron"></span>
-					{/if}
-				</button>
-			{/if}
-		{/each}
-	</div>
-{/if}
+<ContextMenu
+	open={showMenu}
+	items={menuItems}
+	anchor={menuAnchor}
+	closeOnOutsidePointerDown={false}
+	closeOnEscape={false}
+	closeOnContextMenuOutside={false}
+	closeOnSelect={false}
+	minWidthRem={12}
+	zIndex={1300}
+	menuClassName="gc-node-context-menu"
+	onMenuTreeMount={captureMenuTree} />
 
 {#if showColorSubMenu}
 	<div
@@ -715,77 +704,16 @@
 {/if}
 
 <style>
-	.gc-node-context-menu {
-		position: fixed;
+	:global(.gc-node-context-menu) {
 		min-inline-size: 12rem;
-		display: flex;
-		flex-direction: column;
-		padding: 0.25rem;
-		border-radius: 0.45rem;
-		border: solid 1px rgba(255, 255, 255, 0.05);
-		background: var(--gc-color-panel);
-		color: var(--gc-color-text);
-		box-shadow: 0 0.5rem 1.25rem color-mix(in srgb, black 36%, transparent);
-		z-index: 1300;
 	}
 
-	.gc-node-context-item {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		gap: 0.4rem;
-		inline-size: 100%;
-		min-block-size: 1.75rem;
-		padding: 0.25rem 0.5rem;
-		border: none;
-		border-radius: 0.3rem;
-		background: transparent;
-		color: var(--gc-color-text);
+	:global(.gc-node-context-menu .gc-context-item) {
 		font-size: 0.78rem;
-		line-height: 1.2;
-		text-align: start;
-		cursor: pointer;
-		transition:
-			background-color 0.2s ease,
-			color 0.2s ease;
 	}
 
-	.gc-node-context-item:hover,
-	.gc-node-context-item:focus-visible,
-	.gc-node-context-item-open {
+	:global(.gc-node-context-menu .gc-context-item.gc-node-context-item-open) {
 		background: color-mix(in srgb, var(--gc-color-selection) 24%, transparent);
-		outline: none;
-	}
-
-	.gc-node-context-item-disabled {
-		opacity: 0.45;
-		pointer-events: none;
-	}
-
-	.gc-node-context-item-danger {
-		color: color-mix(in srgb, #ffb3b3 80%, var(--gc-color-text) 20%);
-	}
-
-	.gc-node-context-item-danger:hover,
-	.gc-node-context-item-danger:focus-visible {
-		background: color-mix(in srgb, #ff6b6b 28%, transparent);
-		color: color-mix(in srgb, white 90%, #ffb3b3 10%);
-	}
-
-	.gc-node-context-item-label {
-		flex: 1 1 auto;
-	}
-
-	.gc-node-context-item-chevron {
-		opacity: 0.75;
-		font-size: 0.72rem;
-	}
-
-	.gc-node-context-separator {
-		block-size: 0.0625rem;
-		margin: 0.125rem 0;
-		border: none;
-		background: color-mix(in srgb, var(--gc-color-panel-outline) 45%, transparent);
 	}
 
 	.gc-node-context-color-submenu {

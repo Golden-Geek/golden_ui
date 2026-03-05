@@ -17,12 +17,22 @@
 		sendSetParamIntent
 	} from '../../../store/ui-intents';
 	import EnableButton from '../../common/EnableButton.svelte';
+	import ContextMenu from '../../common/ContextMenu.svelte';
 	import NodeWarningBadge from '../../common/NodeWarningBadge.svelte';
+	import type { ContextMenuAnchor, ContextMenuItem } from '../../common/context-menu';
 	import { propertiesInspectorClass } from './inspector.svelte';
 	import { projectionLabel } from '../../../projection-labels';
 	import resetIcon from '../../../style/icons/reset.svg';
 	import referenceIcon from '../../../style/icons/parameter/reference.svg';
-	import { fade, slide } from 'svelte/transition';
+	import expressionIcon from '../../../style/icons/parameter/control/expression.svg';
+	import proxyIcon from '../../../style/icons/parameter/control/proxy.svg';
+	import bindingIcon from '../../../style/icons/parameter/control/binding.svg';
+	import animationIcon from '../../../style/icons/parameter/control/animation.svg';
+	import templateIcon from '../../../style/icons/parameter/string.svg';
+	import manualIcon from '../../../style/icons/parameter/control/manual.svg';
+	import contextIcon from '../../../style/icons/parameter/control/context.svg';
+	import settingsIcon from '../../../style/icons/settings.svg';
+	import { fade } from 'svelte/transition';
 	import type { Snippet } from 'svelte';
 	import Self from './ParameterInspector.svelte';
 
@@ -74,6 +84,7 @@
 	let currentControlMode: UiParameterControlMode = $derived(param?.control?.mode ?? 'manual');
 	let canEditControl = $derived(Boolean(param && enabled && !readOnly));
 	let controlMenuOpen = $state(false);
+	let controlMenuTrigger: HTMLButtonElement | null = $state(null);
 	let controlInfo = $state<UiParamControlInfo | null>(null);
 	let controlInfoLoading = $state(false);
 	let controlInfoRequestSeq = 0;
@@ -90,6 +101,15 @@
 		{ mode: 'binding', label: 'Binding' },
 		{ mode: 'animation', label: 'Animation' }
 	];
+	const controlModeIcons: Record<UiParameterControlMode, string> = {
+		manual: manualIcon,
+		contextLink: contextIcon,
+		templateText: templateIcon,
+		expression: expressionIcon,
+		proxy: proxyIcon,
+		binding: bindingIcon,
+		animation: animationIcon
+	};
 	let availableControlModes = $derived.by((): Set<UiParameterControlMode> => {
 		if (controlInfo && controlInfo.param === liveNodeId) {
 			return new Set(controlInfo.available_modes);
@@ -101,22 +121,50 @@
 		return fallback;
 	});
 
-	let manualControlModeOnly = $derived(
-		availableControlModes.size === 1 && availableControlModes.has('manual')
-	);
-
 	let displayedControlModeOptions = $derived.by(
 		(): ReadonlyArray<{ mode: UiParameterControlMode; label: string }> =>
 			controlModeOptions.filter(
 				(option) => availableControlModes.has(option.mode) || option.mode === currentControlMode
 			)
 	);
+
+	let onlyOneAvailableControlMode = $derived(availableControlModes.size === 1);
+
+	let controlMenuAnchor = $derived.by((): ContextMenuAnchor | null => {
+		if (!controlMenuTrigger) {
+			return null;
+		}
+		return {
+			kind: 'element',
+			element: controlMenuTrigger,
+			placement: 'bottom-end',
+			offsetRem: 0.08
+		};
+	});
 	let hasCompatibleContextCandidates = $derived.by((): boolean => {
 		if (!controlInfo || controlInfo.param !== liveNodeId) {
 			return true;
 		}
 		return controlInfo.context_candidates.some((candidate) => candidate.compatible);
 	});
+	const controlModeBaseColor = (mode: UiParameterControlMode): string => {
+		switch (mode) {
+			case 'contextLink':
+			case 'templateText':
+				return 'var(--gc-color-context)';
+			case 'expression':
+				return 'var(--gc-color-expression)';
+			case 'proxy':
+				return 'var(--gc-color-proxy)';
+			case 'binding':
+				return 'var(--gc-color-binding)';
+			case 'animation':
+				return 'var(--gc-color-animation)';
+			case 'manual':
+			default:
+				return 'var(--gc-color-text)';
+		}
+	};
 	let controlAccentColor = $derived.by((): string => {
 		switch (currentControlMode) {
 			case 'contextLink':
@@ -364,6 +412,27 @@
 		controlMenuOpen = false;
 	};
 
+	let controlModeMenuItems = $derived.by((): ContextMenuItem[] => {
+		return displayedControlModeOptions.map((option) => ({
+			id: `control-mode-${option.mode}`,
+			label: option.label,
+			icon: controlModeIcons[option.mode],
+			disabled: isControlModeDisabled(option.mode),
+			color:
+				option.mode === 'manual'
+					? 'var(--gc-color-text)'
+					: `color-mix(in srgb, ${controlModeBaseColor(option.mode)} 86%, white 14%)`,
+			hoverColor:
+				option.mode === 'manual'
+					? 'color-mix(in srgb, var(--gc-color-selection) 19%, transparent)'
+					: `color-mix(in srgb, ${controlModeBaseColor(option.mode)} 24%, transparent)`,
+			// hint: option.mode === currentControlMode ? 'Current' : undefined,
+			action: () => {
+				void applyControlMode(option.mode);
+			}
+		}));
+	});
+
 	const applyContextLinkSymbol = async (
 		symbol: string,
 		projection: UiParamValueProjection | undefined = contextProjectionDraft
@@ -421,20 +490,15 @@
 		controlInfoPrevMode = currentControlMode;
 		controlInfoPrevMenuOpen = controlMenuOpen;
 
-		if (
-			(!controlMenuOpen && currentControlMode !== 'contextLink') ||
-			!isParameterNode ||
-			!session
-		) {
+		if (!isParameterNode || !session) {
 			return;
 		}
 
 		const nodeChanged = previousNodeId !== liveNodeId;
 		const enteredContextLink =
 			currentControlMode === 'contextLink' && previousMode !== 'contextLink';
-		const openedMenuOutsideContextLink =
-			controlMenuOpen && !previousMenuOpen && currentControlMode !== 'contextLink';
-		const shouldFetch = nodeChanged || enteredContextLink || openedMenuOutsideContextLink;
+		const openedMenu = controlMenuOpen && !previousMenuOpen;
+		const shouldFetch = nodeChanged || enteredContextLink || openedMenu;
 		if (!shouldFetch) {
 			return;
 		}
@@ -543,45 +607,33 @@
 							<EditorComponent node={liveNode} />
 						</div>
 
-						<div
-							class="control-mode-menu"
-							onfocusout={(event) => {
-								const currentTarget = event.currentTarget as HTMLDivElement | null;
-								const nextTarget = event.relatedTarget as Node | null;
-								if (currentTarget && nextTarget && currentTarget.contains(nextTarget)) {
-									return;
-								}
-								controlMenuOpen = false;
-							}}>
-							<button
-								type="button"
-								class="control-mode-trigger {currentControlMode}"
-								aria-label="Choose parameter control mode"
-								title="Choose control mode"
-								disabled={!canEditControl}
-								onclick={() => {
-									controlMenuOpen = !controlMenuOpen;
-								}}>
-								<img src={referenceIcon} alt="Control Mode" />
-							</button>
-							{#if controlMenuOpen}
-								<div class="control-mode-dropdown">
-									{#each displayedControlModeOptions as option}
-										<button
-											type="button"
-											class="control-mode-option {option.mode === currentControlMode
-												? 'active'
-												: ''} {isControlModeDisabled(option.mode) ? 'disabled' : ''}"
-											disabled={isControlModeDisabled(option.mode)}
-											onclick={() => {
-												void applyControlMode(option.mode);
-											}}>
-											{option.label}
-										</button>
-									{/each}
-								</div>
-							{/if}
-						</div>
+						{#if !readOnly && !onlyOneAvailableControlMode && !isControlNode}
+							<div class="control-mode-menu">
+								<button
+									bind:this={controlMenuTrigger}
+									type="button"
+									class="control-mode-trigger {currentControlMode}"
+									aria-label="Choose parameter control mode"
+									title="Choose control mode"
+									disabled={!canEditControl}
+									onclick={() => {
+										controlMenuOpen = !controlMenuOpen;
+									}}>
+									<img src={settingsIcon} alt="Control Mode" />
+								</button>
+								<ContextMenu
+									bind:open={controlMenuOpen}
+									items={controlModeMenuItems}
+									anchor={controlMenuAnchor}
+									insideElements={[controlMenuTrigger]}
+									minWidthRem={8}
+									maxWidthCss="min(14rem, calc(100vw - 2rem))"
+									zIndex={50}
+									menuClassName="control-mode-context-menu" />
+							</div>
+						{:else}
+							<div class="control-mode-placeholder"></div>
+						{/if}
 					</div>
 				{/if}
 			</div>
@@ -719,7 +771,6 @@
 							<div class="context-link-status">No candidates match this filter.</div>
 						{/if}
 					{/if}
-
 				</div>
 			{/if}
 			{@render defaultChildren?.(currentControlMode)}
@@ -740,7 +791,7 @@
 		padding-left: 0.2rem;
 		padding-bottom: 0.2rem;
 		overflow: visible;
-		padding-right: 0.25rem;
+		/* padding-right: 0.25rem; */
 		position: relative;
 		z-index: 0;
 	}
@@ -755,11 +806,6 @@
 			rgb(from var(--gc-parameter-accent) r g b / 6%) 35%,
 			transparent 75%
 		);
-	}
-
-	.parameter-inspector.controlled .parameter-label,
-	.parameter-inspector.controlled .custom-prop-name-text {
-		color: rgb(from var(--gc-parameter-accent) r g b / 96%);
 	}
 
 	.parameter-inspector.control-menu-open {
@@ -871,12 +917,9 @@
 		justify-content: center;
 		cursor: pointer;
 		padding: 0.15rem;
-		opacity: 0.72;
-		border: 0.0625rem solid rgba(from var(--text-color) r g b / 24%);
+		opacity: 0.5;
 		background: rgba(from var(--text-color) r g b / 6%);
-		transition:
-			opacity 0.12s ease,
-			border-color 0.12s ease;
+		transition: opacity 0.2s ease;
 	}
 
 	.control-mode-trigger img {
@@ -893,58 +936,15 @@
 		opacity: 0.35;
 	}
 
-	.control-mode-dropdown {
-		position: absolute;
-		top: 110%;
-		right: 0;
-		z-index: 50;
-		min-width: 7rem;
-		display: flex;
-		flex-direction: column;
-		gap: 0.1rem;
-		padding: 0.25rem;
-		border: 1px solid rgba(255, 255, 255, 0.1);
-		border-radius: 0.35rem;
-		background: var(--gc-color-panel);
-		box-shadow: 0 0.35rem 0.8rem rgba(0, 0, 0, 1);
+	.control-mode-placeholder {
+		width: 1.2rem;
+		height: 1.2rem;
 	}
 
-	.control-mode-option {
-		border: none;
-		border-radius: 0.25rem;
-		background: transparent;
-		color: var(--text-color);
-		cursor: pointer;
-		padding: 0.25rem 0.4rem;
-		text-align: left;
-		font-size: 0.74rem;
-		opacity: 0.85;
-	}
-
-	.control-mode-option:hover {
-		background: rgba(255, 255, 255, 0.5);
-		opacity: 1;
-	}
-
-	.control-mode-option.disabled,
-	.control-mode-option:disabled {
-		cursor: default;
-		opacity: 0.35;
-	}
-
-	.control-mode-option.disabled:hover,
-	.control-mode-option:disabled:hover {
-		background: transparent;
-		opacity: 0.35;
-	}
-
-	.control-mode-option.active {
-		background: rgba(from var(--text-color) r g b / 15%);
-	}
-
-	.parameter-inspector.controlled .control-mode-option.active {
-		background: rgb(from var(--gc-parameter-accent) r g b / 18%);
-		color: rgb(from var(--gc-parameter-accent) r g b / 96%);
+	:global(.control-mode-context-menu .gc-context-item-hint) {
+		font-size: 0.62em;
+		letter-spacing: 0.03em;
+		text-transform: uppercase;
 	}
 
 	.context-link-editor {
@@ -1107,7 +1107,7 @@
 		width: 0.9rem;
 		height: 0.9rem;
 		border-radius: 0.25rem;
-		background: url('../../../style/icons/function.svg') no-repeat center center;
+		background: url('../../../style/icons/parameter/control/expression.svg') no-repeat center center;
 		background-size: contain;
 		display: inline-block;
 	}

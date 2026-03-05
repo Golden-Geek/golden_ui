@@ -1,6 +1,7 @@
 import { createGraphStore, type GraphStore } from './graph.svelte';
 import { createWebSocketUiClient } from '../transport/ws';
 import type {
+	EventTime,
 	NodeId,
 	UiNodeWarningDto,
 	UiNodeDto,
@@ -10,7 +11,8 @@ import type {
 	UiEventDto,
 	UiLogRecord,
 	UiHistoryState,
-	UiSubscriptionScope
+	UiSubscriptionScope,
+	UiParameterControlState
 } from '../types';
 import { wholeGraphScope } from '../types';
 import type { PanelController } from '../dockview/panel-types';
@@ -81,6 +83,18 @@ type PendingLogMutation =
 
 const formatEventTime = (value: { tick: number; micro: number; seq: number }): string =>
 	`${value.tick}:${value.micro}:${value.seq}`;
+
+const defaultEventTime: EventTime = { tick: 0, micro: 0, seq: 0 };
+
+const controlStateEquals = (
+	left: UiParameterControlState,
+	right: UiParameterControlState
+): boolean => {
+	if (left.mode !== right.mode) {
+		return false;
+	}
+	return JSON.stringify(left.spec) === JSON.stringify(right.spec);
+};
 
 const compareEventTime = (
 	left: { tick: number; micro: number; seq: number },
@@ -822,6 +836,24 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 			if (ack.status === 'staged') {
 				status = 'Intent accepted and staged.';
 				return;
+			}
+
+			if (intent.kind === 'setParamControlState') {
+				const paramNode = graph.state.nodesById.get(intent.node);
+				if (paramNode && paramNode.data.kind === 'parameter') {
+					const currentState = paramNode.data.param.control;
+					if (!controlStateEquals(currentState, intent.state)) {
+						graph.applyEvent({
+							time: ack.earliest_event_time ?? graph.state.lastEventTime ?? defaultEventTime,
+							kind: {
+								kind: 'paramControlChanged',
+								param: intent.node,
+								old_state: currentState,
+								new_state: intent.state
+							}
+						});
+					}
+				}
 			}
 
 			if (intent.kind !== 'setParam') {
