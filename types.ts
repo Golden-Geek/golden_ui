@@ -9,7 +9,8 @@ export type UiParameterControlMode =
 	| 'contextLink'
 	| 'templateText'
 	| 'expression'
-	| 'link'
+	| 'proxy'
+	| 'binding'
 	| 'animation';
 
 export type ParamValue =
@@ -235,7 +236,8 @@ export interface UiParamControlInfo {
 	available_modes: UiParameterControlMode[];
 	context_candidates: UiUserContextCandidate[];
 	token_suggestions: UiTokenSuggestion[];
-	link_candidates: UiParamControlCandidate[];
+	proxy_candidates: UiParamControlCandidate[];
+	binding_candidates: UiParamControlCandidate[];
 }
 
 export interface UiNodeReferenceValue {
@@ -259,7 +261,8 @@ export type UiParameterControlSpec =
 	| { mode: 'contextLink'; symbol: string; projection?: UiParamValueProjection }
 	| { mode: 'templateText'; template: string }
 	| { mode: 'expression' }
-	| { mode: 'link' }
+	| { mode: 'proxy' }
+	| { mode: 'binding' }
 	| { mode: 'animation' };
 
 export interface UiParameterControlState {

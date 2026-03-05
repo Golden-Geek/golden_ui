@@ -77,7 +77,6 @@ export interface RustParamControlInfoResponse {
 	available_modes?: unknown[];
 	context_candidates?: unknown[];
 	token_suggestions?: unknown[];
-	link_candidates?: unknown[];
 	proxy_candidates?: unknown[];
 	binding_candidates?: unknown[];
 }
@@ -674,7 +673,8 @@ const isUiParameterControlMode = (value: unknown): value is UiParameterControlMo
 	value === 'contextLink' ||
 	value === 'templateText' ||
 	value === 'expression' ||
-	value === 'link' ||
+	value === 'proxy' ||
+	value === 'binding' ||
 	value === 'animation';
 
 const isUiUserContextValueType = (value: unknown): value is UiUserContextValueType =>
@@ -790,8 +790,10 @@ const defaultControlSpecForMode = (mode: UiParameterControlMode): UiParameterCon
 			return { mode: 'templateText', template: '' };
 		case 'expression':
 			return { mode: 'expression' };
-		case 'link':
-			return { mode: 'link' };
+		case 'proxy':
+			return { mode: 'proxy' };
+		case 'binding':
+			return { mode: 'binding' };
 		case 'animation':
 			return { mode: 'animation' };
 		case 'manual':
@@ -824,8 +826,10 @@ const fromRustControlSpec = (
 			};
 		case 'expression':
 			return { mode: 'expression' };
-		case 'link':
-			return { mode: 'link' };
+		case 'proxy':
+			return { mode: 'proxy' };
+		case 'binding':
+			return { mode: 'binding' };
 		case 'animation':
 			return { mode: 'animation' };
 		case 'manual':
@@ -1039,14 +1043,15 @@ export const fromRustParamControlInfo = (
 					.map((entry) => fromRustTokenSuggestion(entry))
 					.filter((entry): entry is UiTokenSuggestion => entry !== null)
 			: [],
-		link_candidates: Array.isArray(payload.link_candidates)
-			? payload.link_candidates
+		proxy_candidates: Array.isArray(payload.proxy_candidates)
+			? payload.proxy_candidates
 					.map((entry) => fromRustParamControlCandidate(entry))
 					.filter((entry): entry is UiParamControlCandidate => entry !== null)
-			: Array.isArray(payload.proxy_candidates)
-				? payload.proxy_candidates
-						.map((entry) => fromRustParamControlCandidate(entry))
-						.filter((entry): entry is UiParamControlCandidate => entry !== null)
+			: [],
+		binding_candidates: Array.isArray(payload.binding_candidates)
+			? payload.binding_candidates
+					.map((entry) => fromRustParamControlCandidate(entry))
+					.filter((entry): entry is UiParamControlCandidate => entry !== null)
 			: []
 	};
 };

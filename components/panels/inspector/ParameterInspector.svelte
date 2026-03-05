@@ -86,7 +86,8 @@
 		{ mode: 'contextLink', label: 'Context Link' },
 		{ mode: 'templateText', label: 'Template' },
 		{ mode: 'expression', label: 'Expression' },
-		{ mode: 'link', label: 'Link' },
+		{ mode: 'proxy', label: 'Proxy' },
+		{ mode: 'binding', label: 'Binding' },
 		{ mode: 'animation', label: 'Animation' }
 	];
 	let availableControlModes = $derived.by((): Set<UiParameterControlMode> => {
@@ -123,8 +124,10 @@
 				return 'var(--gc-color-context)';
 			case 'expression':
 				return 'var(--gc-color-expression)';
-			case 'link':
-				return 'var(--gc-color-link)';
+			case 'proxy':
+				return 'var(--gc-color-proxy)';
+			case 'binding':
+				return 'var(--gc-color-binding)';
 			case 'animation':
 				return 'var(--gc-color-animation)';
 			case 'manual':
@@ -308,8 +311,10 @@
 				return { mode: 'templateText', template: '' };
 			case 'expression':
 				return { mode: 'expression' };
-			case 'link':
-				return { mode: 'link' };
+			case 'proxy':
+				return { mode: 'proxy' };
+			case 'binding':
+				return { mode: 'binding' };
 			case 'animation':
 				return { mode: 'animation' };
 			case 'manual':
@@ -524,6 +529,10 @@
 					</div>
 				{:else if controlNodeType == 'expression'}
 					<span class="expression-icon"></span>
+				{:else if controlNodeType == 'proxy'}
+					<span class="control-node-label">Proxy</span>
+				{:else if controlNodeType == 'binding'}
+					<span class="control-node-label">Binding</span>
 				{:else}
 					{controlNodeType} type
 				{/if}
@@ -535,7 +544,7 @@
 						</div>
 
 						<div
-							class="link-mode-menu"
+							class="control-mode-menu"
 							onfocusout={(event) => {
 								const currentTarget = event.currentTarget as HTMLDivElement | null;
 								const nextTarget = event.relatedTarget as Node | null;
@@ -546,21 +555,21 @@
 							}}>
 							<button
 								type="button"
-								class="link-mode-trigger {currentControlMode}"
+								class="control-mode-trigger {currentControlMode}"
 								aria-label="Choose parameter control mode"
 								title="Choose control mode"
 								disabled={!canEditControl}
 								onclick={() => {
 									controlMenuOpen = !controlMenuOpen;
 								}}>
-								<img src={referenceIcon} alt="Link Mode" />
+								<img src={referenceIcon} alt="Control Mode" />
 							</button>
 							{#if controlMenuOpen}
-								<div class="link-mode-dropdown">
+								<div class="control-mode-dropdown">
 									{#each displayedControlModeOptions as option}
 										<button
 											type="button"
-											class="link-mode-option {option.mode === currentControlMode
+											class="control-mode-option {option.mode === currentControlMode
 												? 'active'
 												: ''} {isControlModeDisabled(option.mode) ? 'disabled' : ''}"
 											disabled={isControlModeDisabled(option.mode)}
@@ -713,7 +722,6 @@
 
 				</div>
 			{/if}
-
 			{@render defaultChildren?.(currentControlMode)}
 		{:else}
 			{liveNode.meta.label} has no parameter data.
@@ -843,18 +851,18 @@
 		opacity: 1;
 	}
 
-	.link-mode-menu {
+	.control-mode-menu {
 		position: relative;
 		display: flex;
 		align-items: center;
 		justify-content: center;
 	}
 
-	.parameter-inspector.control-menu-open .link-mode-menu {
+	.parameter-inspector.control-menu-open .control-mode-menu {
 		z-index: 40;
 	}
 
-	.link-mode-trigger {
+	.control-mode-trigger {
 		width: 1.2rem;
 		height: 1.2rem;
 		border-radius: 0.25rem;
@@ -871,21 +879,21 @@
 			border-color 0.12s ease;
 	}
 
-	.link-mode-trigger img {
+	.control-mode-trigger img {
 		width: 100%;
 		height: 100%;
 	}
 
-	.link-mode-trigger:hover:not(:disabled) {
+	.control-mode-trigger:hover:not(:disabled) {
 		opacity: 1;
 	}
 
-	.link-mode-trigger:disabled {
+	.control-mode-trigger:disabled {
 		cursor: default;
 		opacity: 0.35;
 	}
 
-	.link-mode-dropdown {
+	.control-mode-dropdown {
 		position: absolute;
 		top: 110%;
 		right: 0;
@@ -901,7 +909,7 @@
 		box-shadow: 0 0.35rem 0.8rem rgba(0, 0, 0, 1);
 	}
 
-	.link-mode-option {
+	.control-mode-option {
 		border: none;
 		border-radius: 0.25rem;
 		background: transparent;
@@ -913,28 +921,28 @@
 		opacity: 0.85;
 	}
 
-	.link-mode-option:hover {
+	.control-mode-option:hover {
 		background: rgba(255, 255, 255, 0.5);
 		opacity: 1;
 	}
 
-	.link-mode-option.disabled,
-	.link-mode-option:disabled {
+	.control-mode-option.disabled,
+	.control-mode-option:disabled {
 		cursor: default;
 		opacity: 0.35;
 	}
 
-	.link-mode-option.disabled:hover,
-	.link-mode-option:disabled:hover {
+	.control-mode-option.disabled:hover,
+	.control-mode-option:disabled:hover {
 		background: transparent;
 		opacity: 0.35;
 	}
 
-	.link-mode-option.active {
+	.control-mode-option.active {
 		background: rgba(from var(--text-color) r g b / 15%);
 	}
 
-	.parameter-inspector.controlled .link-mode-option.active {
+	.parameter-inspector.controlled .control-mode-option.active {
 		background: rgb(from var(--gc-parameter-accent) r g b / 18%);
 		color: rgb(from var(--gc-parameter-accent) r g b / 96%);
 	}
@@ -1102,5 +1110,12 @@
 		background: url('../../../style/icons/function.svg') no-repeat center center;
 		background-size: contain;
 		display: inline-block;
+	}
+
+	.control-node-label {
+		font-size: 0.65rem;
+		letter-spacing: 0.04em;
+		text-transform: uppercase;
+		opacity: 0.8;
 	}
 </style>

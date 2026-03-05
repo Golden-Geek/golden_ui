@@ -89,7 +89,7 @@
 		text-align: left;
 	}
 
-	.warning-wrapper .warning-badge {
+	.warning-wrapper:hover .warning-badge {
 		background-color: hsl(from var(--gc-color-warning) h s calc(l * 0.4));
 		/* z-index: 1000; */
 	}

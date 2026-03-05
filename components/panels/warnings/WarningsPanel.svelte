@@ -75,6 +75,48 @@
 	const selectNode = (nodeId: NodeId): void => {
 		session?.selectNode(nodeId);
 	};
+
+	interface WarningDetailLine {
+		label: string | null;
+		value: string;
+		isSummary: boolean;
+	}
+
+	const DETAIL_LABEL_PATTERN = /^[A-Za-z][A-Za-z0-9 _-]*$/;
+
+	const parseWarningDetail = (detail: string): WarningDetailLine[] => {
+		const lines = detail.replace(/\r\n?/g, '\n').split('\n');
+		const parsed: WarningDetailLine[] = [];
+
+		for (const line of lines) {
+			const raw = line.trimEnd();
+			if (raw.length === 0) {
+				continue;
+			}
+
+			const trimmed = raw.trimStart();
+			const separator = trimmed.indexOf(':');
+			if (separator > 0) {
+				const label = trimmed.slice(0, separator).trim();
+				if (DETAIL_LABEL_PATTERN.test(label)) {
+					parsed.push({
+						label,
+						value: trimmed.slice(separator + 1).trim(),
+						isSummary: label.toLowerCase() === 'error'
+					});
+					continue;
+				}
+			}
+
+			parsed.push({
+				label: null,
+				value: trimmed,
+				isSummary: false
+			});
+		}
+
+		return parsed;
+	};
 </script>
 
 <section class="warnings-panel">
@@ -104,7 +146,21 @@
 					</div>
 					<p class="warning-message">{warning.message}</p>
 					{#if warning.detail}
-						<p class="warning-detail">{warning.detail}</p>
+						<div class="warning-detail">
+							{#each parseWarningDetail(warning.detail) as line, lineIndex (`${warning.sourceNodeId}:${warning.warningId}:${lineIndex}`)}
+								<div
+									class="warning-detail-line"
+									class:warning-detail-line--labeled={line.label !== null}
+									class:warning-detail-line--summary={line.isSummary}>
+									{#if line.label !== null}
+										<span class="warning-detail-label">{line.label}</span>
+									{/if}
+									{#if line.value.length > 0}
+										<span class="warning-detail-value">{line.value}</span>
+									{/if}
+								</div>
+							{/each}
+						</div>
 					{/if}
 				</article>
 			{/each}
@@ -201,11 +257,44 @@
 	}
 
 	.warning-detail {
-		margin: 0;
+		margin: 0.1rem 0 0;
 		font-size: 0.68rem;
 		line-height: 1.3;
-		opacity: 0.8;
+		opacity: 0.92;
 		user-select: text;
 		word-break: break-word;
+		display: flex;
+		flex-direction: column;
+		gap: 0.12rem;
+		padding: 0.32rem 0.4rem;
+		border-radius: 0.28rem;
+		border: 0.0625rem solid color-mix(in srgb, var(--gc-color-panel-outline) 65%, transparent);
+		background: color-mix(in srgb, var(--gc-color-panel-alt) 75%, black 25%);
+	}
+
+	.warning-detail-line {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: baseline;
+		gap: 0.28rem;
+	}
+
+	.warning-detail-line--labeled .warning-detail-label {
+		font-size: 0.58rem;
+		font-weight: 700;
+		letter-spacing: 0.03em;
+		text-transform: uppercase;
+		color: color-mix(in srgb, var(--gc-color-panel-outline) 40%, white 60%);
+	}
+
+	.warning-detail-value {
+		white-space: pre-wrap;
+		word-break: break-word;
+		font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono',
+			'Courier New', monospace;
+	}
+
+	.warning-detail-line--summary .warning-detail-value {
+		color: color-mix(in srgb, var(--gc-color-warning) 85%, white 15%);
 	}
 </style>
