@@ -46,6 +46,7 @@ const defaultNodeIcons: ResolvedNodeIconSet = {
         folder: folderIcon,
         script: scriptIcon,
         animation_curve: animationControlIcon,
+        animation_curve_range: animationControlIcon,
         animation_curve_key: curveKeyIcon,
         animation_curve_easing: animationControlIcon,
         parameter_animation_control: animationControlIcon,

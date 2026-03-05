@@ -7,7 +7,7 @@
 		sendSetParamIntent,
 		type UiEditSession
 	} from '$lib/golden_ui/store/ui-intents';
-	import type { NodeId, ParamValue, UiNodeDto } from '$lib/golden_ui/types';
+	import type { NodeId, ParamValue, UiNodeDto, UiParamConstraints } from '$lib/golden_ui/types';
 	import type { NodeInspectorComponentProps } from '../node-inspector-registry';
 	import NodeInspector from '../NodeInspector.svelte';
 	import SelectNodeButton from '../../../common/SelectNodeButton.svelte';
@@ -30,6 +30,21 @@
 	interface ParamNodeRef {
 		node_id: NodeId;
 		value: ParamValue;
+		enabled: boolean;
+		constraints: UiParamConstraints;
+	}
+
+	interface CurveRangeConstraint {
+		x_min: number;
+		x_max: number;
+		y_min: number;
+		y_max: number;
+	}
+
+	interface CurveRangeState {
+		bounds: CurveRangeConstraint;
+		active: boolean;
+		range_node: UiNodeDto | null;
 	}
 
 	interface ParsedEasing {
@@ -172,10 +187,14 @@
 	const KEY_NODE_TYPE = 'animation_curve_key';
 	const KEY_ITEM_KIND = 'animation_curve_key';
 	const EASING_NODE_TYPE = 'animation_curve_easing';
+	const RANGE_NODE_TYPE = 'animation_curve_range';
 
 	const DECL_POSITION = 'position';
 	const DECL_VALUE = 'value';
 	const DECL_EASING = 'easing';
+	const DECL_RANGE = 'range';
+	const DECL_RANGE_X = 'x';
+	const DECL_RANGE_Y = 'y';
 	const DECL_KIND = 'kind';
 	const DECL_COORDINATE_SPACE = 'coordinate_space';
 	const DECL_OUT_POSITION = 'out_position';
@@ -306,6 +325,56 @@
 	};
 	const normalize_phase_mode = (value: string): CurvePhaseMode =>
 		value.trim().toLowerCase() === 'numphases' ? 'numPhases' : 'frequency';
+	const normalize_bounds_pair = (
+		min_candidate: number,
+		max_candidate: number
+	): { min: number; max: number } | null => {
+		if (!Number.isFinite(min_candidate) || !Number.isFinite(max_candidate)) {
+			return null;
+		}
+		const min = Math.min(min_candidate, max_candidate);
+		const max = Math.max(min_candidate, max_candidate);
+		if (max - min <= CURVE_EPSILON) {
+			return null;
+		}
+		return { min, max };
+	};
+	const make_curve_range_constraint = (
+		x_min_candidate: number,
+		x_max_candidate: number,
+		y_min_candidate: number,
+		y_max_candidate: number
+	): CurveRangeConstraint | null => {
+		const x_bounds = normalize_bounds_pair(x_min_candidate, x_max_candidate);
+		const y_bounds = normalize_bounds_pair(y_min_candidate, y_max_candidate);
+		if (!x_bounds || !y_bounds) {
+			return null;
+		}
+		return {
+			x_min: x_bounds.min,
+			x_max: x_bounds.max,
+			y_min: y_bounds.min,
+			y_max: y_bounds.max
+		};
+	};
+	const range_bounds_from_value = (value: ParamValue | undefined): { min: number; max: number } | null => {
+		if (!value || value.kind !== 'vec2') {
+			return null;
+		}
+		return normalize_bounds_pair(value.value[0], value.value[1]);
+	};
+	const uniform_bounds_from_constraints = (
+		constraints: UiParamConstraints | undefined
+	): { min: number; max: number } | null => {
+		const range = constraints?.range;
+		if (!range || range.kind !== 'uniform') {
+			return null;
+		}
+		if (range.min === undefined || range.max === undefined) {
+			return null;
+		}
+		return normalize_bounds_pair(range.min, range.max);
+	};
 
 	const cubic_from_points = (p0: number, p1: number, p2: number, p3: number): CubicPolynomial => ({
 		a: -p0 + 3 * p1 - 3 * p2 + p3,
@@ -403,7 +472,9 @@
 		}
 		return {
 			node_id: candidate.node_id,
-			value: candidate.data.param.value
+			value: candidate.data.param.value,
+			enabled: candidate.meta.enabled,
+			constraints: candidate.data.param.constraints
 		};
 	};
 
@@ -1021,9 +1092,34 @@
 		await sendSetParamIntent(ref.node_id, { kind: 'float', value }, 'Coalesce');
 	};
 
+	const clamp_curve_position_to_active_range = (position: number): number => {
+		const active_range = active_curve_range_constraint;
+		if (!active_range || !Number.isFinite(position)) {
+			return position;
+		}
+		return clamp(position, active_range.x_min, active_range.x_max);
+	};
+
+	const clamp_curve_value_to_active_range = (value: number): number => {
+		const active_range = active_curve_range_constraint;
+		if (!active_range || !Number.isFinite(value)) {
+			return value;
+		}
+		return clamp(value, active_range.y_min, active_range.y_max);
+	};
+
+	const clamp_curve_point_to_active_range = (
+		position: number,
+		value: number
+	): { position: number; value: number } => ({
+		position: clamp_curve_position_to_active_range(position),
+		value: clamp_curve_value_to_active_range(value)
+	});
+
 	const set_drag_preview = (key_id: NodeId, position: number, value: number): void => {
+		const clamped = clamp_curve_point_to_active_range(position, value);
 		const next = new Map(drag_preview_by_key_id);
-		next.set(key_id, { position, value });
+		next.set(key_id, { position: clamped.position, value: clamped.value });
 		drag_preview_by_key_id = next;
 	};
 
@@ -1116,6 +1212,99 @@
 	let parsed_key_by_id = $derived.by(
 		(): Map<NodeId, ParsedCurveKey> => new Map(parsed_keys.map((entry) => [entry.node_id, entry]))
 	);
+	let editable_curve_range_node = $derived.by((): UiNodeDto | null => {
+		const nodes_by_id = graphNodesById;
+		if (!nodes_by_id || liveNode.node_type !== CURVE_NODE_TYPE) {
+			return null;
+		}
+		for (const child_id of liveNode.children) {
+			const child = nodes_by_id.get(child_id);
+			if (!child || child.decl_id !== DECL_RANGE || child.node_type !== RANGE_NODE_TYPE) {
+				continue;
+			}
+			return child;
+		}
+		return null;
+	});
+	let curve_range_state = $derived.by((): CurveRangeState | null => {
+		const range_node = editable_curve_range_node;
+		if (range_node) {
+			const nodes_by_id = graphNodesById;
+			if (!nodes_by_id) {
+				return null;
+			}
+			let x_bounds: { min: number; max: number } | null = null;
+			let y_bounds: { min: number; max: number } | null = null;
+			for (const child_id of range_node.children) {
+				const child = nodes_by_id.get(child_id);
+				if (!child || child.data.kind !== 'parameter') {
+					continue;
+				}
+				if (child.decl_id === DECL_RANGE_X) {
+					x_bounds = range_bounds_from_value(child.data.param.value);
+					continue;
+				}
+				if (child.decl_id === DECL_RANGE_Y) {
+					y_bounds = range_bounds_from_value(child.data.param.value);
+				}
+			}
+
+			if (!x_bounds || !y_bounds) {
+				return null;
+			}
+			const bounds = make_curve_range_constraint(
+				x_bounds.min,
+				x_bounds.max,
+				y_bounds.min,
+				y_bounds.max
+			);
+			if (!bounds) {
+				return null;
+			}
+			return {
+				bounds,
+				active: range_node.meta.enabled,
+				range_node
+			};
+		}
+
+		let x_bounds: { min: number; max: number } | null = null;
+		let y_bounds: { min: number; max: number } | null = null;
+		for (const key of parsed_keys) {
+			if (!x_bounds && key.position_param) {
+				x_bounds = uniform_bounds_from_constraints(key.position_param.constraints);
+			}
+			if (!y_bounds && key.value_param) {
+				y_bounds = uniform_bounds_from_constraints(key.value_param.constraints);
+			}
+			if (x_bounds && y_bounds) {
+				break;
+			}
+		}
+		if (!x_bounds || !y_bounds) {
+			return null;
+		}
+		const bounds = make_curve_range_constraint(
+			x_bounds.min,
+			x_bounds.max,
+			y_bounds.min,
+			y_bounds.max
+		);
+		if (!bounds) {
+			return null;
+		}
+		return {
+			bounds,
+			active: true,
+			range_node: null
+		};
+	});
+	let active_curve_range_constraint = $derived.by((): CurveRangeConstraint | null => {
+		if (!curve_range_state?.active) {
+			return null;
+		}
+		return curve_range_state.bounds;
+	});
 	let selected_key = $derived.by((): ParsedCurveKey | null => {
 		if (selected_key_id === null) {
 			return null;
@@ -1264,15 +1453,21 @@
 		const plot_left = pad_left;
 		const plot_top = pad_top;
 
-		let x_min = keys[0].position;
-		let x_max = keys[keys.length - 1].position;
+		const active_range = active_curve_range_constraint;
+		let x_min = active_range ? active_range.x_min : keys[0].position;
+		let x_max = active_range ? active_range.x_max : keys[keys.length - 1].position;
 		if (!Number.isFinite(x_min) || !Number.isFinite(x_max)) {
 			x_min = 0;
 			x_max = 1;
 		}
 		if (Math.abs(x_max - x_min) <= CURVE_EPSILON) {
-			x_min -= 0.5;
-			x_max += 0.5;
+			if (active_range) {
+				x_min = active_range.x_min;
+				x_max = active_range.x_max;
+			} else {
+				x_min -= 0.5;
+				x_max += 0.5;
+			}
 		}
 
 		const sample_count = Math.max(192, Math.min(4096, Math.round(plot_width * 2.4)));
@@ -1284,7 +1479,10 @@
 		for (let index = 0; index < sample_count; index += 1) {
 			const position = index + 1 === sample_count ? x_max : x_min + sample_step * index;
 			const sample = sample_compiled_curve(compiled_curve, position);
-			const value = sample ?? 0;
+			let value = sample ?? 0;
+			if (active_range) {
+				value = clamp(value, active_range.y_min, active_range.y_max);
+			}
 			sample_values[index] = value;
 			if (value < y_min) {
 				y_min = value;
@@ -1295,27 +1493,42 @@
 		}
 
 		for (const key of parsed_keys) {
-			if (key.value < y_min) {
-				y_min = key.value;
+			const key_value = active_range
+				? clamp(key.value, active_range.y_min, active_range.y_max)
+				: key.value;
+			if (key_value < y_min) {
+				y_min = key_value;
 			}
-			if (key.value > y_max) {
-				y_max = key.value;
+			if (key_value > y_max) {
+				y_max = key_value;
 			}
 		}
-		if (!Number.isFinite(y_min) || !Number.isFinite(y_max)) {
-			y_min = -1;
-			y_max = 1;
+		if (active_range) {
+			y_min = active_range.y_min;
+			y_max = active_range.y_max;
+		} else {
+			if (!Number.isFinite(y_min) || !Number.isFinite(y_max)) {
+				y_min = -1;
+				y_max = 1;
+			}
+			if (Math.abs(y_max - y_min) <= CURVE_EPSILON) {
+				const delta = Math.max(0.5, Math.abs(y_max) * 0.2);
+				y_min -= delta;
+				y_max += delta;
+			}
+			const value_pad = (y_max - y_min) * 0.08;
+			y_min -= value_pad;
+			y_max += value_pad;
 		}
-		if (Math.abs(y_max - y_min) <= CURVE_EPSILON) {
-			const delta = Math.max(0.5, Math.abs(y_max) * 0.2);
-			y_min -= delta;
-			y_max += delta;
-		}
-		const value_pad = (y_max - y_min) * 0.08;
-		y_min -= value_pad;
-		y_max += value_pad;
 
-		const adaptive_bounds: CurveViewBounds = { x_min, x_max, y_min, y_max };
+		const adaptive_bounds: CurveViewBounds = active_range
+			? {
+					x_min: active_range.x_min,
+					x_max: active_range.x_max,
+					y_min: active_range.y_min,
+					y_max: active_range.y_max
+				}
+			: { x_min, x_max, y_min, y_max };
 		let active_bounds = adaptive_bounds;
 		if (curve_view_mode === 'fixed') {
 			if (fixed_view_bounds) {
@@ -1337,7 +1550,11 @@
 			for (let index = 0; index < sample_count; index += 1) {
 				const position = index + 1 === sample_count ? x_max : x_min + sample_step * index;
 				const sample = sample_compiled_curve(compiled_curve, position);
-				sample_values[index] = sample ?? 0;
+				let value = sample ?? 0;
+				if (active_range) {
+					value = clamp(value, active_range.y_min, active_range.y_max);
+				}
+				sample_values[index] = value;
 			}
 		}
 
@@ -1558,8 +1775,14 @@
 		const key_stride = parsed_keys.length > 2200 ? Math.ceil(parsed_keys.length / 2200) : 1;
 		for (let index = 0; index < parsed_keys.length; index += 1) {
 			const key = parsed_keys[index];
-			const x = to_screen_x(key.position);
-			const y = to_screen_y(key.value);
+			const key_position = active_range
+				? clamp(key.position, active_range.x_min, active_range.x_max)
+				: key.position;
+			const key_value = active_range
+				? clamp(key.value, active_range.y_min, active_range.y_max)
+				: key.value;
+			const x = to_screen_x(key_position);
+			const y = to_screen_y(key_value);
 			key_screen_points.set(key.node_id, { x, y });
 
 			const selected = key.node_id === selected_key_id;
@@ -1706,6 +1929,7 @@
 		rem_base_px;
 		curve_view_mode;
 		fixed_view_bounds;
+		curve_range_state;
 		draw_curve_canvas();
 	});
 
@@ -1737,7 +1961,7 @@
 			0,
 			1
 		);
-		return {
+		const curve_point = {
 			position:
 				interaction_transform.x_min +
 				normalized_x * (interaction_transform.x_max - interaction_transform.x_min),
@@ -1745,6 +1969,7 @@
 				interaction_transform.y_max -
 				normalized_y * (interaction_transform.y_max - interaction_transform.y_min)
 		};
+		return clamp_curve_point_to_active_range(curve_point.position, curve_point.value);
 	};
 
 	const current_view_bounds = (): CurveViewBounds | null => {
@@ -1770,6 +1995,52 @@
 			!Number.isFinite(bounds.y_max)
 		) {
 			return null;
+		}
+
+		const active_range = active_curve_range_constraint;
+		if (active_range) {
+			const range_span_x = active_range.x_max - active_range.x_min;
+			const range_span_y = active_range.y_max - active_range.y_min;
+			if (range_span_x <= CURVE_EPSILON || range_span_y <= CURVE_EPSILON) {
+				return null;
+			}
+
+			let x_span = bounds.x_max - bounds.x_min;
+			let y_span = bounds.y_max - bounds.y_min;
+			if (!Number.isFinite(x_span) || !Number.isFinite(y_span)) {
+				return null;
+			}
+
+			const min_x_span = Math.min(MIN_VIEW_SPAN, range_span_x);
+			const min_y_span = Math.min(MIN_VIEW_SPAN, range_span_y);
+			x_span = clamp(x_span, min_x_span, range_span_x);
+			y_span = clamp(y_span, min_y_span, range_span_y);
+			if (x_span > MAX_VIEW_SPAN || y_span > MAX_VIEW_SPAN) {
+				return null;
+			}
+
+			const center_x_candidate = (bounds.x_min + bounds.x_max) * 0.5;
+			const center_y_candidate = (bounds.y_min + bounds.y_max) * 0.5;
+			const min_center_x = active_range.x_min + x_span * 0.5;
+			const max_center_x = active_range.x_max - x_span * 0.5;
+			const min_center_y = active_range.y_min + y_span * 0.5;
+			const max_center_y = active_range.y_max - y_span * 0.5;
+
+			const center_x =
+				min_center_x > max_center_x
+					? (active_range.x_min + active_range.x_max) * 0.5
+					: clamp(center_x_candidate, min_center_x, max_center_x);
+			const center_y =
+				min_center_y > max_center_y
+					? (active_range.y_min + active_range.y_max) * 0.5
+					: clamp(center_y_candidate, min_center_y, max_center_y);
+
+			return {
+				x_min: center_x - x_span * 0.5,
+				x_max: center_x + x_span * 0.5,
+				y_min: center_y - y_span * 0.5,
+				y_max: center_y + y_span * 0.5
+			};
 		}
 
 		let x_span = bounds.x_max - bounds.x_min;
@@ -1801,6 +2072,27 @@
 		curve_view_mode = 'fixed';
 		fixed_view_bounds = sanitized;
 	};
+
+	$effect(() => {
+		active_curve_range_constraint;
+		const current_fixed = fixed_view_bounds;
+		if (!current_fixed) {
+			return;
+		}
+		const sanitized = sanitize_view_bounds({ ...current_fixed });
+		if (!sanitized) {
+			fixed_view_bounds = null;
+			return;
+		}
+		if (
+			Math.abs(current_fixed.x_min - sanitized.x_min) > CURVE_EPSILON ||
+			Math.abs(current_fixed.x_max - sanitized.x_max) > CURVE_EPSILON ||
+			Math.abs(current_fixed.y_min - sanitized.y_min) > CURVE_EPSILON ||
+			Math.abs(current_fixed.y_max - sanitized.y_max) > CURVE_EPSILON
+		) {
+			fixed_view_bounds = sanitized;
+		}
+	});
 
 	const pan_view_by_pixels = (delta_screen_x: number, delta_screen_y: number): void => {
 		const base = current_view_bounds();
@@ -1942,7 +2234,8 @@
 	};
 
 	const queue_drag_commit = (key_id: NodeId, position: number, value: number): void => {
-		queued_drag_target = { position, value };
+		const clamped = clamp_curve_point_to_active_range(position, value);
+		queued_drag_target = { position: clamped.position, value: clamped.value };
 		queued_drag_key_id = key_id;
 		if (drag_commit_raf_id !== 0 || typeof window === 'undefined') {
 			return;
@@ -2143,11 +2436,12 @@
 		if (!key_creatable_item || adding_key) {
 			return;
 		}
+		const clamped = clamp_curve_point_to_active_range(position, value);
 		adding_key = true;
 		pending_create_target = {
 			known_key_ids: new Set(parsed_keys.map((entry) => entry.node_id)),
-			position,
-			value
+			position: clamped.position,
+			value: clamped.value
 		};
 		const created = await sendCreateUserItemIntent(liveNode.node_id, key_creatable_item);
 		adding_key = false;
@@ -2191,6 +2485,14 @@
 
 	const axis_midpoint = (): { position: number; value: number } => {
 		if (!interaction_transform) {
+			if (active_curve_range_constraint) {
+				return {
+					position:
+						(active_curve_range_constraint.x_min + active_curve_range_constraint.x_max) * 0.5,
+					value:
+						(active_curve_range_constraint.y_min + active_curve_range_constraint.y_max) * 0.5
+				};
+			}
 			return { position: 0, value: 0 };
 		}
 		return {
@@ -2289,6 +2591,15 @@
 				onwheel={on_canvas_wheel}
 				ondblclick={on_canvas_double_click}></canvas>
 		</div>
+
+		{#if editable_curve_range_node}
+			<section class="curve-range-editor">
+				<div class="section-title">Range Constraint</div>
+				<div class="range-node-inspector">
+					<NodeInspector nodes={[editable_curve_range_node]} level={level + 1} order="solo" />
+				</div>
+			</section>
+		{/if}
 
 		<section class="curve-key-editor">
 			<div class="section-title">Selected Key</div>
@@ -2418,6 +2729,22 @@
 		border: solid 0.06rem rgba(191, 213, 248, 0.2);
 		background: rgba(7, 12, 20, 0.58);
 		padding: 0.25rem;
+	}
+
+	.curve-range-editor {
+		display: flex;
+		flex-direction: column;
+		min-height: 0;
+		border-radius: 0.34rem;
+		border: solid 0.06rem rgba(191, 213, 248, 0.2);
+		background: rgba(7, 12, 20, 0.58);
+		padding: 0.25rem;
+	}
+
+	.range-node-inspector {
+		max-height: 16rem;
+		overflow: auto;
+		padding-right: 0.2rem;
 	}
 
 	.selected-key-node-inspector {
