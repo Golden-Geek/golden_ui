@@ -126,6 +126,9 @@
 		y_min: number;
 		y_max: number;
 		key_screen_points: Map<NodeId, { x: number; y: number }>;
+		curve_screen_x: Float64Array;
+		curve_screen_y: Float64Array;
+		curve_owner_key_ids: Array<NodeId | null>;
 	}
 
 	interface DragPreview {
@@ -144,11 +147,23 @@
 		pointer_id: number;
 	}
 
+	interface ActiveCanvasPan {
+		pointer_id: number;
+		start_screen_x: number;
+		start_screen_y: number;
+		start_bounds: CurveViewBounds;
+	}
+
 	interface CurveViewBounds {
 		x_min: number;
 		x_max: number;
 		y_min: number;
 		y_max: number;
+	}
+
+	interface GridBlendStep {
+		step: number;
+		weight: number;
 	}
 
 	let { node, level, defaultHeader }: NodeInspectorComponentProps = $props();
@@ -184,6 +199,11 @@
 
 	const CURVE_EPSILON = 1e-12;
 	const MAX_PERLIN_OCTAVES = 12;
+	const MIN_VIEW_SPAN = 1e-6;
+	const MAX_VIEW_SPAN = 1e9;
+	const GRID_MANTISSAS = [1, 2, 5] as const;
+	const GRID_MAX_LINES = 4000;
+	const GRID_MIN_PIXEL_SPACING = 3.5;
 
 	let session = $derived(appState.session);
 	let graphNodesById = $derived(session?.graph.state.nodesById ?? null);
@@ -202,7 +222,9 @@
 	let canvas_width_px = $state(1);
 	let canvas_height_px = $state(1);
 	let active_drag = $state<ActiveKeyDrag | null>(null);
+	let active_canvas_pan = $state<ActiveCanvasPan | null>(null);
 	let drag_edit_session = $state<UiEditSession | null>(null);
+	let hover_curve_position = $state<{ position: number; value: number } | null>(null);
 
 	let interaction_transform: CanvasTransform | null = null;
 	let queued_drag_target: DragPreview | null = null;
@@ -677,6 +699,307 @@
 		return sample_segment(segments[segment_index], position);
 	};
 
+	const is_step_multiple = (value: number, step: number): boolean => {
+		if (!(step > CURVE_EPSILON) || !Number.isFinite(value)) {
+			return false;
+		}
+		const ratio = value / step;
+		const rounded = Math.round(ratio);
+		return Math.abs(ratio - rounded) <= 1e-6 * Math.max(1, Math.abs(ratio));
+	};
+
+	const blended_grid_steps = (ideal_step: number): GridBlendStep[] => {
+		if (!Number.isFinite(ideal_step) || ideal_step <= CURVE_EPSILON) {
+			return [{ step: 1, weight: 1 }];
+		}
+
+		const exponent = Math.floor(Math.log10(ideal_step));
+		const candidates: number[] = [];
+		for (let level = exponent - 2; level <= exponent + 2; level += 1) {
+			const decade = 10 ** level;
+			for (const mantissa of GRID_MANTISSAS) {
+				candidates.push(mantissa * decade);
+			}
+		}
+		candidates.sort((left, right) => left - right);
+
+		let lower = candidates[0];
+		let upper = candidates[candidates.length - 1];
+		for (const candidate of candidates) {
+			if (candidate <= ideal_step) {
+				lower = candidate;
+			}
+			if (candidate >= ideal_step) {
+				upper = candidate;
+				break;
+			}
+		}
+
+		if (Math.abs(upper - lower) <= CURVE_EPSILON) {
+			return [{ step: lower, weight: 1 }];
+		}
+
+		const log_lower = Math.log(lower);
+		const log_upper = Math.log(upper);
+		const span = log_upper - log_lower;
+		if (Math.abs(span) <= CURVE_EPSILON) {
+			return [{ step: lower, weight: 1 }];
+		}
+		const blend = clamp((Math.log(ideal_step) - log_lower) / span, 0, 1);
+		const lower_weight = 1 - blend;
+		const upper_weight = blend;
+		const levels: GridBlendStep[] = [];
+		if (lower_weight > 0.03) {
+			levels.push({ step: lower, weight: lower_weight });
+		}
+		if (upper_weight > 0.03) {
+			levels.push({ step: upper, weight: upper_weight });
+		}
+		if (levels.length === 0) {
+			levels.push({ step: blend >= 0.5 ? upper : lower, weight: 1 });
+		}
+		return levels;
+	};
+
+	const draw_grid_lines = (
+		context: CanvasRenderingContext2D,
+		min_value: number,
+		max_value: number,
+		step: number,
+		skip_step: number | null,
+		alpha: number,
+		line_width: number,
+		to_screen: (value: number) => number,
+		is_vertical: boolean,
+		line_start: number,
+		line_end: number
+	): void => {
+		if (
+			alpha <= 0 ||
+			!Number.isFinite(step) ||
+			step <= CURVE_EPSILON ||
+			!Number.isFinite(min_value) ||
+			!Number.isFinite(max_value)
+		) {
+			return;
+		}
+
+		const start_index = Math.ceil((min_value - step * 1e-9) / step);
+		const end_index = Math.floor((max_value + step * 1e-9) / step);
+		const line_count = end_index - start_index + 1;
+		if (line_count <= 0 || line_count > GRID_MAX_LINES) {
+			return;
+		}
+
+		context.strokeStyle = `rgba(168, 186, 223, ${alpha})`;
+		context.lineWidth = line_width;
+		context.beginPath();
+		let has_line = false;
+
+		for (let index = start_index; index <= end_index; index += 1) {
+			const value = index * step;
+			if (skip_step !== null && is_step_multiple(value, skip_step)) {
+				continue;
+			}
+
+			const screen = to_screen(value);
+			if (!Number.isFinite(screen)) {
+				continue;
+			}
+
+			if (is_vertical) {
+				context.moveTo(screen, line_start);
+				context.lineTo(screen, line_end);
+			} else {
+				context.moveTo(line_start, screen);
+				context.lineTo(line_end, screen);
+			}
+			has_line = true;
+		}
+
+		if (has_line) {
+			context.stroke();
+		}
+	};
+
+	const draw_adaptive_axis_grid = (
+		context: CanvasRenderingContext2D,
+		min_value: number,
+		max_value: number,
+		axis_pixels: number,
+		target_major_spacing_px: number,
+		to_screen: (value: number) => number,
+		is_vertical: boolean,
+		line_start: number,
+		line_end: number
+	): void => {
+		const span = max_value - min_value;
+		if (!Number.isFinite(span) || span <= CURVE_EPSILON || axis_pixels <= CURVE_EPSILON) {
+			return;
+		}
+
+		const ideal_major_step = (span * target_major_spacing_px) / Math.max(1, axis_pixels);
+		const levels = blended_grid_steps(Math.max(ideal_major_step, CURVE_EPSILON));
+		for (const level of levels) {
+			const major_step = level.step;
+			const major_px = (major_step / span) * axis_pixels;
+			if (!Number.isFinite(major_px) || major_px < GRID_MIN_PIXEL_SPACING) {
+				continue;
+			}
+
+			const major_visibility = clamp(
+				(major_px - GRID_MIN_PIXEL_SPACING) / (GRID_MIN_PIXEL_SPACING * 2.8),
+				0,
+				1
+			);
+			const major_alpha = (0.06 + 0.17 * level.weight) * major_visibility;
+			draw_grid_lines(
+				context,
+				min_value,
+				max_value,
+				major_step,
+				null,
+				major_alpha,
+				1,
+				to_screen,
+				is_vertical,
+				line_start,
+				line_end
+			);
+
+			const minor_step = major_step / 5;
+			const minor_px = major_px / 5;
+			if (minor_px >= GRID_MIN_PIXEL_SPACING * 0.85) {
+				const minor_visibility = clamp(
+					(minor_px - GRID_MIN_PIXEL_SPACING * 0.85) / (GRID_MIN_PIXEL_SPACING * 3.3),
+					0,
+					1
+				);
+				const minor_alpha = (0.03 + 0.1 * level.weight) * minor_visibility;
+				draw_grid_lines(
+					context,
+					min_value,
+					max_value,
+					minor_step,
+					major_step,
+					minor_alpha,
+					0.75,
+					to_screen,
+					is_vertical,
+					line_start,
+					line_end
+				);
+			}
+
+			const micro_step = minor_step / 2;
+			const micro_px = minor_px / 2;
+			if (micro_px >= GRID_MIN_PIXEL_SPACING * 1.1) {
+				const micro_visibility = clamp(
+					(micro_px - GRID_MIN_PIXEL_SPACING * 1.1) / (GRID_MIN_PIXEL_SPACING * 3.6),
+					0,
+					1
+				);
+				const micro_alpha = (0.018 + 0.052 * level.weight) * micro_visibility;
+				draw_grid_lines(
+					context,
+					min_value,
+					max_value,
+					micro_step,
+					minor_step,
+					micro_alpha,
+					0.6,
+					to_screen,
+					is_vertical,
+					line_start,
+					line_end
+				);
+			}
+		}
+	};
+
+	const dominant_grid_step = (
+		min_value: number,
+		max_value: number,
+		axis_pixels: number,
+		target_major_spacing_px: number
+	): number => {
+		const span = max_value - min_value;
+		if (!Number.isFinite(span) || span <= CURVE_EPSILON || axis_pixels <= CURVE_EPSILON) {
+			return 1;
+		}
+		const ideal_major_step = (span * target_major_spacing_px) / Math.max(1, axis_pixels);
+		const levels = blended_grid_steps(Math.max(ideal_major_step, CURVE_EPSILON));
+		let best = levels[0] ?? { step: 1, weight: 1 };
+		for (const level of levels) {
+			if (level.weight > best.weight) {
+				best = level;
+			}
+		}
+		return Math.max(CURVE_EPSILON, best.step);
+	};
+
+	const draw_axis_tick_labels = (
+		context: CanvasRenderingContext2D,
+		min_value: number,
+		max_value: number,
+		step: number,
+		to_screen: (value: number) => number,
+		axis: 'x' | 'y',
+		plot_left: number,
+		plot_top: number,
+		plot_width: number,
+		plot_height: number,
+		font_px: number
+	): void => {
+		if (!(step > CURVE_EPSILON) || !Number.isFinite(min_value) || !Number.isFinite(max_value)) {
+			return;
+		}
+		const start_index = Math.ceil((min_value - step * 1e-9) / step);
+		const end_index = Math.floor((max_value + step * 1e-9) / step);
+		const tick_count = end_index - start_index + 1;
+		if (tick_count <= 0 || tick_count > 120) {
+			return;
+		}
+
+		context.font = `${Math.max(8, font_px)}px sans-serif`;
+		context.fillStyle = 'rgba(205, 221, 247, 0.7)';
+		if (axis === 'x') {
+			let previous_right = Number.NEGATIVE_INFINITY;
+			for (let index = start_index; index <= end_index; index += 1) {
+				const value = index * step;
+				const x = to_screen(value);
+				if (x < plot_left || x > plot_left + plot_width) {
+					continue;
+				}
+				const label = format_number(value);
+				const text_width = context.measureText(label).width;
+				const left = x - text_width * 0.5;
+				const right = x + text_width * 0.5;
+				if (left <= previous_right + font_px * 0.45) {
+					continue;
+				}
+				previous_right = right;
+				context.fillText(label, left, plot_top + plot_height + font_px * 1.16);
+			}
+			return;
+		}
+
+		let previous_y = Number.NEGATIVE_INFINITY;
+		for (let index = start_index; index <= end_index; index += 1) {
+			const value = index * step;
+			const y = to_screen(value);
+			if (y < plot_top || y > plot_top + plot_height) {
+				continue;
+			}
+			if (y - previous_y < font_px * 1.18) {
+				continue;
+			}
+			previous_y = y;
+			const label = format_number(value);
+			context.fillText(label, plot_left + font_px * 0.2, y - font_px * 0.16);
+		}
+	};
+
 	const format_number = (value: number): string => {
 		if (!Number.isFinite(value)) {
 			return '0';
@@ -1033,26 +1356,72 @@
 		const to_screen_y = (value: number): number =>
 			plot_top + plot_height - ((value - y_min) / y_span) * plot_height;
 
-		for (let line = 0; line <= 8; line += 1) {
-			const t = line / 8;
-			const x = plot_left + plot_width * t;
-			context.strokeStyle =
-				line % 2 === 0 ? 'rgba(168, 186, 223, 0.16)' : 'rgba(168, 186, 223, 0.08)';
-			context.lineWidth = line === 0 || line === 8 ? 1 : 0.8;
+		const sample_screen_x = new Float64Array(sample_count);
+		const sample_screen_y = new Float64Array(sample_count);
+		const sample_owner_key_ids: Array<NodeId | null> = new Array(sample_count).fill(null);
+		const segments = compiled_curve.segments;
+		let active_segment_index = 0;
+		for (let index = 0; index < sample_count; index += 1) {
+			const position = index + 1 === sample_count ? x_max : x_min + sample_step * index;
+			sample_screen_x[index] = to_screen_x(position);
+			sample_screen_y[index] = to_screen_y(sample_values[index]);
+
+			while (
+				active_segment_index + 1 < segments.length &&
+				position > segments[active_segment_index].end_position + CURVE_EPSILON
+			) {
+				active_segment_index += 1;
+			}
+			const segment = segments[active_segment_index];
+			if (
+				segment &&
+				position >= segment.start_position - CURVE_EPSILON &&
+				position <= segment.end_position + CURVE_EPSILON
+			) {
+				sample_owner_key_ids[index] = compiled_curve.keys[active_segment_index]?.node_id ?? null;
+			}
+		}
+
+		const target_major_spacing_px = Math.max(28, rem_base_px * 4.4);
+		draw_adaptive_axis_grid(
+			context,
+			x_min,
+			x_max,
+			plot_width,
+			target_major_spacing_px,
+			to_screen_x,
+			true,
+			plot_top,
+			plot_top + plot_height
+		);
+		draw_adaptive_axis_grid(
+			context,
+			y_min,
+			y_max,
+			plot_height,
+			target_major_spacing_px,
+			to_screen_y,
+			false,
+			plot_left,
+			plot_left + plot_width
+		);
+
+		if (x_min <= 0 && x_max >= 0) {
+			const x0 = to_screen_x(0);
+			context.strokeStyle = 'rgba(210, 226, 255, 0.24)';
+			context.lineWidth = 1.05;
 			context.beginPath();
-			context.moveTo(x, plot_top);
-			context.lineTo(x, plot_top + plot_height);
+			context.moveTo(x0, plot_top);
+			context.lineTo(x0, plot_top + plot_height);
 			context.stroke();
 		}
-		for (let line = 0; line <= 6; line += 1) {
-			const t = line / 6;
-			const y = plot_top + plot_height * t;
-			context.strokeStyle =
-				line % 3 === 0 ? 'rgba(168, 186, 223, 0.16)' : 'rgba(168, 186, 223, 0.08)';
-			context.lineWidth = line === 0 || line === 6 ? 1 : 0.8;
+		if (y_min <= 0 && y_max >= 0) {
+			const y0 = to_screen_y(0);
+			context.strokeStyle = 'rgba(210, 226, 255, 0.24)';
+			context.lineWidth = 1.05;
 			context.beginPath();
-			context.moveTo(plot_left, y);
-			context.lineTo(plot_left + plot_width, y);
+			context.moveTo(plot_left, y0);
+			context.lineTo(plot_left + plot_width, y0);
 			context.stroke();
 		}
 
@@ -1072,9 +1441,8 @@
 				bucket_max[index] = Number.NEGATIVE_INFINITY;
 			}
 			for (let index = 0; index < sample_count; index += 1) {
-				const position = index + 1 === sample_count ? x_max : x_min + sample_step * index;
 				const value = sample_values[index];
-				const sample_x = to_screen_x(position);
+				const sample_x = sample_screen_x[index];
 				const bucket = clamp(Math.floor(sample_x - plot_left), 0, bucket_count - 1);
 				if (!bucket_has[bucket]) {
 					bucket_has[bucket] = 1;
@@ -1129,9 +1497,8 @@
 		} else {
 			context.beginPath();
 			for (let index = 0; index < sample_count; index += 1) {
-				const position = index + 1 === sample_count ? x_max : x_min + sample_step * index;
-				const x = to_screen_x(position);
-				const y = to_screen_y(sample_values[index]);
+				const x = sample_screen_x[index];
+				const y = sample_screen_y[index];
 				if (index === 0) {
 					context.moveTo(x, y);
 				} else {
@@ -1139,6 +1506,52 @@
 				}
 			}
 			context.stroke();
+		}
+
+		const stroke_owned_segment = (
+			key_id: NodeId,
+			stroke_style: string,
+			line_width: number
+		): boolean => {
+			context.strokeStyle = stroke_style;
+			context.lineWidth = line_width;
+			context.beginPath();
+			let drawing = false;
+			let has_path = false;
+
+			for (let index = 0; index < sample_count; index += 1) {
+				if (sample_owner_key_ids[index] !== key_id) {
+					drawing = false;
+					continue;
+				}
+
+				const x = sample_screen_x[index];
+				const y = sample_screen_y[index];
+				if (!drawing) {
+					context.moveTo(x, y);
+					drawing = true;
+					has_path = true;
+				} else {
+					context.lineTo(x, y);
+				}
+			}
+
+			if (has_path) {
+				context.stroke();
+			}
+			return has_path;
+		};
+
+		if (hover_key_id !== null && hover_key_id !== selected_key_id) {
+			if (stroke_owned_segment(hover_key_id, 'rgba(255, 171, 103, 0.25)', 2.6)) {
+				stroke_owned_segment(hover_key_id, 'rgba(255, 197, 139, 0.82)', 1.35);
+			}
+		}
+
+		if (selected_key_id !== null) {
+			if (stroke_owned_segment(selected_key_id, 'rgba(255, 224, 126, 0.32)', 3.1)) {
+				stroke_owned_segment(selected_key_id, 'rgba(255, 232, 149, 0.94)', 1.75);
+			}
 		}
 
 		const key_screen_points = new Map<NodeId, { x: number; y: number }>();
@@ -1181,20 +1594,89 @@
 			}
 		}
 
-		context.fillStyle = 'rgba(197, 213, 240, 0.75)';
-		context.font = `${Math.max(8, Math.round(height * 0.054))}px sans-serif`;
-		context.fillText(format_number(x_min), plot_left, plot_top + plot_height + rem_base_px * 0.9);
-		context.fillText(
-			format_number(x_max),
-			plot_left + plot_width - context.measureText(format_number(x_max)).width,
-			plot_top + plot_height + rem_base_px * 0.9
+		const axis_label_font_px = Math.max(8, Math.round(height * 0.045));
+		const x_label_step = dominant_grid_step(x_min, x_max, plot_width, target_major_spacing_px);
+		const y_label_step = dominant_grid_step(y_min, y_max, plot_height, target_major_spacing_px);
+		draw_axis_tick_labels(
+			context,
+			x_min,
+			x_max,
+			x_label_step,
+			to_screen_x,
+			'x',
+			plot_left,
+			plot_top,
+			plot_width,
+			plot_height,
+			axis_label_font_px
 		);
-		context.fillText(format_number(y_max), plot_left + rem_base_px * 0.18, plot_top + rem_base_px * 0.68);
-		context.fillText(
-			format_number(y_min),
-			plot_left + rem_base_px * 0.18,
-			plot_top + plot_height - rem_base_px * 0.28
+		draw_axis_tick_labels(
+			context,
+			y_min,
+			y_max,
+			y_label_step,
+			to_screen_y,
+			'y',
+			plot_left,
+			plot_top,
+			plot_width,
+			plot_height,
+			axis_label_font_px
 		);
+
+		if (hover_curve_position) {
+			const cross_x = to_screen_x(hover_curve_position.position);
+			const cross_y = to_screen_y(hover_curve_position.value);
+			if (
+				cross_x >= plot_left &&
+				cross_x <= plot_left + plot_width &&
+				cross_y >= plot_top &&
+				cross_y <= plot_top + plot_height
+			) {
+				context.setLineDash([Math.max(2, rem_base_px * 0.12), Math.max(2, rem_base_px * 0.16)]);
+				context.strokeStyle = 'rgba(217, 231, 255, 0.34)';
+				context.lineWidth = 0.9;
+				context.beginPath();
+				context.moveTo(cross_x, plot_top);
+				context.lineTo(cross_x, plot_top + plot_height);
+				context.moveTo(plot_left, cross_y);
+				context.lineTo(plot_left + plot_width, cross_y);
+				context.stroke();
+				context.setLineDash([]);
+
+				const cursor_label = `x ${format_number(hover_curve_position.position)}  y ${format_number(hover_curve_position.value)}`;
+				context.font = `${Math.max(8, Math.round(height * 0.043))}px sans-serif`;
+				const label_padding = rem_base_px * 0.22;
+				const label_width = context.measureText(cursor_label).width + label_padding * 2;
+				const label_height = axis_label_font_px + label_padding * 1.6;
+				const label_x = clamp(
+					cross_x + rem_base_px * 0.38,
+					plot_left + rem_base_px * 0.2,
+					plot_left + plot_width - label_width - rem_base_px * 0.2
+				);
+				const label_y = clamp(
+					cross_y - label_height - rem_base_px * 0.28,
+					plot_top + rem_base_px * 0.2,
+					plot_top + plot_height - label_height - rem_base_px * 0.2
+				);
+				context.fillStyle = 'rgba(7, 13, 24, 0.9)';
+				context.fillRect(label_x, label_y, label_width, label_height);
+				context.strokeStyle = 'rgba(191, 212, 245, 0.5)';
+				context.lineWidth = 0.8;
+				context.strokeRect(label_x, label_y, label_width, label_height);
+				context.fillStyle = 'rgba(225, 236, 255, 0.95)';
+				context.fillText(
+					cursor_label,
+					label_x + label_padding,
+					label_y + label_height - label_padding * 0.65
+				);
+			}
+		}
+
+		context.fillStyle = 'rgba(186, 205, 236, 0.68)';
+		context.font = `${Math.max(8, Math.round(height * 0.041))}px sans-serif`;
+		const viewport_label = `x ${format_number(x_min)}..${format_number(x_max)}   y ${format_number(y_min)}..${format_number(y_max)}`;
+		context.fillText(viewport_label, plot_left + rem_base_px * 0.2, plot_top + axis_label_font_px * 1.05);
 
 		interaction_transform = {
 			plot_left,
@@ -1205,7 +1687,10 @@
 			x_max,
 			y_min,
 			y_max,
-			key_screen_points
+			key_screen_points,
+			curve_screen_x: sample_screen_x,
+			curve_screen_y: sample_screen_y,
+			curve_owner_key_ids: sample_owner_key_ids
 		};
 	};
 
@@ -1217,6 +1702,7 @@
 		parsed_keys;
 		selected_key_id;
 		hover_key_id;
+		hover_curve_position;
 		rem_base_px;
 		curve_view_mode;
 		fixed_view_bounds;
@@ -1261,6 +1747,119 @@
 		};
 	};
 
+	const current_view_bounds = (): CurveViewBounds | null => {
+		if (fixed_view_bounds) {
+			return { ...fixed_view_bounds };
+		}
+		if (!interaction_transform) {
+			return null;
+		}
+		return {
+			x_min: interaction_transform.x_min,
+			x_max: interaction_transform.x_max,
+			y_min: interaction_transform.y_min,
+			y_max: interaction_transform.y_max
+		};
+	};
+
+	const sanitize_view_bounds = (bounds: CurveViewBounds): CurveViewBounds | null => {
+		if (
+			!Number.isFinite(bounds.x_min) ||
+			!Number.isFinite(bounds.x_max) ||
+			!Number.isFinite(bounds.y_min) ||
+			!Number.isFinite(bounds.y_max)
+		) {
+			return null;
+		}
+
+		let x_span = bounds.x_max - bounds.x_min;
+		let y_span = bounds.y_max - bounds.y_min;
+		if (x_span < MIN_VIEW_SPAN) {
+			const center = (bounds.x_min + bounds.x_max) * 0.5;
+			x_span = MIN_VIEW_SPAN;
+			bounds.x_min = center - x_span * 0.5;
+			bounds.x_max = center + x_span * 0.5;
+		}
+		if (y_span < MIN_VIEW_SPAN) {
+			const center = (bounds.y_min + bounds.y_max) * 0.5;
+			y_span = MIN_VIEW_SPAN;
+			bounds.y_min = center - y_span * 0.5;
+			bounds.y_max = center + y_span * 0.5;
+		}
+		if (x_span > MAX_VIEW_SPAN || y_span > MAX_VIEW_SPAN) {
+			return null;
+		}
+
+		return bounds;
+	};
+
+	const apply_view_bounds = (candidate: CurveViewBounds): void => {
+		const sanitized = sanitize_view_bounds({ ...candidate });
+		if (!sanitized) {
+			return;
+		}
+		curve_view_mode = 'fixed';
+		fixed_view_bounds = sanitized;
+	};
+
+	const pan_view_by_pixels = (delta_screen_x: number, delta_screen_y: number): void => {
+		const base = current_view_bounds();
+		if (!base || !interaction_transform) {
+			return;
+		}
+		const units_per_px_x = (base.x_max - base.x_min) / Math.max(1, interaction_transform.plot_width);
+		const units_per_px_y = (base.y_max - base.y_min) / Math.max(1, interaction_transform.plot_height);
+		apply_view_bounds({
+			x_min: base.x_min - delta_screen_x * units_per_px_x,
+			x_max: base.x_max - delta_screen_x * units_per_px_x,
+			y_min: base.y_min + delta_screen_y * units_per_px_y,
+			y_max: base.y_max + delta_screen_y * units_per_px_y
+		});
+	};
+
+	const zoom_view_at_screen = (
+		screen_x: number,
+		screen_y: number,
+		zoom_factor_x: number,
+		zoom_factor_y: number
+	): void => {
+		if (!interaction_transform) {
+			return;
+		}
+		const anchor = screen_to_curve_point(screen_x, screen_y);
+		const base = current_view_bounds();
+		if (!anchor || !base) {
+			return;
+		}
+
+		const safe_zoom_x = clamp(zoom_factor_x, 0.08, 24);
+		const safe_zoom_y = clamp(zoom_factor_y, 0.08, 24);
+		const left = anchor.position - base.x_min;
+		const right = base.x_max - anchor.position;
+		const down = anchor.value - base.y_min;
+		const up = base.y_max - anchor.value;
+
+		apply_view_bounds({
+			x_min: anchor.position - left * safe_zoom_x,
+			x_max: anchor.position + right * safe_zoom_x,
+			y_min: anchor.value - down * safe_zoom_y,
+			y_max: anchor.value + up * safe_zoom_y
+		});
+	};
+
+	const normalize_wheel_delta = (event: WheelEvent): { x: number; y: number } => {
+		let scale = 1;
+		if (event.deltaMode === 1) {
+			scale = rem_base_px * 1.3;
+		} else if (event.deltaMode === 2) {
+			scale = Math.max(canvas_width_px, canvas_height_px);
+		}
+		return {
+			x: event.deltaX * scale,
+			y: event.deltaY * scale
+		};
+	};
+
 	const nearest_key = (screen_x: number, screen_y: number, threshold_px: number): NodeId | null => {
 		if (!interaction_transform) {
 			return null;
@@ -1276,6 +1875,54 @@
 			}
 			best_distance = distance;
 			result = key_id;
+		}
+		return result;
+	};
+
+	const nearest_curve_owner_key = (
+		screen_x: number,
+		screen_y: number,
+		threshold_px: number
+	): NodeId | null => {
+		if (!interaction_transform) {
+			return null;
+		}
+		const curve_x = interaction_transform.curve_screen_x;
+		const curve_y = interaction_transform.curve_screen_y;
+		const owners = interaction_transform.curve_owner_key_ids;
+		if (curve_x.length < 2 || curve_y.length < 2) {
+			return null;
+		}
+
+		let result: NodeId | null = null;
+		let best_distance_sq = threshold_px * threshold_px;
+		for (let index = 0; index + 1 < curve_x.length; index += 1) {
+			const owner = owners[index] ?? owners[index + 1];
+			if (owner === null) {
+				continue;
+			}
+
+			const ax = curve_x[index];
+			const ay = curve_y[index];
+			const bx = curve_x[index + 1];
+			const by = curve_y[index + 1];
+			const dx = bx - ax;
+			const dy = by - ay;
+			const length_sq = dx * dx + dy * dy;
+			let t = 0;
+			if (length_sq > CURVE_EPSILON) {
+				t = clamp(((screen_x - ax) * dx + (screen_y - ay) * dy) / length_sq, 0, 1);
+			}
+			const closest_x = ax + dx * t;
+			const closest_y = ay + dy * t;
+			const distance_sq =
+				(closest_x - screen_x) * (closest_x - screen_x) +
+				(closest_y - screen_y) * (closest_y - screen_y);
+			if (distance_sq >= best_distance_sq) {
+				continue;
+			}
+			best_distance_sq = distance_sq;
+			result = owner;
 		}
 		return result;
 	};
@@ -1326,41 +1973,103 @@
 		}
 	};
 
+	const finish_canvas_pan = (pointer_id?: number): void => {
+		if (!active_canvas_pan) {
+			return;
+		}
+		if (pointer_id !== undefined && active_canvas_pan.pointer_id !== pointer_id) {
+			return;
+		}
+		const release_pointer_id = pointer_id ?? active_canvas_pan.pointer_id;
+		if (canvas_element && canvas_element.hasPointerCapture(release_pointer_id)) {
+			canvas_element.releasePointerCapture(release_pointer_id);
+		}
+		active_canvas_pan = null;
+	};
+
 	const on_canvas_pointer_down = (event: PointerEvent): void => {
-		if (event.button !== 0 || !interaction_transform || !canvas_element) {
+		if (!interaction_transform || !canvas_element) {
 			return;
 		}
 		const point = canvas_local_point(event);
 		if (!point) {
 			return;
 		}
+		hover_curve_position = screen_to_curve_point(point.x, point.y);
+
+		if (event.button === 1) {
+			const start_bounds = current_view_bounds();
+			if (!start_bounds) {
+				return;
+			}
+			hover_key_id = null;
+			active_canvas_pan = {
+				pointer_id: event.pointerId,
+				start_screen_x: point.x,
+				start_screen_y: point.y,
+				start_bounds
+			};
+			apply_view_bounds(start_bounds);
+			canvas_element.setPointerCapture(event.pointerId);
+			event.preventDefault();
+			return;
+		}
+		if (event.button !== 0) {
+			return;
+		}
 
 		const selection = nearest_key(point.x, point.y, Math.max(6, rem_base_px * 0.62));
-		if (selection === null) {
-			selected_key_id = null;
+		if (selection !== null) {
+			selected_key_id = selection;
+
+			const key = parsed_key_by_id.get(selection);
+			if (!key?.position_param || !key.value_param) {
+				return;
+			}
+
+			const edit_session = createUiEditSession('Move Curve Key', 'curve-key-drag');
+			void edit_session.begin();
+			drag_edit_session = edit_session;
+			active_drag = {
+				key_id: selection,
+				pointer_id: event.pointerId
+			};
+			canvas_element.setPointerCapture(event.pointerId);
+			event.preventDefault();
 			return;
 		}
-		selected_key_id = selection;
 
-		const key = parsed_key_by_id.get(selection);
-		if (!key?.position_param || !key.value_param) {
+		const curve_selection = nearest_curve_owner_key(point.x, point.y, Math.max(4, rem_base_px * 0.45));
+		if (curve_selection !== null) {
+			selected_key_id = curve_selection;
 			return;
 		}
 
-		const edit_session = createUiEditSession('Move Curve Key', 'curve-key-drag');
-		void edit_session.begin();
-		drag_edit_session = edit_session;
-		active_drag = {
-			key_id: selection,
-			pointer_id: event.pointerId
-		};
-		canvas_element.setPointerCapture(event.pointerId);
-		event.preventDefault();
+		selected_key_id = null;
 	};
 
 	const on_canvas_pointer_move = (event: PointerEvent): void => {
 		const point = canvas_local_point(event);
 		if (!point) {
+			return;
+		}
+		hover_curve_position = screen_to_curve_point(point.x, point.y);
+
+		if (active_canvas_pan && active_canvas_pan.pointer_id === event.pointerId && interaction_transform) {
+			hover_key_id = null;
+			const delta_x = point.x - active_canvas_pan.start_screen_x;
+			const delta_y = point.y - active_canvas_pan.start_screen_y;
+			const start = active_canvas_pan.start_bounds;
+			const units_per_px_x =
+				(start.x_max - start.x_min) / Math.max(1, interaction_transform.plot_width);
+			const units_per_px_y =
+				(start.y_max - start.y_min) / Math.max(1, interaction_transform.plot_height);
+			apply_view_bounds({
+				x_min: start.x_min - delta_x * units_per_px_x,
+				x_max: start.x_max - delta_x * units_per_px_x,
+				y_min: start.y_min + delta_y * units_per_px_y,
+				y_max: start.y_max + delta_y * units_per_px_y
+			});
 			return;
 		}
 
@@ -1374,17 +2083,60 @@
 			return;
 		}
 
-		hover_key_id = nearest_key(point.x, point.y, Math.max(6, rem_base_px * 0.56));
+		const hovered_key = nearest_key(point.x, point.y, Math.max(6, rem_base_px * 0.56));
+		if (hovered_key !== null) {
+			hover_key_id = hovered_key;
+			return;
+		}
+		hover_key_id = nearest_curve_owner_key(point.x, point.y, Math.max(4, rem_base_px * 0.42));
 	};
 
 	const on_canvas_pointer_up = (event: PointerEvent): void => {
 		finish_drag(event.pointerId);
+		finish_canvas_pan(event.pointerId);
 	};
 	const on_canvas_pointer_cancel = (event: PointerEvent): void => {
 		finish_drag(event.pointerId);
+		finish_canvas_pan(event.pointerId);
 	};
 	const on_canvas_pointer_leave = (): void => {
 		hover_key_id = null;
+		hover_curve_position = null;
+	};
+
+	const on_canvas_wheel = (event: WheelEvent): void => {
+		if (!interaction_transform) {
+			return;
+		}
+		const point = canvas_local_point(event);
+		if (!point) {
+			return;
+		}
+
+		const delta = normalize_wheel_delta(event);
+		const should_pan =
+			event.shiftKey || event.altKey || Math.abs(delta.x) > Math.abs(delta.y) * 0.65;
+		if (should_pan) {
+			let pan_x = delta.x;
+			let pan_y = delta.y;
+			if (event.shiftKey) {
+				if (Math.abs(pan_x) < Math.abs(delta.y)) {
+					pan_x += delta.y;
+				}
+				pan_y = 0;
+			}
+			if (event.altKey) {
+				pan_x = 0;
+			}
+			pan_view_by_pixels(pan_x, pan_y);
+			event.preventDefault();
+			return;
+		}
+
+		const zoom_sensitivity = event.ctrlKey || event.metaKey ? 0.00135 : 0.0023;
+		const zoom_factor = Math.exp(delta.y * zoom_sensitivity);
+		zoom_view_at_screen(point.x, point.y, zoom_factor, zoom_factor);
+		event.preventDefault();
 	};
 
 	const add_key_at = async (position: number, value: number): Promise<void> => {
@@ -1454,6 +2206,7 @@
 				drag_commit_raf_id = 0;
 			}
 			finish_drag();
+			finish_canvas_pan();
 		};
 	});
 </script>
@@ -1506,21 +2259,34 @@
 					Fixed
 				</button>
 			</div>
+			<button
+				type="button"
+				class="toolbar-button"
+				onclick={() => {
+					set_curve_view_mode('adaptive');
+				}}>
+				Fit View
+			</button>
 			<div class="curve-stats">
 				<div><strong>{parsed_keys.length}</strong> keys</div>
 				<div><strong>{compiled_curve.segments.length}</strong> segments</div>
 			</div>
 		</section>
+		<div class="curve-nav-hint">
+			Wheel: zoom | Shift + wheel: horizontal pan | Alt + wheel: vertical pan | Middle drag:
+			pan
+		</div>
 
 		<div class="curve-canvas-wrap">
 			<canvas
-				class="curve-canvas"
+				class="curve-canvas {active_canvas_pan ? 'panning' : ''}"
 				bind:this={canvas_element}
 				onpointerdown={on_canvas_pointer_down}
 				onpointermove={on_canvas_pointer_move}
 				onpointerup={on_canvas_pointer_up}
 				onpointercancel={on_canvas_pointer_cancel}
 				onpointerleave={on_canvas_pointer_leave}
+				onwheel={on_canvas_wheel}
 				ondblclick={on_canvas_double_click}></canvas>
 		</div>
 
@@ -1586,6 +2352,13 @@
 		opacity: 0.8;
 	}
 
+	.curve-nav-hint {
+		font-size: 0.59rem;
+		opacity: 0.64;
+		padding: 0 0.12rem;
+		letter-spacing: 0.01em;
+	}
+
 	.curve-canvas-wrap {
 		height: min(26rem, 38vh);
 		border-radius: 0.44rem;
@@ -1599,6 +2372,10 @@
 		width: 100%;
 		height: 100%;
 		cursor: crosshair;
+	}
+
+	.curve-canvas.panning {
+		cursor: grabbing;
 	}
 
 	.view-mode-toggle {
