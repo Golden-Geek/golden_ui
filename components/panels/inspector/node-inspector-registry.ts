@@ -1,6 +1,7 @@
 import type { Snippet } from 'svelte';
 import type { UiNodeDto } from '$lib/golden_ui/types';
 import ScriptNodeInspector from './nodes/ScriptNodeInspector.svelte';
+import AnimationCurveNodeInspector from './nodes/AnimationCurveNodeInspector.svelte';
 
 export type NodeInspectorOrder = 'first' | 'last' | 'solo' | '';
 
@@ -23,7 +24,8 @@ export interface NodeInspectorEntry {
 export type NodeInspectorRegistry = Record<string, NodeInspectorEntry>;
 
 const builtinNodeInspectorRegistry: NodeInspectorRegistry = {
-	script: { component: ScriptNodeInspector }
+	script: { component: ScriptNodeInspector },
+	animation_curve: { component: AnimationCurveNodeInspector }
 };
 
 const customNodeInspectorRegistry = new Map<string, NodeInspectorEntry>();

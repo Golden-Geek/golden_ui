@@ -3,6 +3,7 @@ import nodeAddIcon from "../style/icons/node/add.svg";
 import folderIcon from "../style/icons/node/folder.svg";
 import nodeManagerIcon from "../style/icons/node/manager.svg";
 import scriptIcon from "../style/icons/node/script.svg";
+import animationControlIcon from "../style/icons/parameter/control/animation.svg";
 import parameterBoolIcon from "../style/icons/parameter/bool.svg";
 import parameterColorIcon from "../style/icons/parameter/color.svg";
 import parameterEnumIcon from "../style/icons/parameter/enum.svg";
@@ -14,6 +15,7 @@ import parameterVec2Icon from "../style/icons/parameter/vec2.svg";
 import parameterVec3Icon from "../style/icons/parameter/vec3.svg";
 import parameterReferenceIcon from "../style/icons/parameter/reference.svg";
 import parameterFileIcon from "../style/icons/parameter/file.svg";
+import curveKeyIcon from "../style/icons/node/curve/key.svg";
 
 const DEFAULT_FALLBACK_ICON = nodeAddIcon;
 const DEFAULT_MANAGER_ICON = nodeManagerIcon;
@@ -43,6 +45,10 @@ const defaultNodeIcons: ResolvedNodeIconSet = {
         add: nodeAddIcon,
         folder: folderIcon,
         script: scriptIcon,
+        animation_curve: animationControlIcon,
+        animation_curve_key: curveKeyIcon,
+        animation_curve_easing: animationControlIcon,
+        parameter_animation_control: animationControlIcon,
     },
     parameterKinds: {
         bool: parameterBoolIcon,

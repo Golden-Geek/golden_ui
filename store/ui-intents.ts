@@ -84,6 +84,13 @@ export const sendSetLogMaxEntriesIntent = async (max_entries: number): Promise<b
 	});
 };
 
+export const sendRemoveNodeIntent = async (node: NodeId): Promise<boolean> => {
+	return sendUiIntent({
+		kind: 'removeNode',
+		node
+	});
+};
+
 export const sendCreateUserItemIntent = async (
 	parent: NodeId,
 	item: UiCreatableUserItem
