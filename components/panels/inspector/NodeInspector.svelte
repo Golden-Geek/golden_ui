@@ -10,15 +10,18 @@
 	import NodeWarningBadge from '../../common/NodeWarningBadge.svelte';
 	import { resolveNodeInspector, type NodeInspectorOrder } from './node-inspector-registry';
 	import NodeAddButton from '../../common/NodeAddButton.svelte';
+	import type { Snippet } from 'svelte';
 
 	let {
 		nodes = [],
 		level = 0,
-		order = ''
+		order = '',
+		controlNodeType = ''
 	} = $props<{
 		nodes: UiNodeDto[];
 		level: number;
 		order?: NodeInspectorOrder;
+		controlNodeType?: String;
 	}>();
 
 	let session = $derived(appState.session);
@@ -122,7 +125,7 @@
 		class:custom-component={!!CustomInspectorComponent}
 		data-node-id={node.node_id}
 		style="--container-color: {color}">
-		{#snippet builtInHeader(headerExtra?: import('svelte').Snippet)}
+		{#snippet builtInHeader(headerExtra?: Snippet)}
 			{#if !isRoot}
 				<div class="node-header">
 					<span
@@ -218,7 +221,7 @@
 			{/if}
 		{/snippet}
 
-		{#snippet builtInChildren()}
+		{#snippet builtInChildren(controlNodeType: String = '')}
 			<div class="node-inspector-children">
 				{#if !collapsed}
 					<div class="node-inspector-children-wrapper" transition:slide={{ duration: 200 }}>
@@ -232,7 +235,8 @@
 										? 'first'
 										: index === children.length - 1
 											? 'last'
-											: ''} />
+											: ''}
+								{controlNodeType} />
 						{/each}
 					</div>
 				{/if}
@@ -240,9 +244,9 @@
 		{/snippet}
 
 		{#if isParameter}
-			<ParameterInspector {node} {level} {order}>
-				{#snippet defaultChildren()}
-					{@render builtInChildren()}
+			<ParameterInspector {node} {level} {order} {controlNodeType}>
+				{#snippet defaultChildren(extraClass: String = '')}
+					{@render builtInChildren(extraClass)}
 				{/snippet}
 			</ParameterInspector>
 		{:else if CustomInspectorComponent}
@@ -254,11 +258,11 @@
 				{hasChildren}
 				{toggleCollapsed}
 				{setCollapsed}>
-				{#snippet defaultHeader(headerExtra?: import('svelte').Snippet)}
+				{#snippet defaultHeader(headerExtra?: Snippet)}
 					{@render builtInHeader(headerExtra)}
 				{/snippet}
-				{#snippet defaultChildren()}
-					{@render builtInChildren()}
+				{#snippet defaultChildren(extraClass: String = '')}
+					{@render builtInChildren(extraClass)}
 				{/snippet}
 			</CustomInspectorComponent>
 		{:else}
@@ -336,11 +340,6 @@
 			display: inline-flex;
 			align-items: center;
 			gap: 0.25rem;
-			/* background: linear-gradient(
-				to bottom,
-				rgb(from var(--container-color) r g b / 40%),
-				rgb(from var(--container-color) r g b / 5%)
-			); */
 			background-color: rgb(from var(--container-color) r g b / 30%);
 			border-radius: 0.5rem 0.5rem 0 0;
 			padding: 0.25rem;

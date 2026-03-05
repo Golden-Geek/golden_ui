@@ -411,9 +411,11 @@
 	.reference-editor.link-missing {
 		color: var(--gc-color-warning);
 	}
+
 	.reference-editor.link-linked {
 		color: var(--gc-color-success);
 	}
+
 	.reference-editor.link-empty {
 		opacity: 0.6;
 	}

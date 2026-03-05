@@ -31,23 +31,23 @@
 </script>
 
 {#if safeCount > 0}
-	<button
-		transition:fade={{ duration: 100 }}
-		class="warning-badge"
-		title={computedTitle}
-		aria-label={computedTitle}
-		tabindex="-1"
-		onmouseenter={() => (showMessage = true)}
-		onmouseleave={() => (showMessage = false)}
-		onfocus={() => (showMessage = true)}
-		onblur={() => (showMessage = false)}
-		onclick={() => showWarningInPanel()}
-		onkeydown={(e) => {
-			if (e.key === 'Enter' || e.key === ' ') {
-				showWarningInPanel();
-			}
-		}}>
-		<div class="warning-wrapper">
+	<div class="warning-wrapper">
+		<button
+			transition:fade={{ duration: 100 }}
+			class="warning-badge"
+			title={computedTitle}
+			aria-label={computedTitle}
+			tabindex="-1"
+			onmouseenter={() => (showMessage = true)}
+			onmouseleave={() => (showMessage = false)}
+			onfocus={() => (showMessage = true)}
+			// onblur={() => (showMessage = false)}
+			onclick={() => showWarningInPanel()}
+			onkeydown={(e) => {
+				if (e.key === 'Enter' || e.key === ' ') {
+					showWarningInPanel();
+				}
+			}}>
 			<div class="warning-icon"></div>
 
 			{#if showMessage}
@@ -57,50 +57,51 @@
 					</div>
 				</div>
 			{/if}
-		</div>
-	</button>
+		</button>
+	</div>
 {/if}
 
 <style>
-	.warning-badge {
+	.warning-wrapper {
 		position: relative;
 		display: inline-flex;
 		align-items: center;
-		font-size: 0.65rem;
 		font-weight: 700;
 		vertical-align: middle;
 		min-width: 1.5rem;
 		min-height: 1rem;
 		cursor: pointer;
 		color: var(--gc-color-warning);
+		gap: 0.2rem;
+		align-items: center;
 	}
 
-	.warning-wrapper {
+	.warning-badge {
 		display: inline-flex;
-		align-items: center;
-		gap: 0.2rem;
 		position: absolute;
 		left: 0;
 		transition: background-color 0.2s ease;
-		background-color: rgb(from var(--gc-color-warning) r g b / 0%);
 		padding: 0.1rem 0.3rem;
-		border-radius: 0.45rem;
-		gap: 0.2rem;
 		z-index: 1000;
+		font-size: 0.65rem;
+		border-radius: 0.45rem;
+		background-color: rgb(from var(--gc-color-warning) r g b / 0%);
+		text-align: left;
 	}
 
-	.warning-badge:hover .warning-wrapper {
+	.warning-wrapper .warning-badge {
 		background-color: hsl(from var(--gc-color-warning) h s calc(l * 0.4));
+		/* z-index: 1000; */
 	}
 
-	.message-wrapper{
+	.message-wrapper {
 		z-index: 1000;
 	}
 
 	.warning-message {
 		max-height: 100%;
-		width: 15rem;
+		/* width: 15rem; */
 		overflow: hidden;
-		/* white-space: nowrap; */
+		white-space: nowrap;
 	}
 </style>

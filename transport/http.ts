@@ -17,7 +17,6 @@ import type {
 	UiParameterControlMode,
 	UiParameterControlSpec,
 	UiParameterControlState,
-	UiParameterControlDiagnostic,
 	UiParamConstraints,
 	UiParamDto,
 	UiFileConstraints,
@@ -76,7 +75,6 @@ export interface RustParamControlInfoResponse {
 	param: number;
 	active_mode?: unknown;
 	available_modes?: unknown[];
-	diagnostics?: unknown[];
 	context_candidates?: unknown[];
 	token_suggestions?: unknown[];
 	link_candidates?: unknown[];
@@ -721,19 +719,6 @@ const isUiParamValueProjection = (value: unknown): value is UiParamValueProjecti
 	value === 'colorToVec3Hsv' ||
 	value === 'colorToVec2Hs';
 
-const fromRustControlDiagnostics = (
-	value: unknown
-): UiParameterControlDiagnostic[] =>
-	Array.isArray(value)
-		? value
-				.filter((item): item is Record<string, unknown> => isRecord(item))
-				.map((item) => ({
-					code: typeof item.code === 'string' ? item.code : 'unknown',
-					message: typeof item.message === 'string' ? item.message : '',
-					detail: typeof item.detail === 'string' ? item.detail : undefined
-				}))
-		: [];
-
 const fromRustUserContextCandidate = (value: unknown): UiUserContextCandidate | null => {
 	if (!isRecord(value) || typeof value.symbol !== 'string') {
 		return null;
@@ -853,19 +838,16 @@ const fromRustControlState = (control: unknown): UiParameterControlState => {
 	if (!isRecord(control)) {
 		return {
 			mode: 'manual',
-			spec: { mode: 'manual' },
-			diagnostics: []
+			spec: { mode: 'manual' }
 		};
 	}
 
 	const modeRaw = control.mode;
 	const mode: UiParameterControlMode = isUiParameterControlMode(modeRaw) ? modeRaw : 'manual';
-	const diagnostics = fromRustControlDiagnostics(control.diagnostics);
 
 	return {
 		mode,
-		spec: fromRustControlSpec(mode, control.spec),
-		diagnostics
+		spec: fromRustControlSpec(mode, control.spec)
 	};
 };
 
@@ -1047,7 +1029,6 @@ export const fromRustParamControlInfo = (
 		param: Number(payload.param ?? 0),
 		active_mode: activeMode,
 		available_modes: availableModes,
-		diagnostics: fromRustControlDiagnostics(payload.diagnostics),
 		context_candidates: Array.isArray(payload.context_candidates)
 			? payload.context_candidates
 					.map((candidate) => fromRustUserContextCandidate(candidate))
@@ -1082,8 +1063,7 @@ export const toRustIntent = (intent: UiEditIntent): unknown => {
 			...intent,
 			state: {
 				mode: intent.state.mode,
-				spec: intent.state.spec,
-				diagnostics: []
+				spec: intent.state.spec
 			}
 		};
 	}

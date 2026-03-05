@@ -89,8 +89,7 @@
 		if (shouldUseTemplateMode) {
 			const applied = await sendSetParamControlStateIntent(liveNode.node_id, {
 				mode: 'templateText',
-				spec: { mode: 'templateText', template: nextValue },
-				diagnostics: []
+				spec: { mode: 'templateText', template: nextValue }
 			});
 			if (applied) {
 				return;
@@ -100,8 +99,7 @@
 		if (!isManualMode) {
 			await sendSetParamControlStateIntent(liveNode.node_id, {
 				mode: 'manual',
-				spec: { mode: 'manual' },
-				diagnostics: []
+				spec: { mode: 'manual' }
 			});
 		}
 
@@ -139,6 +137,7 @@
 
 <style>
 	.string-editor {
+		flex:1;
 		height: 100%;
 		box-sizing: border-box;
 		font-size: 0.75rem;

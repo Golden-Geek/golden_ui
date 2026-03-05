@@ -629,8 +629,8 @@
 				initialHeight: remToPx(20),
 				minimumHeight: remToPx(8),
 				position: {
-					referencePanelId: 'inspector',
-					direction: 'below'
+					referencePanelId: 'outliner',
+					direction: 'right'
 				}
 			},
 			{

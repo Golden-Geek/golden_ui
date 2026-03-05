@@ -11,6 +11,7 @@
 	} from '../../../types';
 	import { appState } from '../../../store/workbench.svelte';
 	import {
+		createUiEditSession,
 		sendPatchMetaIntent,
 		sendSetParamControlStateIntent,
 		sendSetParamIntent
@@ -23,18 +24,28 @@
 	import referenceIcon from '../../../style/icons/parameter/reference.svg';
 	import { fade, slide } from 'svelte/transition';
 	import type { Snippet } from 'svelte';
+	import Self from './ParameterInspector.svelte';
 
-	let { node, level, order, defaultChildren } = $props<{
+	let {
+		node,
+		level,
+		order,
+		defaultChildren,
+		controlNodeType = ''
+	} = $props<{
 		node: UiNodeDto;
 		level: number;
 		order: 'first' | 'last' | 'solo' | '';
-		defaultChildren?: Snippet;
+		controlNodeType?: String;
+		defaultChildren?: Snippet<[String?]>;
 	}>();
 
 	let session = $derived(appState.session);
 	let liveNode = $derived(session?.graph.state.nodesById.get(node.node_id) ?? node);
 	let liveNodeId = $derived(liveNode.node_id);
 	let isParameterNode = $derived(liveNode.data.kind === 'parameter');
+
+	let isControlNode = $derived(controlNodeType != '');
 
 	let param: UiParamDto | null = $derived(
 		liveNode.data.kind === 'parameter' ? liveNode.data.param : null
@@ -54,6 +65,9 @@
 	let isValueOverridden = $derived.by((): boolean => {
 		if (!param) {
 			return false;
+		}
+		if (currentControlMode !== 'manual') {
+			return true;
 		}
 		return !paramValuesEqual(param.value, param.default_value);
 	});
@@ -102,7 +116,22 @@
 		}
 		return controlInfo.context_candidates.some((candidate) => candidate.compatible);
 	});
-	let controlDiagnostics = $derived(param?.control?.diagnostics ?? []);
+	let controlAccentColor = $derived.by((): string => {
+		switch (currentControlMode) {
+			case 'contextLink':
+			case 'templateText':
+				return 'var(--gc-color-context)';
+			case 'expression':
+				return 'var(--gc-color-expression)';
+			case 'link':
+				return 'var(--gc-color-link)';
+			case 'animation':
+				return 'var(--gc-color-animation)';
+			case 'manual':
+			default:
+				return 'transparent';
+		}
+	});
 	let activeContextSymbol = $derived.by((): string => {
 		if (
 			!param ||
@@ -243,10 +272,32 @@
 	}
 
 	const resetValue = (): void => {
+		void resetValueInSinglePass();
+	};
+
+	const resetValueInSinglePass = async (): Promise<void> => {
 		if (!param || readOnly || !enabled || !isValueOverridden) {
 			return;
 		}
-		void sendSetParamIntent(liveNode.node_id, param.default_value, param.event_behaviour);
+		const defaultValue = param.default_value;
+		const eventBehaviour = param.event_behaviour;
+		const resetSession = createUiEditSession('Reset parameter', 'param-reset');
+
+		await resetSession.begin();
+		try {
+			if (currentControlMode !== 'manual') {
+				const appliedMode = await sendSetParamControlStateIntent(
+					liveNodeId,
+					stateForMode('manual')
+				);
+				if (!appliedMode) {
+					return;
+				}
+			}
+			await sendSetParamIntent(liveNodeId, defaultValue, eventBehaviour);
+		} finally {
+			await resetSession.end();
+		}
 	};
 
 	function defaultControlSpec(mode: UiParameterControlMode): UiParameterControlSpec {
@@ -272,14 +323,12 @@
 		if (currentState && currentState.mode === mode && currentState.spec.mode === mode) {
 			return {
 				mode,
-				spec: currentState.spec,
-				diagnostics: []
+				spec: currentState.spec
 			};
 		}
 		return {
 			mode,
-			spec: defaultControlSpec(mode),
-			diagnostics: []
+			spec: defaultControlSpec(mode)
 		};
 	}
 
@@ -338,8 +387,7 @@
 				mode: 'contextLink',
 				symbol: nextSymbol,
 				projection: nextProjection
-			},
-			diagnostics: []
+			}
 		});
 	};
 
@@ -415,64 +463,73 @@
 
 {#if visible}
 	<div
-		class="parameter-inspector {order} {'level-' + level} 
+		class="parameter-inspector {order} {'level-' + level} {controlNodeType}
 		{readOnly ? 'readonly' : ''} {currentControlMode !== 'manual' ? 'controlled' : ''}"
 		class:control-menu-open={controlMenuOpen}
+		style="--gc-parameter-accent: {controlAccentColor};"
 		data-node-id={liveNode.node_id}>
 		{#if param}
 			<div class="firstline">
-				<div class="parameter-info">
-					{#if canDisable}
-						<EnableButton node={liveNode} />
-					{/if}
-					{#if isNameChangeable}
-						{#if renamingState.isRenaming}
-							<input
-								class="custom-prop-name"
-								bind:value={renamingState.renameDraft}
-								onblur={() => {
-									void commitRename();
-								}}
-								onkeydown={(e) => {
-									if (e.key === 'Enter') {
-										void commitRename();
-									}
-									if (e.key === 'Escape') {
-										renamingState.isRenaming = false;
-										renamingState.renameDraft = liveNode.meta.label;
-									}
-								}} />
-						{:else}
-							<span
-								class="custom-prop-name-text"
-								role="textbox"
-								tabindex="-1"
-								ondblclick={() => {
-									renamingState.renameDraft = liveNode.meta.label;
-									renamingState.isRenaming = true;
-								}}
-								title="Double-click to rename">
-								{liveNode.meta.label}
-							</span>
+				{#if !isControlNode}
+					<div class="parameter-info">
+						{#if canDisable}
+							<EnableButton node={liveNode} />
 						{/if}
-					{:else}
-						<span class="parameter-label">{liveNode.meta.label}</span>
-					{/if}
-					<NodeWarningBadge {warnings} />
-					{#if !readOnly && enabled && isValueOverridden}
-						<button
-							type="button"
-							class="reset-value"
-							aria-label="Reset parameter value"
-							title="Reset to default value"
-							onclick={resetValue}
-							transition:fade={{ duration: 100 }}>
-							<img src={resetIcon} alt="Reset Value" />
-						</button>
-					{/if}
-				</div>
+
+						{#if isNameChangeable}
+							{#if renamingState.isRenaming}
+								<input
+									class="custom-prop-name"
+									bind:value={renamingState.renameDraft}
+									onblur={() => {
+										void commitRename();
+									}}
+									onkeydown={(e) => {
+										if (e.key === 'Enter') {
+											void commitRename();
+										}
+										if (e.key === 'Escape') {
+											renamingState.isRenaming = false;
+											renamingState.renameDraft = liveNode.meta.label;
+										}
+									}} />
+							{:else}
+								<span
+									class="custom-prop-name-text"
+									role="textbox"
+									tabindex="-1"
+									ondblclick={() => {
+										renamingState.renameDraft = liveNode.meta.label;
+										renamingState.isRenaming = true;
+									}}
+									title="Double-click to rename">
+									{liveNode.meta.label}
+								</span>
+							{/if}
+						{:else}
+							<span class="parameter-label">{liveNode.meta.label}</span>
+						{/if}
+						<NodeWarningBadge {warnings} />
+						{#if !readOnly && enabled && isValueOverridden}
+							<button
+								type="button"
+								class="reset-value"
+								aria-label="Reset parameter value"
+								title="Reset to default value"
+								onclick={resetValue}
+								transition:fade={{ duration: 100 }}>
+								<img src={resetIcon} alt="Reset Value" />
+							</button>
+						{/if}
+					</div>
+				{:else if controlNodeType == 'expression'}
+					<span class="expression-icon"></span>
+				{:else}
+					{controlNodeType} type
+				{/if}
+
 				{#if EditorComponent}
-					<div class="parameter-controls">
+					<div class="parameter-controls" class:full-width={isControlNode}>
 						<div class="parameter-wrapper {readOnly ? 'readonly' : ''} {enabled ? '' : 'disabled'}">
 							<EditorComponent node={liveNode} />
 						</div>
@@ -654,22 +711,10 @@
 						{/if}
 					{/if}
 
-					{#if controlDiagnostics.length > 0}
-						<div class="context-link-diagnostics">
-							{#each controlDiagnostics as diagnostic (`${diagnostic.code}:${diagnostic.message}:${diagnostic.detail ?? ''}`)}
-								<div class="context-link-diagnostic">
-									<strong>{diagnostic.code}</strong>
-									<span>{diagnostic.message}</span>
-									{#if diagnostic.detail}
-										<small>{diagnostic.detail}</small>
-									{/if}
-								</div>
-							{/each}
-						</div>
-					{/if}
 				</div>
 			{/if}
-			{@render defaultChildren?.()}
+
+			{@render defaultChildren?.(currentControlMode)}
 		{:else}
 			{liveNode.meta.label} has no parameter data.
 		{/if}
@@ -678,6 +723,7 @@
 
 <style>
 	.parameter-inspector {
+		--gc-parameter-accent: transparent;
 		width: 100%;
 		display: flex;
 		flex-direction: column;
@@ -689,6 +735,23 @@
 		padding-right: 0.25rem;
 		position: relative;
 		z-index: 0;
+	}
+
+	.parameter-inspector.controlled {
+		border-left: solid 0.12rem rgb(from var(--gc-parameter-accent) r g b / 85%);
+		padding-left: 0.28rem;
+		border-radius: 0.3rem;
+		background: linear-gradient(
+			90deg,
+			rgb(from var(--gc-parameter-accent) r g b / 14%) 0%,
+			rgb(from var(--gc-parameter-accent) r g b / 6%) 35%,
+			transparent 75%
+		);
+	}
+
+	.parameter-inspector.controlled .parameter-label,
+	.parameter-inspector.controlled .custom-prop-name-text {
+		color: rgb(from var(--gc-parameter-accent) r g b / 96%);
 	}
 
 	.parameter-inspector.control-menu-open {
@@ -707,6 +770,14 @@
 		gap: 0.25rem;
 	}
 
+	.parameter-controls {
+		display: flex;
+		align-items: center;
+		justify-content: flex-end;
+		gap: 0.25rem;
+		flex: 1;
+	}
+
 	.parameter-wrapper {
 		display: flex;
 		align-items: center;
@@ -715,12 +786,8 @@
 		max-width: 15rem;
 	}
 
-	.parameter-controls {
-		display: flex;
-		align-items: center;
-		justify-content: flex-end;
-		gap: 0.25rem;
-		flex: 1;
+	.full-width .parameter-wrapper {
+		max-width: none;
 	}
 
 	.parameter-wrapper.readonly,
@@ -797,6 +864,8 @@
 		cursor: pointer;
 		padding: 0.15rem;
 		opacity: 0.72;
+		border: 0.0625rem solid rgba(from var(--text-color) r g b / 24%);
+		background: rgba(from var(--text-color) r g b / 6%);
 		transition:
 			opacity 0.12s ease,
 			border-color 0.12s ease;
@@ -863,6 +932,11 @@
 
 	.link-mode-option.active {
 		background: rgba(from var(--text-color) r g b / 15%);
+	}
+
+	.parameter-inspector.controlled .link-mode-option.active {
+		background: rgb(from var(--gc-parameter-accent) r g b / 18%);
+		color: rgb(from var(--gc-parameter-accent) r g b / 96%);
 	}
 
 	.context-link-editor {
@@ -1020,24 +1094,13 @@
 		background: rgb(from var(--gc-color-success) r g b / 18%);
 	}
 
-	.context-link-diagnostics {
-		display: flex;
-		flex-direction: column;
-		gap: 0.2rem;
-		padding: 0.2rem 0.25rem;
+	/* Control Nodes */
+	.expression-icon {
+		width: 0.9rem;
+		height: 0.9rem;
 		border-radius: 0.25rem;
-		background: rgba(from var(--gc-color-warning) r g b / 10%);
-	}
-
-	.context-link-diagnostic {
-		display: flex;
-		flex-direction: column;
-		gap: 0.04rem;
-		font-size: 0.66rem;
-		color: rgb(from var(--gc-color-warning) r g b / 95%);
-	}
-
-	.context-link-diagnostic small {
-		opacity: 0.8;
+		background: url('../../../style/icons/function.svg') no-repeat center center;
+		background-size: contain;
+		display: inline-block;
 	}
 </style>

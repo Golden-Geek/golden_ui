@@ -166,12 +166,6 @@ export interface UiParamHints {
 	unit?: string;
 }
 
-export interface UiParameterControlDiagnostic {
-	code: string;
-	message: string;
-	detail?: string;
-}
-
 export type UiUserContextValueType =
 	| 'trigger'
 	| 'int'
@@ -239,7 +233,6 @@ export interface UiParamControlInfo {
 	param: NodeId;
 	active_mode: UiParameterControlMode;
 	available_modes: UiParameterControlMode[];
-	diagnostics: UiParameterControlDiagnostic[];
 	context_candidates: UiUserContextCandidate[];
 	token_suggestions: UiTokenSuggestion[];
 	link_candidates: UiParamControlCandidate[];
@@ -272,7 +265,6 @@ export type UiParameterControlSpec =
 export interface UiParameterControlState {
 	mode: UiParameterControlMode;
 	spec: UiParameterControlSpec;
-	diagnostics: UiParameterControlDiagnostic[];
 }
 
 export interface UiParamDto {

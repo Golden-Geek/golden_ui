@@ -13,7 +13,7 @@ export interface NodeInspectorComponentProps {
 	toggleCollapsed?: () => void;
 	setCollapsed?: (collapsed: boolean) => void;
 	defaultHeader?: Snippet<[Snippet?]>;
-	defaultChildren?: Snippet;
+	defaultChildren?: Snippet<[String?]>;
 }
 
 export interface NodeInspectorEntry {
