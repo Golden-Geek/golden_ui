@@ -48,7 +48,7 @@
 		</div>
 		<div class="outliner-content">
 			<div class="outliner-tree">
-				<OutlinerItem node={rootNode} {nodeFilter} />
+				<OutlinerItem node={rootNode} {nodeFilter} initiallyExpandedDepth={3} />
 			</div>
 		</div>
 	</div>

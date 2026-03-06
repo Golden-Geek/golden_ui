@@ -93,7 +93,24 @@
 
 	let isSelected = $derived(session?.isNodeSelected(node?.node_id ?? -1) ?? false);
 	let hasArrow = $derived(Boolean(node?.children && node.children.length > 0));
-	let warnings = $derived(node ? (session?.getNodeVisibleWarnings(node.node_id) ?? []) : []);
+	let canHaveVisibleWarnings = $derived.by((): boolean => {
+		if (!node) {
+			return false;
+		}
+		const presentation = node.meta.presentation;
+		if (!presentation) {
+			return false;
+		}
+		if (Array.isArray(presentation.warnings) && presentation.warnings.length > 0) {
+			return true;
+		}
+		return Number(presentation.show_child_warnings_max_depth ?? 0) > 0;
+	});
+	let warnings = $derived(
+		node && canHaveVisibleWarnings
+			? (session?.getNodeVisibleWarnings(node.node_id) ?? [])
+			: []
+	);
 
 	const passesFilter = (candidate: UiNodeDto | null): boolean => {
 		if (!candidate) {

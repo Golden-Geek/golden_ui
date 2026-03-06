@@ -47,7 +47,7 @@
 		display: inline-block;
 		background-color: rgba(50, 50, 50, 0.5);
 		cursor: pointer;
-		vertical-align: text-top;
+		vertical-align: middle;
 		transition:
 			background-color 0.2s ease,
 			box-shadow 0.2s ease,

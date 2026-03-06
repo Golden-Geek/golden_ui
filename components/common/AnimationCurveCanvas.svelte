@@ -89,6 +89,13 @@
 	const GRID_MANTISSAS = [1, 2, 5] as const;
 	const GRID_MAX_LINES = 4000;
 	const GRID_MIN_PIXEL_SPACING = 3.5;
+	const CURVE_BOUNDS_SAMPLE_MIN = 192;
+	const CURVE_BOUNDS_SAMPLE_MAX = 2048;
+	const CURVE_RENDER_MAX_POINTS = 12288;
+	const CURVE_RENDER_FLATNESS_PX = 0.34;
+	const CURVE_RENDER_MIN_SEGMENT_PX = 0.22;
+	const CURVE_RENDER_MAX_DEPTH = 13;
+	const CURVE_DRAW_MIN_DELTA_PX = 0.08;
 
 	const clamp = (value: number, min: number, max: number): number =>
 		Math.min(max, Math.max(min, value));
@@ -546,6 +553,194 @@
 		context.restore();
 	};
 
+	const build_adaptive_curve_samples = (
+		x_min: number,
+		x_max: number,
+		x_span: number,
+		plot_width: number,
+		keys: CompiledCurveKeyLike[],
+		to_screen_x: (position: number) => number,
+		to_screen_y: (value: number) => number,
+		sample_value: (position: number) => number
+	): {
+		positions: Float64Array;
+		values: Float64Array;
+		screen_x: Float64Array;
+		screen_y: Float64Array;
+	} => {
+		const seed_positions: number[] = [x_min, x_max];
+		for (const key of keys) {
+			if (key.position > x_min + CURVE_EPSILON && key.position < x_max - CURVE_EPSILON) {
+				seed_positions.push(key.position);
+			}
+		}
+		seed_positions.sort((left, right) => left - right);
+
+		const unique_seeds: number[] = [];
+		for (const seed of seed_positions) {
+			const previous = unique_seeds[unique_seeds.length - 1];
+			if (
+				previous !== undefined &&
+				Math.abs(previous - seed) <= Math.max(CURVE_EPSILON, x_span * 1e-12)
+			) {
+				continue;
+			}
+			unique_seeds.push(seed);
+		}
+		if (unique_seeds.length < 2) {
+			unique_seeds.splice(0, unique_seeds.length, x_min, x_max);
+		}
+
+		const sample_cache = new Map<number, number>();
+		const sample_at = (position: number): number => {
+			const cached = sample_cache.get(position);
+			if (cached !== undefined) {
+				return cached;
+			}
+			const sampled = sample_value(position);
+			sample_cache.set(position, sampled);
+			return sampled;
+		};
+
+		const positions: number[] = [];
+		const values: number[] = [];
+		const screen_x: number[] = [];
+		const screen_y: number[] = [];
+		const append_point = (x: number, value: number, sx: number, sy: number): void => {
+			const last_index = positions.length - 1;
+			if (last_index >= 0 && Math.abs(positions[last_index] - x) <= CURVE_EPSILON) {
+				positions[last_index] = x;
+				values[last_index] = value;
+				screen_x[last_index] = sx;
+				screen_y[last_index] = sy;
+				return;
+			}
+			positions.push(x);
+			values.push(value);
+			screen_x.push(sx);
+			screen_y.push(sy);
+		};
+
+		const max_points = Math.max(
+			768,
+			Math.min(CURVE_RENDER_MAX_POINTS, Math.round(plot_width * 8))
+		);
+		const min_world_dx = x_span / Math.max(1, plot_width * 3.6);
+		type Interval = {
+			x0: number;
+			y0: number;
+			sx0: number;
+			sy0: number;
+			x1: number;
+			y1: number;
+			sx1: number;
+			sy1: number;
+			depth: number;
+		};
+
+		for (let index = 0; index + 1 < unique_seeds.length; index += 1) {
+			const x0 = unique_seeds[index];
+			const x1 = unique_seeds[index + 1];
+			if (!(x1 > x0 + CURVE_EPSILON)) {
+				continue;
+			}
+			const y0 = sample_at(x0);
+			const y1 = sample_at(x1);
+			const sx0 = to_screen_x(x0);
+			const sx1 = to_screen_x(x1);
+			const sy0 = to_screen_y(y0);
+			const sy1 = to_screen_y(y1);
+			const stack: Interval[] = [{ x0, y0, sx0, sy0, x1, y1, sx1, sy1, depth: 0 }];
+
+			while (stack.length > 0) {
+				const interval = stack.pop();
+				if (!interval) {
+					continue;
+				}
+
+				const world_dx = interval.x1 - interval.x0;
+				const screen_dx = interval.sx1 - interval.sx0;
+				const can_subdivide =
+					interval.depth < CURVE_RENDER_MAX_DEPTH &&
+					positions.length < max_points - 1 &&
+					world_dx > min_world_dx &&
+					screen_dx > CURVE_RENDER_MIN_SEGMENT_PX;
+
+				if (!can_subdivide) {
+					append_point(interval.x0, interval.y0, interval.sx0, interval.sy0);
+					append_point(interval.x1, interval.y1, interval.sx1, interval.sy1);
+					continue;
+				}
+
+				const midpoint_x = interval.x0 + world_dx * 0.5;
+				const midpoint_y = sample_at(midpoint_x);
+				const midpoint_sx = to_screen_x(midpoint_x);
+				const midpoint_sy = to_screen_y(midpoint_y);
+
+				const quarter_x = interval.x0 + world_dx * 0.25;
+				const quarter_y = sample_at(quarter_x);
+				const quarter_sy = to_screen_y(quarter_y);
+				const three_quarter_x = interval.x0 + world_dx * 0.75;
+				const three_quarter_y = sample_at(three_quarter_x);
+				const three_quarter_sy = to_screen_y(three_quarter_y);
+
+				const linear_mid_sy = interval.sy0 + (interval.sy1 - interval.sy0) * 0.5;
+				const linear_quarter_sy = interval.sy0 + (interval.sy1 - interval.sy0) * 0.25;
+				const linear_three_quarter_sy = interval.sy0 + (interval.sy1 - interval.sy0) * 0.75;
+				const flatness_error = Math.max(
+					Math.abs(midpoint_sy - linear_mid_sy),
+					Math.abs(quarter_sy - linear_quarter_sy),
+					Math.abs(three_quarter_sy - linear_three_quarter_sy)
+				);
+
+				if (flatness_error <= CURVE_RENDER_FLATNESS_PX) {
+					append_point(interval.x0, interval.y0, interval.sx0, interval.sy0);
+					append_point(interval.x1, interval.y1, interval.sx1, interval.sy1);
+					continue;
+				}
+
+				stack.push({
+					x0: midpoint_x,
+					y0: midpoint_y,
+					sx0: midpoint_sx,
+					sy0: midpoint_sy,
+					x1: interval.x1,
+					y1: interval.y1,
+					sx1: interval.sx1,
+					sy1: interval.sy1,
+					depth: interval.depth + 1
+				});
+				stack.push({
+					x0: interval.x0,
+					y0: interval.y0,
+					sx0: interval.sx0,
+					sy0: interval.sy0,
+					x1: midpoint_x,
+					y1: midpoint_y,
+					sx1: midpoint_sx,
+					sy1: midpoint_sy,
+					depth: interval.depth + 1
+				});
+			}
+		}
+
+		if (positions.length === 0) {
+			const start_value = sample_at(x_min);
+			const end_value = sample_at(x_max);
+			positions.push(x_min, x_max);
+			values.push(start_value, end_value);
+			screen_x.push(to_screen_x(x_min), to_screen_x(x_max));
+			screen_y.push(to_screen_y(start_value), to_screen_y(end_value));
+		}
+
+		return {
+			positions: Float64Array.from(positions),
+			values: Float64Array.from(values),
+			screen_x: Float64Array.from(screen_x),
+			screen_y: Float64Array.from(screen_y)
+		};
+	};
+
 	const draw_curve_canvas = (): void => {
 		if (!canvas_context) {
 			return;
@@ -602,20 +797,22 @@
 			}
 		}
 
-		const sample_count = Math.max(192, Math.min(4096, Math.round(plot_width * 2.4)));
-		let sample_step = (x_max - x_min) / Math.max(1, sample_count - 1);
-		const sample_values = new Float64Array(sample_count);
+		const bounds_sample_count = Math.max(
+			CURVE_BOUNDS_SAMPLE_MIN,
+			Math.min(CURVE_BOUNDS_SAMPLE_MAX, Math.round(plot_width * 1.2))
+		);
+		let bounds_sample_step = (x_max - x_min) / Math.max(1, bounds_sample_count - 1);
 		let y_min = Number.POSITIVE_INFINITY;
 		let y_max = Number.NEGATIVE_INFINITY;
 
-		for (let index = 0; index < sample_count; index += 1) {
-			const position = index + 1 === sample_count ? x_max : x_min + sample_step * index;
+		for (let index = 0; index < bounds_sample_count; index += 1) {
+			const position =
+				index + 1 === bounds_sample_count ? x_max : x_min + bounds_sample_step * index;
 			const sample = sampleCurveAt(position);
 			let value = sample ?? 0;
 			if (active_range) {
 				value = clamp(value, active_range.y_min, active_range.y_max);
 			}
-			sample_values[index] = value;
 			if (value < y_min) {
 				y_min = value;
 			}
@@ -678,15 +875,15 @@
 		) {
 			x_min = active_bounds.x_min;
 			x_max = active_bounds.x_max;
-			sample_step = (x_max - x_min) / Math.max(1, sample_count - 1);
-			for (let index = 0; index < sample_count; index += 1) {
-				const position = index + 1 === sample_count ? x_max : x_min + sample_step * index;
+			bounds_sample_step = (x_max - x_min) / Math.max(1, bounds_sample_count - 1);
+			for (let index = 0; index < bounds_sample_count; index += 1) {
+				const position =
+					index + 1 === bounds_sample_count ? x_max : x_min + bounds_sample_step * index;
 				const sample = sampleCurveAt(position);
 				let value = sample ?? 0;
 				if (active_range) {
 					value = clamp(value, active_range.y_min, active_range.y_max);
 				}
-				sample_values[index] = value;
 			}
 		}
 
@@ -705,15 +902,32 @@
 		const to_screen_y = (value: number): number =>
 			plot_top + plot_height - ((value - y_min) / y_span) * plot_height;
 
-		const sample_screen_x = new Float64Array(sample_count);
-		const sample_screen_y = new Float64Array(sample_count);
+		const sampled_curve = build_adaptive_curve_samples(
+			x_min,
+			x_max,
+			x_span,
+			plot_width,
+			compiledCurve.keys,
+			to_screen_x,
+			to_screen_y,
+			(position) => {
+				const sample = sampleCurveAt(position);
+				let value = sample ?? 0;
+				if (active_range) {
+					value = clamp(value, active_range.y_min, active_range.y_max);
+				}
+				return value;
+			}
+		);
+		const sample_positions = sampled_curve.positions;
+		const sample_screen_x = sampled_curve.screen_x;
+		const sample_screen_y = sampled_curve.screen_y;
+		const sample_count = sample_positions.length;
 		const sample_owner_key_ids: Array<NodeId | null> = new Array(sample_count).fill(null);
 		const segments = compiledCurve.segments;
 		let active_segment_index = 0;
 		for (let index = 0; index < sample_count; index += 1) {
-			const position = index + 1 === sample_count ? x_max : x_min + sample_step * index;
-			sample_screen_x[index] = to_screen_x(position);
-			sample_screen_y[index] = to_screen_y(sample_values[index]);
+			const position = sample_positions[index];
 
 			while (
 				active_segment_index + 1 < segments.length &&
@@ -785,82 +999,31 @@
 		context.lineWidth = 1.35;
 		context.lineJoin = 'round';
 		context.lineCap = 'round';
-		const bucket_count = Math.max(1, Math.round(plot_width));
-		if (sample_count > bucket_count * 2) {
-			const bucket_min = new Float64Array(bucket_count);
-			const bucket_max = new Float64Array(bucket_count);
-			const bucket_first = new Float64Array(bucket_count);
-			const bucket_last = new Float64Array(bucket_count);
-			const bucket_has = new Uint8Array(bucket_count);
-			for (let index = 0; index < bucket_count; index += 1) {
-				bucket_min[index] = Number.POSITIVE_INFINITY;
-				bucket_max[index] = Number.NEGATIVE_INFINITY;
+		context.beginPath();
+		let has_curve_path = false;
+		let last_curve_x = 0;
+		let last_curve_y = 0;
+		for (let index = 0; index < sample_count; index += 1) {
+			const x = sample_screen_x[index];
+			const y = sample_screen_y[index];
+			if (!has_curve_path) {
+				context.moveTo(x, y);
+				has_curve_path = true;
+				last_curve_x = x;
+				last_curve_y = y;
+				continue;
 			}
-			for (let index = 0; index < sample_count; index += 1) {
-				const value = sample_values[index];
-				const sample_x = sample_screen_x[index];
-				const bucket = clamp(Math.floor(sample_x - plot_left), 0, bucket_count - 1);
-				if (!bucket_has[bucket]) {
-					bucket_has[bucket] = 1;
-					bucket_first[bucket] = value;
-					bucket_last[bucket] = value;
-					bucket_min[bucket] = value;
-					bucket_max[bucket] = value;
-					continue;
-				}
-				bucket_last[bucket] = value;
-				if (value < bucket_min[bucket]) {
-					bucket_min[bucket] = value;
-				}
-				if (value > bucket_max[bucket]) {
-					bucket_max[bucket] = value;
-				}
+			if (
+				Math.abs(x - last_curve_x) < CURVE_DRAW_MIN_DELTA_PX &&
+				Math.abs(y - last_curve_y) < CURVE_DRAW_MIN_DELTA_PX
+			) {
+				continue;
 			}
-			context.beginPath();
-			let has_path_point = false;
-			for (let index = 0; index < bucket_count; index += 1) {
-				if (!bucket_has[index]) {
-					continue;
-				}
-				const x = plot_left + index + 0.5;
-				const first_y = to_screen_y(bucket_first[index]);
-				const last_y = to_screen_y(bucket_last[index]);
-				if (!has_path_point) {
-					context.moveTo(x, first_y);
-					has_path_point = true;
-				} else {
-					context.lineTo(x, first_y);
-				}
-				context.lineTo(x, last_y);
-			}
-			context.stroke();
-
-			context.beginPath();
-			for (let index = 0; index < bucket_count; index += 1) {
-				if (!bucket_has[index]) {
-					continue;
-				}
-				const min_y = to_screen_y(bucket_min[index]);
-				const max_y = to_screen_y(bucket_max[index]);
-				if (Math.abs(max_y - min_y) <= 0.35) {
-					continue;
-				}
-				const x = plot_left + index + 0.5;
-				context.moveTo(x, min_y);
-				context.lineTo(x, max_y);
-			}
-			context.stroke();
-		} else {
-			context.beginPath();
-			for (let index = 0; index < sample_count; index += 1) {
-				const x = sample_screen_x[index];
-				const y = sample_screen_y[index];
-				if (index === 0) {
-					context.moveTo(x, y);
-				} else {
-					context.lineTo(x, y);
-				}
-			}
+			context.lineTo(x, y);
+			last_curve_x = x;
+			last_curve_y = y;
+		}
+		if (has_curve_path) {
 			context.stroke();
 		}
 
@@ -874,6 +1037,8 @@
 			context.beginPath();
 			let drawing = false;
 			let has_path = false;
+			let last_x = 0;
+			let last_y = 0;
 
 			for (let index = 0; index < sample_count; index += 1) {
 				if (sample_owner_key_ids[index] !== key_id) {
@@ -887,8 +1052,18 @@
 					context.moveTo(x, y);
 					drawing = true;
 					has_path = true;
+					last_x = x;
+					last_y = y;
 				} else {
+					if (
+						Math.abs(x - last_x) < CURVE_DRAW_MIN_DELTA_PX &&
+						Math.abs(y - last_y) < CURVE_DRAW_MIN_DELTA_PX
+					) {
+						continue;
+					}
 					context.lineTo(x, y);
+					last_x = x;
+					last_y = y;
 				}
 			}
 

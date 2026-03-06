@@ -322,7 +322,13 @@ export interface UiSchemaView {
 	node_types: Array<{ node_type: string }>;
 	enums: Array<{
 		enum_id: string;
-		variants: Array<{ variant_id: string; label: string; tags: string[]; ordering?: number }>;
+		variants: Array<{
+			variant_id: string;
+			value: ParamValue;
+			label: string;
+			tags: string[];
+			ordering?: number;
+		}>;
 	}>;
 }
 

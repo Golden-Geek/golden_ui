@@ -11,6 +11,7 @@ import type {
 	UiEventDto,
 	UiLogRecord,
 	UiHistoryState,
+	UiSnapshot,
 	UiSubscriptionScope,
 	UiParameterControlState
 } from '../types';
@@ -94,19 +95,6 @@ const controlStateEquals = (
 		return false;
 	}
 	return JSON.stringify(left.spec) === JSON.stringify(right.spec);
-};
-
-const compareEventTime = (
-	left: { tick: number; micro: number; seq: number },
-	right: { tick: number; micro: number; seq: number }
-): number => {
-	if (left.tick !== right.tick) {
-		return left.tick - right.tick;
-	}
-	if (left.micro !== right.micro) {
-		return left.micro - right.micro;
-	}
-	return left.seq - right.seq;
 };
 
 const isEditableTarget = (target: EventTarget | null): boolean => {
@@ -208,6 +196,22 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 	const scope = options.scope ?? wholeGraphScope;
 	const retryMs = Math.max(100, options.bootstrapRetryMs ?? DEFAULT_RETRY_MS);
 	const graph = createGraphStore();
+	const shouldLogUiPerf = (() => {
+		if (typeof window === 'undefined') {
+			return false;
+		}
+		try {
+			return window.localStorage.getItem('gc_ui_perf') === '1';
+		} catch {
+			return false;
+		}
+	})();
+	const logUiPerf = (message: string): void => {
+		if (!shouldLogUiPerf) {
+			return;
+		}
+		console.info(`[ui-perf] ${message}`);
+	};
 
 	let status = $state('Connecting to engine...');
 	let selectedNodeIds = $state<NodeId[]>([]);
@@ -225,6 +229,8 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 	let mountedCleanup: (() => void) | null = null;
 	let resyncInFlight = false;
 	let resyncQueued = false;
+	let snapshotRequestInFlight: Promise<UiSnapshot> | null = null;
+	let hasLoadedSnapshot = false;
 	let intentQueueTail: Promise<void> = Promise.resolve();
 
 	const client = createWebSocketUiClient({
@@ -237,7 +243,9 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 				return;
 			}
 			if (state === 'connected') {
-				status = 'Connected.';
+				status = hasLoadedSnapshot
+					? 'Connected.'
+					: 'Transport connected. Syncing snapshot...';
 				return;
 			}
 			if (state === 'disconnected') {
@@ -698,46 +706,62 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 		canRedo = history.can_redo;
 	};
 
+	const applySnapshotToState = (snapshot: UiSnapshot, successStatus: string): void => {
+		graph.loadSnapshot(snapshot);
+		hasLoadedSnapshot = true;
+		invalidateWarningCaches();
+		restorePersistedSelection();
+		reconcileSelection();
+		applyHistoryState(snapshot.history);
+		resetPendingLogMutations();
+		logMaxEntries = snapshot.logger.max_entries;
+		logRecords = [...snapshot.logger.records];
+		status = successStatus;
+	};
+
+	const requestSnapshot = (): Promise<UiSnapshot> => {
+		if (snapshotRequestInFlight) {
+			return snapshotRequestInFlight;
+		}
+		const inFlight = client.snapshot(scope);
+		snapshotRequestInFlight = inFlight.finally(() => {
+			snapshotRequestInFlight = null;
+		});
+		return snapshotRequestInFlight;
+	};
+
 	const resyncSnapshot = async (successStatus: string): Promise<void> => {
 		if (resyncInFlight) {
 			resyncQueued = true;
 			return;
 		}
 		resyncInFlight = true;
+		resyncQueued = false;
 		try {
-			while (true) {
-				resyncQueued = false;
-				const lastKnownEventTime = graph.state.lastEventTime;
-				const snapshot = await client.snapshot(scope);
-				const latestAppliedEventTime = graph.state.lastEventTime ?? lastKnownEventTime;
-
-				// Ignore stale snapshots that were captured before already-applied events.
-				if (
-					latestAppliedEventTime &&
-					compareEventTime(snapshot.at, latestAppliedEventTime) < 0
-				) {
-					resyncQueued = true;
-				} else {
-					graph.loadSnapshot(snapshot);
-					invalidateWarningCaches();
-					restorePersistedSelection();
-					reconcileSelection();
-					applyHistoryState(snapshot.history);
-					resetPendingLogMutations();
-					logMaxEntries = snapshot.logger.max_entries;
-					logRecords = [...snapshot.logger.records];
-					status = successStatus;
-				}
-
-				if (!resyncQueued) {
-					break;
-				}
-			}
+			const fetchStartedAt = typeof performance !== 'undefined' ? performance.now() : Date.now();
+			const snapshot = await requestSnapshot();
+			const fetchElapsedMs =
+				(typeof performance !== 'undefined' ? performance.now() : Date.now()) -
+				fetchStartedAt;
+			const applyStartedAt = typeof performance !== 'undefined' ? performance.now() : Date.now();
+			applySnapshotToState(snapshot, successStatus);
+			const applyElapsedMs =
+				(typeof performance !== 'undefined' ? performance.now() : Date.now()) -
+				applyStartedAt;
+			logUiPerf(
+				`resync snapshot fetch_ms=${fetchElapsedMs.toFixed(1)} apply_ms=${applyElapsedMs.toFixed(
+					1
+				)} nodes=${snapshot.nodes.length}`
+			);
 		} catch (error) {
 			const message = error instanceof Error ? error.message : 'unknown resync error';
 			status = `Resync failed: ${message}`;
 		} finally {
 			resyncInFlight = false;
+			if (resyncQueued) {
+				resyncQueued = false;
+				void resyncSnapshot(successStatus);
+			}
 		}
 	};
 
@@ -918,6 +942,7 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 		let unsubscribe = () => {};
 		let bootstrapInFlight = false;
 		let retryTimer: ReturnType<typeof setTimeout> | null = null;
+		let retryDelayMs = retryMs;
 
 		const clearRetry = (): void => {
 			if (retryTimer !== null) {
@@ -930,10 +955,12 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 			if (stopped || subscribed || retryTimer !== null) {
 				return;
 			}
+			const delay = retryDelayMs;
+			retryDelayMs = Math.min(10000, Math.max(retryMs, retryDelayMs * 2));
 			retryTimer = setTimeout(() => {
 				retryTimer = null;
 				void bootstrap();
-			}, retryMs);
+			}, delay);
 		};
 
 		const bootstrap = async (): Promise<void> => {
@@ -943,22 +970,28 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 
 			bootstrapInFlight = true;
 			try {
-				const snapshot = await client.snapshot(scope);
+				const fetchStartedAt = typeof performance !== 'undefined' ? performance.now() : Date.now();
+				const snapshot = await requestSnapshot();
+				const fetchElapsedMs =
+					(typeof performance !== 'undefined' ? performance.now() : Date.now()) -
+					fetchStartedAt;
 				if (stopped) {
 					return;
 				}
-				graph.loadSnapshot(snapshot);
-				invalidateWarningCaches();
-				restorePersistedSelection();
-				reconcileSelection();
-				applyHistoryState(snapshot.history);
-				resetPendingLogMutations();
-				logMaxEntries = snapshot.logger.max_entries;
-				logRecords = [...snapshot.logger.records];
-				status = 'Connected.';
+				const applyStartedAt = typeof performance !== 'undefined' ? performance.now() : Date.now();
+				applySnapshotToState(snapshot, 'Connected.');
+				const applyElapsedMs =
+					(typeof performance !== 'undefined' ? performance.now() : Date.now()) -
+					applyStartedAt;
+				logUiPerf(
+					`bootstrap snapshot fetch_ms=${fetchElapsedMs.toFixed(1)} apply_ms=${applyElapsedMs.toFixed(
+						1
+					)} nodes=${snapshot.nodes.length}`
+				);
 				unsubscribe = client.subscribe(scope, snapshot.at, applyBatch);
 				subscribed = true;
 				clearRetry();
+				retryDelayMs = retryMs;
 			} catch (error) {
 				if (stopped) {
 					return;
@@ -1014,6 +1047,7 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 			selectedNodeIds = [];
 			logRecords = [];
 			logMaxEntries = 0;
+			hasLoadedSnapshot = false;
 			mountedCleanup = null;
 		};
 

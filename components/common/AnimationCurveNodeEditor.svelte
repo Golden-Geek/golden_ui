@@ -739,31 +739,39 @@
 		inv_span: number
 	): number => {
 		let t = clamp((position - start_position) * inv_span, 0, 1);
-		for (let iteration = 0; iteration < 4; iteration += 1) {
+		let converged = false;
+		for (let iteration = 0; iteration < 6; iteration += 1) {
 			const sampled_x = sample_cubic(x, t);
 			const delta = sampled_x - position;
-			if (Math.abs(delta) <= 1e-8) {
+			if (Math.abs(delta) <= 1e-10) {
+				converged = true;
 				break;
 			}
 			const derivative = derivative_cubic(x, t);
 			if (Math.abs(derivative) <= CURVE_EPSILON) {
 				break;
 			}
-			t = clamp(t - delta / derivative, 0, 1);
+			const next_t = t - delta / derivative;
+			if (!Number.isFinite(next_t)) {
+				break;
+			}
+			t = clamp(next_t, 0, 1);
 		}
 
-		let low = 0;
-		let high = 1;
-		for (let iteration = 0; iteration < 8; iteration += 1) {
-			const midpoint = (low + high) * 0.5;
-			const sampled_x = sample_cubic(x, midpoint);
-			if (sampled_x <= position) {
-				low = midpoint;
-			} else {
-				high = midpoint;
+		if (!converged) {
+			let low = 0;
+			let high = 1;
+			for (let iteration = 0; iteration < 20; iteration += 1) {
+				const midpoint = (low + high) * 0.5;
+				const sampled_x = sample_cubic(x, midpoint);
+				if (sampled_x <= position) {
+					low = midpoint;
+				} else {
+					high = midpoint;
+				}
 			}
+			t = (low + high) * 0.5;
 		}
-		t = (low + high) * 0.5;
 		return sample_cubic(y, t);
 	};
 

@@ -57,6 +57,7 @@
 	let CustomInspectorComponent = $derived(customInspectorEntry?.component ?? null);
 
 	let titleTextElem: HTMLSpanElement | null = $state(null as HTMLSpanElement | null);
+	let enableButtonElem: HTMLDivElement | null = $state(null as HTMLDivElement | null);
 	let renameInputElem: HTMLInputElement | null = $state(null as HTMLInputElement | null);
 	let renamingState = $state({
 		isRenaming: false,
@@ -143,7 +144,15 @@
 							const clickedTitle = Boolean(
 								titleTextElem && target && titleTextElem.contains(target)
 							);
-							if (!isNameChangeable || !clickedTitle) {
+							const clickedEnableButton = Boolean(
+								enableButtonElem && target && enableButtonElem.contains(target)
+							);
+
+							let shouldToggle = !clickedEnableButton;
+							if (isNameChangeable) {
+								if (clickedTitle) shouldToggle = false;
+							}
+							if (shouldToggle) {
 								toggleCollapsed();
 							}
 						}}
@@ -163,7 +172,9 @@
 						</span>
 
 						{#if canBeDisabled}
-							<EnableButton {node} />
+							<div class="enable-button-wrapper" bind:this={enableButtonElem}>
+								<EnableButton {node} />
+							</div>
 						{/if}
 
 						{#if renamingState.isRenaming}

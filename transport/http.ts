@@ -131,9 +131,9 @@ interface RustScriptState {
 interface RustUiParamDto {
 	value: RustParamValue;
 	default_value?: RustParamValue;
-	event_behaviour: ParamEventBehaviour;
-	read_only: boolean;
-	constraints: {
+	event_behaviour?: ParamEventBehaviour;
+	read_only?: boolean;
+	constraints?: {
 		range?: {
 			kind?: string;
 			min?: number | number[];
@@ -148,16 +148,16 @@ interface RustUiParamDto {
 			tags?: string[];
 			ordering?: number;
 		}>;
-		policy: ParamConstraintPolicy;
-			reference?: {
-				root?: unknown;
-				target_kind?: string;
-				allowed_node_types?: string[];
-				allowed_parameter_types?: string[];
-				allow_projections?: boolean;
-				custom_filter_key?: string;
-				default_search_filter?: string;
-			};
+		policy?: ParamConstraintPolicy;
+		reference?: {
+			root?: unknown;
+			target_kind?: string;
+			allowed_node_types?: string[];
+			allowed_parameter_types?: string[];
+			allow_projections?: boolean;
+			custom_filter_key?: string;
+			default_search_filter?: string;
+		};
 		file?: {
 			allowed_types?: string[];
 			allowed_extensions?: string[];
@@ -170,6 +170,7 @@ interface RustUiParamDto {
 		unit?: string;
 	};
 	control?: unknown;
+	enum_options_id?: string;
 }
 
 interface RustUiLogRecord extends UiLogRecord {}
@@ -193,7 +194,20 @@ interface RustUiNodeDto {
 	user_item_kind?: string;
 	accepted_user_item_kinds?: string[];
 	creatable_user_items?: Array<{ node_type: string; item_kind: string; label: string }>;
-	children: number[];
+	children?: number[];
+}
+
+interface RustUiSchemaEnumVariantDefinition {
+	variant_id?: string;
+	value?: RustParamValue;
+	label?: string;
+	tags?: string[];
+	ordering?: number;
+}
+
+interface RustUiSchemaEnumDefinition {
+	enum_id?: string;
+	variants?: RustUiSchemaEnumVariantDefinition[];
 }
 
 export interface RustUiSnapshot {
@@ -201,7 +215,10 @@ export interface RustUiSnapshot {
 	scope: RustScope;
 	at: EventTime;
 	nodes: RustUiNodeDto[];
-	schema: Partial<UiSnapshot['schema']>;
+	schema: {
+		node_types?: Array<{ node_type: string }>;
+		enums?: RustUiSchemaEnumDefinition[];
+	};
 	history?: UiHistoryState;
 	logger?: RustUiLoggerState;
 }
@@ -476,10 +493,19 @@ const fromRustReferenceRoot = (root: unknown): UiReferenceRoot => {
 	return { kind: 'engineRoot' };
 };
 
-const fromRustReferenceConstraints = (reference: RustUiParamDto['constraints']['reference']): UiReferenceConstraints | undefined => {
-	if (!reference) {
+const fromRustReferenceConstraints = (reference: unknown): UiReferenceConstraints | undefined => {
+	if (!isRecord(reference)) {
 		return undefined;
 	}
+
+	const allowedNodeTypes = Array.isArray(reference.allowed_node_types)
+		? reference.allowed_node_types.filter((value): value is string => typeof value === 'string')
+		: [];
+	const allowedParameterTypes = Array.isArray(reference.allowed_parameter_types)
+		? reference.allowed_parameter_types.filter(
+				(value): value is string => typeof value === 'string'
+			)
+		: [];
 
 	const target_kind =
 		reference.target_kind === 'ParameterOnly' || reference.target_kind === 'parameterOnly'
@@ -489,8 +515,8 @@ const fromRustReferenceConstraints = (reference: RustUiParamDto['constraints']['
 	return {
 		root: fromRustReferenceRoot(reference.root),
 		target_kind,
-		allowed_node_types: [...(reference.allowed_node_types ?? [])],
-		allowed_parameter_types: [...(reference.allowed_parameter_types ?? [])],
+		allowed_node_types: allowedNodeTypes,
+		allowed_parameter_types: allowedParameterTypes,
 		allow_projections:
 			typeof reference.allow_projections === 'boolean'
 				? reference.allow_projections
@@ -504,16 +530,20 @@ const fromRustReferenceConstraints = (reference: RustUiParamDto['constraints']['
 	};
 };
 
-const fromRustFileConstraints = (file: RustUiParamDto['constraints']['file']): UiFileConstraints | undefined => {
-	if (!file) {
+const fromRustFileConstraints = (file: unknown): UiFileConstraints | undefined => {
+	if (!isRecord(file)) {
 		return undefined;
 	}
 
-	const allowed_types = (file.allowed_types ?? [])
-		.map((value) => String(value).toLowerCase())
+	const allowedTypesRaw = Array.isArray(file.allowed_types) ? file.allowed_types : [];
+	const allowedExtensionsRaw = Array.isArray(file.allowed_extensions)
+		? file.allowed_extensions
+		: [];
+	const allowed_types = allowedTypesRaw
+		.map((value: unknown) => String(value).toLowerCase())
 		.filter((value): value is UiFileConstraints['allowed_types'][number] => value === 'audio' || value === 'video' || value === 'script');
-	const allowed_extensions = (file.allowed_extensions ?? [])
-		.map((value) => String(value).trim())
+	const allowed_extensions = allowedExtensionsRaw
+		.map((value: unknown) => String(value).trim())
 		.filter((value) => value.length > 0);
 
 	return {
@@ -615,19 +645,18 @@ const fromRustScriptState = (state: RustScriptState): UiScriptState => ({
 	manifest: fromRustScriptManifest(state.manifest)
 });
 
-const fromRustRangeConstraint = (
-	range: RustUiParamDto['constraints']['range']
-): UiParamConstraints['range'] | undefined => {
+const fromRustRangeConstraint = (range: unknown): UiParamConstraints['range'] | undefined => {
 	if (!range || typeof range !== 'object') {
 		return undefined;
 	}
 
-	const kind = String(range.kind ?? '').toLowerCase();
+	const payload = range as Record<string, unknown>;
+	const kind = String(payload.kind ?? '').toLowerCase();
 	if (kind === 'uniform') {
 		return {
 			kind: 'uniform',
-			min: typeof range.min === 'number' ? range.min : undefined,
-			max: typeof range.max === 'number' ? range.max : undefined
+			min: typeof payload.min === 'number' ? payload.min : undefined,
+			max: typeof payload.max === 'number' ? payload.max : undefined
 		};
 	}
 
@@ -644,29 +673,46 @@ const fromRustRangeConstraint = (
 
 		return {
 			kind: 'components',
-			min: parseList(range.min),
-			max: parseList(range.max)
+			min: parseList(payload.min),
+			max: parseList(payload.max)
 		};
 	}
 
 	return undefined;
 };
 
-const fromRustConstraints = (constraints: RustUiParamDto['constraints']): UiParamConstraints => ({
-	range: fromRustRangeConstraint(constraints.range),
-	step: constraints.step,
-	step_base: constraints.step_base,
-	enum_options: (constraints.enum_options ?? []).map((option) => ({
+const fromRustConstraints = (
+	constraints: RustUiParamDto['constraints'] | undefined,
+	sharedEnumOptions: UiParamConstraints['enum_options'] | undefined
+): UiParamConstraints => {
+	const payload = constraints ?? {};
+	const step =
+		typeof payload.step === 'number' && Number.isFinite(payload.step)
+			? payload.step
+			: undefined;
+	const stepBase =
+		typeof payload.step_base === 'number' && Number.isFinite(payload.step_base)
+			? payload.step_base
+			: undefined;
+	const inlineEnumOptions = (payload.enum_options ?? []).map((option) => ({
 		variant_id: option.variant_id,
 		value: fromRustParamValue(option.value),
 		label: option.label,
 		tags: [...(option.tags ?? [])],
 		ordering: option.ordering
-	})),
-	policy: constraints.policy,
-	reference: fromRustReferenceConstraints(constraints.reference),
-	file: fromRustFileConstraints(constraints.file)
-});
+	}));
+	const enumOptions =
+		inlineEnumOptions.length > 0 ? inlineEnumOptions : [...(sharedEnumOptions ?? [])];
+	return {
+		range: fromRustRangeConstraint(payload.range),
+		step,
+		step_base: stepBase,
+		enum_options: enumOptions,
+		policy: payload.policy === 'Reject' ? 'Reject' : 'ClampAdapt',
+		reference: fromRustReferenceConstraints(payload.reference),
+		file: fromRustFileConstraints(payload.file)
+	};
+};
 
 const isUiParameterControlMode = (value: unknown): value is UiParameterControlMode =>
 	value === 'manual' ||
@@ -855,26 +901,97 @@ const fromRustControlState = (control: unknown): UiParameterControlState => {
 	};
 };
 
-const fromRustParam = (param: RustUiParamDto): UiParamDto => ({
-	value: fromRustParamValue(param.value),
-	default_value: fromRustParamValue(param.default_value ?? param.value),
-	event_behaviour: param.event_behaviour,
-	read_only: param.read_only,
-	constraints: fromRustConstraints(param.constraints),
-	ui_hints: { ...(param.ui_hints ?? {}) },
-	control: fromRustControlState(param.control),
-	reference_allowed_targets: [...(param.reference_allowed_targets ?? [])],
-	reference_visible_nodes: [...(param.reference_visible_nodes ?? [])]
-});
+type EnumOptionsById = Map<string, UiParamConstraints['enum_options']>;
 
-const fromRustNodeData = (data: RustUiNodeDto['data']): UiNodeDataDto => {
+const fromRustSchemaEnumVariants = (
+	variants: RustUiSchemaEnumVariantDefinition[] | undefined
+): UiSnapshot['schema']['enums'][number]['variants'] => {
+	const parsed: UiSnapshot['schema']['enums'][number]['variants'] = [];
+	for (const variant of variants ?? []) {
+		const variantId = typeof variant.variant_id === 'string' ? variant.variant_id : '';
+		if (variantId.length === 0) {
+			continue;
+		}
+		const value =
+			variant.value !== undefined
+				? fromRustParamValue(variant.value)
+				: ({ kind: 'enum', value: variantId } as const);
+		parsed.push({
+			variant_id: variantId,
+			value,
+			label: typeof variant.label === 'string' ? variant.label : variantId,
+			tags: Array.isArray(variant.tags)
+				? variant.tags.filter((tag): tag is string => typeof tag === 'string')
+				: [],
+			ordering:
+				typeof variant.ordering === 'number' && Number.isFinite(variant.ordering)
+					? variant.ordering
+					: undefined
+		});
+	}
+	return parsed;
+};
+
+const parseRustSchemaEnums = (
+	definitions: RustUiSchemaEnumDefinition[] | undefined
+): { enums: UiSnapshot['schema']['enums']; enumOptionsById: EnumOptionsById } => {
+	const enums: UiSnapshot['schema']['enums'] = [];
+	const enumOptionsById: EnumOptionsById = new Map();
+	for (const definition of definitions ?? []) {
+		const enumId = typeof definition.enum_id === 'string' ? definition.enum_id : '';
+		if (enumId.length === 0) {
+			continue;
+		}
+		const variants = fromRustSchemaEnumVariants(definition.variants);
+		if (variants.length === 0) {
+			continue;
+		}
+		enums.push({ enum_id: enumId, variants });
+		enumOptionsById.set(
+			enumId,
+			variants.map((variant) => ({
+				variant_id: variant.variant_id,
+				value: variant.value,
+				label: variant.label,
+				tags: [...variant.tags],
+				ordering: variant.ordering
+			}))
+		);
+	}
+	return { enums, enumOptionsById };
+};
+
+const fromRustParam = (param: RustUiParamDto, enumOptionsById: EnumOptionsById): UiParamDto => {
+	const sharedEnumOptions =
+		typeof param.enum_options_id === 'string'
+			? enumOptionsById.get(param.enum_options_id)
+			: undefined;
+	const value = fromRustParamValue(param.value);
+	return {
+		value,
+		default_value:
+			param.default_value !== undefined ? fromRustParamValue(param.default_value) : value,
+		event_behaviour: param.event_behaviour === 'Append' ? 'Append' : 'Coalesce',
+		read_only: Boolean(param.read_only),
+		constraints: fromRustConstraints(param.constraints, sharedEnumOptions),
+		ui_hints: { ...(param.ui_hints ?? {}) },
+		control: fromRustControlState(param.control),
+		reference_allowed_targets: [...(param.reference_allowed_targets ?? [])],
+		reference_visible_nodes: [...(param.reference_visible_nodes ?? [])]
+	};
+};
+
+const fromRustNodeData = (
+	data: RustUiNodeDto['data'],
+	enumOptionsById: EnumOptionsById
+): UiNodeDataDto => {
 	if (data.kind === 'parameter') {
-		return { kind: 'parameter', param: fromRustParam(data.param) };
+		return { kind: 'parameter', param: fromRustParam(data.param, enumOptionsById) };
 	}
 	return { kind: 'node', node_type: data.node_type };
 };
 
-const fromRustNode = (node: RustUiNodeDto): UiNodeDto => ({
+const fromRustNode = (node: RustUiNodeDto, enumOptionsById: EnumOptionsById): UiNodeDto => ({
 	node_id: node.node_id,
 	uuid: node.uuid,
 	decl_id: node.decl_id,
@@ -892,12 +1009,12 @@ const fromRustNode = (node: RustUiNodeDto): UiNodeDto => ({
 		},
 		tags: [...(node.meta.tags ?? [])]
 	},
-	data: fromRustNodeData(node.data),
+	data: fromRustNodeData(node.data, enumOptionsById),
 	user_role: node.user_role ?? 'regular',
 	user_item_kind: node.user_item_kind ?? node.node_type,
 	accepted_user_item_kinds: [...(node.accepted_user_item_kinds ?? [])],
 	creatable_user_items: [...(node.creatable_user_items ?? [])],
-	children: [...node.children]
+	children: [...(node.children ?? [])]
 });
 
 const fromRustEvent = (event: RustUiEventDto): UiEventDto => {
@@ -971,27 +1088,30 @@ const fromRustEvent = (event: RustUiEventDto): UiEventDto => {
 	};
 };
 
-export const fromRustSnapshot = (snapshot: RustUiSnapshot): UiSnapshot => ({
-	protocol_version: snapshot.protocol_version,
-	scope: fromRustScope(snapshot.scope),
-	at: snapshot.at,
-	nodes: snapshot.nodes.map(fromRustNode),
-	schema: {
-		node_types: snapshot.schema.node_types ?? [],
-		enums: snapshot.schema.enums ?? []
-	},
-	history: snapshot.history ?? {
-		can_undo: false,
-		can_redo: false,
-		undo_len: 0,
-		redo_len: 0,
-		active_edit_session: false
-	},
-	logger: {
-		max_entries: snapshot.logger?.max_entries ?? 0,
-		records: [...(snapshot.logger?.records ?? [])]
-	}
-});
+export const fromRustSnapshot = (snapshot: RustUiSnapshot): UiSnapshot => {
+	const parsedSchemaEnums = parseRustSchemaEnums(snapshot.schema.enums);
+	return {
+		protocol_version: snapshot.protocol_version,
+		scope: fromRustScope(snapshot.scope),
+		at: snapshot.at,
+		nodes: snapshot.nodes.map((node) => fromRustNode(node, parsedSchemaEnums.enumOptionsById)),
+		schema: {
+			node_types: snapshot.schema.node_types ?? [],
+			enums: parsedSchemaEnums.enums
+		},
+		history: snapshot.history ?? {
+			can_undo: false,
+			can_redo: false,
+			undo_len: 0,
+			redo_len: 0,
+			active_edit_session: false
+		},
+		logger: {
+			max_entries: snapshot.logger?.max_entries ?? 0,
+			records: [...(snapshot.logger?.records ?? [])]
+		}
+	};
+};
 
 export const fromRustEventBatch = (batch: RustUiEventBatch): UiEventBatch => ({
 	from: batch.from,
