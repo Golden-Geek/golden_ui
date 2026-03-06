@@ -68,6 +68,7 @@
 		canvas_bg: string;
 		line_idle: string;
 		point_idle: string;
+		fill_rgb: string;
 		grid_line_rgb: string;
 		grid_label_rgb: string;
 		border_unbounded: string;
@@ -201,6 +202,7 @@
 		canvas_bg: '#000000',
 		line_idle: '#9aa1ac',
 		point_idle: '#b1bac9',
+		fill_rgb: '80, 162, 255',
 		grid_line_rgb: '164, 174, 191',
 		grid_label_rgb: '186, 195, 210',
 		border_unbounded: 'rgba(138, 147, 161, 0.46)',
@@ -1027,8 +1029,66 @@
 
 		context.save();
 		context.beginPath();
-		context.rect(plot_left - 2, plot_top - 2, plot_width + 4, plot_height + 4, border_radius);
+		context.roundRect(plot_left - 2, plot_top - 2, plot_width + 4, plot_height + 4, border_radius);
 		context.clip();
+
+		const zero_axis_y = clamp(to_screen_y(0), plot_top, plot_top + plot_height);
+		context.beginPath();
+		let has_area_fill_path = false;
+		let first_area_x = 0;
+		let last_area_x = 0;
+		let last_area_y = 0;
+		for (let index = 0; index < sample_count; index += 1) {
+			const x = sample_screen_x[index];
+			const y = sample_screen_y[index];
+			if (!has_area_fill_path) {
+				context.moveTo(x, y);
+				has_area_fill_path = true;
+				first_area_x = x;
+				last_area_x = x;
+				last_area_y = y;
+				continue;
+			}
+			if (
+				Math.abs(x - last_area_x) < CURVE_DRAW_MIN_DELTA_PX &&
+				Math.abs(y - last_area_y) < CURVE_DRAW_MIN_DELTA_PX
+			) {
+				continue;
+			}
+			context.lineTo(x, y);
+			last_area_x = x;
+			last_area_y = y;
+		}
+		if (has_area_fill_path) {
+			context.lineTo(last_area_x, zero_axis_y);
+			context.lineTo(first_area_x, zero_axis_y);
+			context.closePath();
+			const zero_axis_ratio = clamp(
+				(zero_axis_y - plot_top) / Math.max(CURVE_EPSILON, plot_height),
+				0,
+				1
+			);
+			const axis_blend = 0.05;
+			const area_gradient = context.createLinearGradient(
+				0,
+				plot_top,
+				0,
+				plot_top + plot_height
+			);
+			area_gradient.addColorStop(0, `rgba(${curve_canvas_theme.fill_rgb}, 0.25)`);
+			area_gradient.addColorStop(
+				Math.max(0, zero_axis_ratio - axis_blend),
+				`rgba(${curve_canvas_theme.fill_rgb}, 0.05)`
+			);
+			area_gradient.addColorStop(zero_axis_ratio, `rgba(${curve_canvas_theme.fill_rgb}, 0)`);
+			area_gradient.addColorStop(
+				Math.min(1, zero_axis_ratio + axis_blend),
+				`rgba(${curve_canvas_theme.fill_rgb}, 0.05)`
+			);
+			area_gradient.addColorStop(1, `rgba(${curve_canvas_theme.fill_rgb}, 0.25)`);
+			context.fillStyle = area_gradient;
+			context.fill();
+		}
 
 		context.strokeStyle = curve_canvas_theme.line_idle;
 		context.lineWidth = 1.35;
@@ -1218,7 +1278,7 @@
 				cross_y <= plot_top + plot_height
 			) {
 				context.setLineDash([Math.max(2, rem_base_px * 0.12), Math.max(2, rem_base_px * 0.16)]);
-				context.strokeStyle = 'rgba(217, 231, 255, 0.34)';
+				context.strokeStyle = 'rgba(217, 231, 255, 0)';
 				context.lineWidth = 0.9;
 				context.beginPath();
 				context.moveTo(cross_x, plot_top);
@@ -1343,6 +1403,7 @@
 				canvas_bg: css_var_or(styles, '--gc-color-curve-canvas-bg', '#171b20'),
 				line_idle: css_var_or(styles, '--gc-color-curve-line-idle', '#9aa1ac'),
 				point_idle: css_var_or(styles, '--gc-color-curve-point-idle', '#b1bac9'),
+				fill_rgb: css_var_or(styles, '--gc-color-curve-fill-rgb', '80, 162, 255'),
 				grid_line_rgb: css_var_or(styles, '--gc-color-curve-grid-line-rgb', '164, 174, 191'),
 				grid_label_rgb: css_var_or(styles, '--gc-color-curve-grid-label-rgb', '186, 195, 210'),
 				border_unbounded: css_var_or(
