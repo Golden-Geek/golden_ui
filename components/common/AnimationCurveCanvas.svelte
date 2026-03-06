@@ -90,8 +90,13 @@
 	const GRID_MAX_LINES = 4000;
 	const GRID_MIN_PIXEL_SPACING = 3.5;
 
-	const clamp = (value: number, min: number, max: number): number => Math.min(max, Math.max(min, value));
-	const css_var_or = (styles: CSSStyleDeclaration, variable_name: string, fallback: string): string => {
+	const clamp = (value: number, min: number, max: number): number =>
+		Math.min(max, Math.max(min, value));
+	const css_var_or = (
+		styles: CSSStyleDeclaration,
+		variable_name: string,
+		fallback: string
+	): string => {
 		const value = styles.getPropertyValue(variable_name).trim();
 		return value.length > 0 ? value : fallback;
 	};
@@ -169,7 +174,7 @@
 	let canvas_height_px = $state(1);
 	let bounds_label = $state('Bounds : X [min: -, max: -] | Y [min: -, max: -]');
 	let curve_canvas_theme = $state<CurveCanvasTheme>({
-		canvas_bg: '#171b20',
+		canvas_bg: '#000000',
 		line_idle: '#9aa1ac',
 		point_idle: '#b1bac9',
 		grid_line_rgb: '164, 174, 191',
@@ -571,10 +576,10 @@
 			return;
 		}
 
-		const pad_left = Math.max(width * 0.11, rem_base_px * 3.4);
+		const pad_left = Math.max(width * 0.03, rem_base_px * 1.8);
 		const pad_right = Math.max(width * 0.03, rem_base_px * 0.8);
-		const pad_top = Math.max(height * 0.06, rem_base_px * 0.7);
-		const pad_bottom = Math.max(height * 0.13, rem_base_px * 1.95);
+		const pad_top = Math.max(height * 0.06, rem_base_px * 0.7)
+		const pad_bottom = Math.max(height * 0.03, rem_base_px * 1.3);
 		const plot_width = Math.max(1, width - pad_left - pad_right);
 		const plot_height = Math.max(1, height - pad_top - pad_bottom);
 		const plot_left = pad_left;
@@ -894,11 +899,7 @@
 		};
 
 		const selected_key_id_list =
-			selectedKeyIds.length > 0
-				? selectedKeyIds
-				: selectedKeyId === null
-					? []
-					: [selectedKeyId];
+			selectedKeyIds.length > 0 ? selectedKeyIds : selectedKeyId === null ? [] : [selectedKeyId];
 		const selected_key_set = new Set<NodeId>(selected_key_id_list);
 
 		if (hoverKeyId !== null && !selected_key_set.has(hoverKeyId)) {
@@ -1053,7 +1054,14 @@
 		}
 
 		if (showGrid) {
-			draw_plot_border(context, plot_left, plot_top, plot_width, plot_height, Boolean(active_range));
+			draw_plot_border(
+				context,
+				plot_left,
+				plot_top,
+				plot_width,
+				plot_height,
+				Boolean(active_range)
+			);
 		}
 		const next_bounds_label = `Bounds : X [min: ${format_number(x_min)}, max: ${format_number(x_max)}] | Y [min: ${format_number(y_min)}, max: ${format_number(y_max)}]`;
 		if (bounds_label !== next_bounds_label) {
@@ -1082,9 +1090,7 @@
 			return;
 		}
 		const refresh = (): void => {
-			const parsed = Number.parseFloat(
-				window.getComputedStyle(document.documentElement).fontSize
-			);
+			const parsed = Number.parseFloat(window.getComputedStyle(document.documentElement).fontSize);
 			if (Number.isFinite(parsed) && parsed > 0) {
 				rem_base_px = parsed;
 			}

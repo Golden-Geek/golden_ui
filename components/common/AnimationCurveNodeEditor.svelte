@@ -19,7 +19,6 @@
 		| 'perlinNoise'
 		| 'random'
 		| 'script';
-	type CurveCoordinateSpace = 'relative' | 'absolute';
 	type CurveStepMode = 'stepSize' | 'numSteps';
 	type CurvePhaseMode = 'frequency' | 'numPhases';
 	type CurveShape = 'sine' | 'triangle' | 'saw' | 'reverseSaw' | 'square';
@@ -81,7 +80,6 @@
 		| { kind: 'steps'; steps: number }
 		| {
 				kind: 'shape';
-				coordinate_space: CurveCoordinateSpace;
 				shape: CurveShape;
 				amplitude: number;
 				phase_cycles: number;
@@ -160,7 +158,6 @@
 		start_key_id: NodeId;
 		end_key_id: NodeId;
 		key_id: NodeId;
-		coordinate_space: CurveCoordinateSpace;
 		start_position: number;
 		start_value: number;
 		end_position: number;
@@ -184,7 +181,6 @@
 		anchor_value: number;
 		handle_position: number;
 		handle_value: number;
-		coordinate_space: CurveCoordinateSpace;
 		segment_start_position: number;
 		segment_end_position: number;
 		span: number;
@@ -211,7 +207,20 @@
 		known_key_ids: Set<NodeId>;
 		position: number;
 		value: number;
+		split_easing: PendingSplitEasing | null;
 		edit_session: UiEditSession | null;
+	}
+
+	interface PendingSplitEasing {
+		source_start_key_id: NodeId;
+		source_end_key_id: NodeId;
+		left_param_values: Record<string, ParamValue>;
+		right_param_values: Record<string, ParamValue>;
+	}
+
+	interface AddKeyOptions {
+		preserve_curve_shape?: boolean;
+		preferred_owner_key_id?: NodeId | null;
 	}
 
 	interface ActiveKeyDrag {
@@ -220,6 +229,28 @@
 		anchor_start_position: number;
 		anchor_start_value: number;
 		origins: Array<{ key_id: NodeId; position: number; value: number }>;
+		position_delta_constraint: KeyDragPositionConstraint | null;
+		bezier_alignment_constraints: KeyDragBezierAlignmentConstraint[];
+		touched_bezier_key_ids: Set<NodeId>;
+	}
+
+	interface KeyDragPositionConstraint {
+		min_delta_position: number;
+		max_delta_position: number;
+	}
+
+	interface KeyDragBezierAlignmentConstraint {
+		anchor_key_id: NodeId;
+		previous_key_id: NodeId;
+		next_key_id: NodeId;
+		previous_owner_key_id: NodeId;
+		anchor_owner_key_id: NodeId;
+		left_span: number;
+		right_span: number;
+		in_vector_x: number;
+		in_vector_y: number;
+		out_vector_x: number;
+		out_vector_y: number;
 	}
 
 	interface ActiveBezierHandleDrag {
@@ -253,6 +284,7 @@
 		showGrid = true,
 		showNumbers = true,
 		showBounds = true,
+		constrainKeysToNeighbors = true,
 		canvasHeight = 'min(26rem, 38vh)'
 	}: {
 		curveNode: UiNodeDto;
@@ -263,6 +295,7 @@
 		showGrid?: boolean;
 		showNumbers?: boolean;
 		showBounds?: boolean;
+		constrainKeysToNeighbors?: boolean;
 		canvasHeight?: string;
 	} = $props();
 
@@ -279,7 +312,6 @@
 	const DECL_RANGE_X = 'x';
 	const DECL_RANGE_Y = 'y';
 	const DECL_KIND = 'kind';
-	const DECL_COORDINATE_SPACE = 'coordinate_space';
 	const DECL_OUT_POSITION = 'out_position';
 	const DECL_OUT_VALUE = 'out_value';
 	const DECL_IN_POSITION = 'in_position';
@@ -385,8 +417,6 @@
 		}
 		return 'linear';
 	};
-	const normalize_coordinate_space = (value: string): CurveCoordinateSpace =>
-		value.trim().toLowerCase() === 'absolute' ? 'absolute' : 'relative';
 	const normalize_step_mode = (value: string): CurveStepMode =>
 		value.trim().toLowerCase() === 'stepsize' ? 'stepSize' : 'numSteps';
 	const normalize_shape = (value: string): CurveShape => {
@@ -604,37 +634,18 @@
 			if (easing_kind === 'hold') {
 				easing = { kind: 'hold' };
 			} else if (easing_kind === 'bezier') {
-				const coordinate_space = normalize_coordinate_space(
-					param_string_value(params[DECL_COORDINATE_SPACE]?.value, 'relative')
-				);
 				const out_position = param_number_value(params[DECL_OUT_POSITION]?.value, 1 / 3);
 				const out_value = param_number_value(params[DECL_OUT_VALUE]?.value, 1 / 3);
 				const in_position = param_number_value(params[DECL_IN_POSITION]?.value, -1 / 3);
 				const in_value = param_number_value(params[DECL_IN_VALUE]?.value, -1 / 3);
 
 				const value_span = end.value - start.value;
-				let p1x = 0;
-				let p2x = 0;
-				let p1y = 0;
-				let p2y = 0;
-				if (coordinate_space === 'relative') {
-					p1x = finite_or(start.position + out_position * span, start.position + span / 3);
-					p2x = finite_or(end.position + in_position * span, start.position + (span * 2) / 3);
-					p1y = finite_or(start.value + out_value, start.value + value_span / 3);
-					p2y = finite_or(end.value + in_value, start.value + (value_span * 2) / 3);
-				} else {
-					p1x = finite_or(out_position, start.position + span / 3);
-					p2x = finite_or(in_position, start.position + (span * 2) / 3);
-					p1y = finite_or(start.value + out_value, start.value + value_span / 3);
-					p2y = finite_or(end.value + in_value, start.value + (value_span * 2) / 3);
-				}
+				let p1x = finite_or(start.position + out_position * span, start.position + span / 3);
+				let p2x = finite_or(end.position + in_position * span, start.position + (span * 2) / 3);
+				const p1y = finite_or(start.value + out_value, start.value + value_span / 3);
+				const p2y = finite_or(end.value + in_value, start.value + (value_span * 2) / 3);
 				p1x = clamp(p1x, start.position, end.position);
 				p2x = clamp(p2x, start.position, end.position);
-				if (p2x < p1x) {
-					const temporary = p1x;
-					p1x = p2x;
-					p2x = temporary;
-				}
 				easing = {
 					kind: 'bezier',
 					x: cubic_from_points(start.position, p1x, p2x, end.position),
@@ -659,9 +670,6 @@
 					steps
 				};
 			} else if (easing_kind === 'shape') {
-				const coordinate_space = normalize_coordinate_space(
-					param_string_value(params[DECL_COORDINATE_SPACE]?.value, 'relative')
-				);
 				const phase_mode = normalize_phase_mode(
 					param_string_value(params[DECL_PHASE_MODE]?.value, 'frequency')
 				);
@@ -672,7 +680,6 @@
 				const phase_cycles = phase_mode === 'frequency' ? frequency * Math.abs(span) : num_phases;
 				easing = {
 					kind: 'shape',
-					coordinate_space,
 					shape,
 					amplitude,
 					phase_cycles,
@@ -758,6 +765,40 @@
 		}
 		t = (low + high) * 0.5;
 		return sample_cubic(y, t);
+	};
+
+	const solve_bezier_t_for_position = (
+		position: number,
+		x: CubicPolynomial,
+		start_position: number,
+		inv_span: number
+	): number => {
+		let t = clamp((position - start_position) * inv_span, 0, 1);
+		for (let iteration = 0; iteration < 6; iteration += 1) {
+			const sampled_x = sample_cubic(x, t);
+			const delta = sampled_x - position;
+			if (Math.abs(delta) <= 1e-9) {
+				break;
+			}
+			const derivative = derivative_cubic(x, t);
+			if (Math.abs(derivative) <= CURVE_EPSILON) {
+				break;
+			}
+			t = clamp(t - delta / derivative, 0, 1);
+		}
+
+		let low = 0;
+		let high = 1;
+		for (let iteration = 0; iteration < 14; iteration += 1) {
+			const midpoint = (low + high) * 0.5;
+			const sampled_x = sample_cubic(x, midpoint);
+			if (sampled_x <= position) {
+				low = midpoint;
+			} else {
+				high = midpoint;
+			}
+		}
+		return clamp((low + high) * 0.5, 0, 1);
 	};
 
 	const sample_segment = (segment: CompiledCurveSegment, position: number): number => {
@@ -853,22 +894,69 @@
 		return sample_segment(segments[segment_index], position);
 	};
 
-	const set_numeric_param = async (ref: ParamNodeRef | undefined, value: number): Promise<void> => {
+	const coerce_param_value_for_ref = (ref: ParamNodeRef, value: ParamValue): ParamValue | null => {
+		if (ref.value.kind === 'int') {
+			if (value.kind === 'int') {
+				return { kind: 'int', value: Math.round(value.value) };
+			}
+			if (value.kind === 'float') {
+				return { kind: 'int', value: Math.round(value.value) };
+			}
+			return null;
+		}
+		if (ref.value.kind === 'float') {
+			if (value.kind === 'int' || value.kind === 'float') {
+				return { kind: 'float', value: value.value };
+			}
+			return null;
+		}
+		if (ref.value.kind === 'enum') {
+			if (value.kind === 'enum' || value.kind === 'str') {
+				return { kind: 'enum', value: value.value };
+			}
+			return null;
+		}
+		if (ref.value.kind === 'str') {
+			if (value.kind === 'enum' || value.kind === 'str') {
+				return { kind: 'str', value: value.value };
+			}
+			return null;
+		}
+		if (ref.value.kind === value.kind) {
+			return value;
+		}
+		return null;
+	};
+
+	const set_param_value = async (ref: ParamNodeRef | undefined, value: ParamValue): Promise<void> => {
 		const operation = (async (): Promise<void> => {
-			if (!ref || !Number.isFinite(value)) {
+			if (!ref) {
 				return;
 			}
-			if (ref.value.kind === 'int') {
-				await sendSetParamIntent(ref.node_id, { kind: 'int', value: Math.round(value) }, 'Append');
+			const coerced = coerce_param_value_for_ref(ref, value);
+			if (!coerced) {
 				return;
 			}
-			await sendSetParamIntent(ref.node_id, { kind: 'float', value }, 'Append');
+			if (
+				(coerced.kind === 'float' || coerced.kind === 'int') &&
+				!Number.isFinite(coerced.value)
+			) {
+				return;
+			}
+			await sendSetParamIntent(ref.node_id, coerced, 'Append');
 		})();
 		pending_param_write_promises.add(operation);
 		void operation.finally(() => {
 			pending_param_write_promises.delete(operation);
 		});
 		await operation;
+	};
+
+	const set_numeric_param = async (ref: ParamNodeRef | undefined, value: number): Promise<void> => {
+		if (!Number.isFinite(value)) {
+			return;
+		}
+		await set_param_value(ref, { kind: 'float', value });
 	};
 
 	const clamp_curve_position_to_active_range = (position: number): number => {
@@ -969,6 +1057,165 @@
 		const next = new Map(easing_drag_preview_by_key_id);
 		next.delete(key_id);
 		easing_drag_preview_by_key_id = next;
+	};
+
+	const HANDLE_ALIGNMENT_COSINE_TOLERANCE = 0.035;
+	const KEY_NEIGHBOR_POSITION_GAP = 1e-8;
+
+	const build_key_drag_position_delta_constraint = (
+		origins: Array<{ key_id: NodeId; position: number; value: number }>
+	): KeyDragPositionConstraint | null => {
+		if (origins.length === 0 || parsed_keys.length === 0) {
+			return null;
+		}
+
+		const selected_key_set = new Set<NodeId>(origins.map((entry) => entry.key_id));
+		const key_index_by_id = new Map<NodeId, number>();
+		for (let index = 0; index < parsed_keys.length; index += 1) {
+			key_index_by_id.set(parsed_keys[index].node_id, index);
+		}
+
+		let min_delta_position = Number.NEGATIVE_INFINITY;
+		let max_delta_position = Number.POSITIVE_INFINITY;
+		let has_constraint = false;
+		const active_range = active_curve_range_constraint;
+
+		for (const origin of origins) {
+			const index = key_index_by_id.get(origin.key_id);
+			if (index === undefined) {
+				continue;
+			}
+			const previous = index > 0 ? parsed_keys[index - 1] : null;
+			if (previous && !selected_key_set.has(previous.node_id)) {
+				min_delta_position = Math.max(
+					min_delta_position,
+					previous.position + KEY_NEIGHBOR_POSITION_GAP - origin.position
+				);
+				has_constraint = true;
+			}
+			const next = index + 1 < parsed_keys.length ? parsed_keys[index + 1] : null;
+			if (next && !selected_key_set.has(next.node_id)) {
+				max_delta_position = Math.min(
+					max_delta_position,
+					next.position - KEY_NEIGHBOR_POSITION_GAP - origin.position
+				);
+				has_constraint = true;
+			}
+
+			if (active_range) {
+				min_delta_position = Math.max(
+					min_delta_position,
+					active_range.x_min - origin.position
+				);
+				max_delta_position = Math.min(
+					max_delta_position,
+					active_range.x_max - origin.position
+				);
+				has_constraint = true;
+			}
+		}
+
+		if (!has_constraint) {
+			return null;
+		}
+
+		if (min_delta_position > max_delta_position) {
+			const locked_delta =
+				min_delta_position > 0 && max_delta_position < 0
+					? 0
+					: Math.abs(min_delta_position) <= Math.abs(max_delta_position)
+						? min_delta_position
+						: max_delta_position;
+			return {
+				min_delta_position: locked_delta,
+				max_delta_position: locked_delta
+			};
+		}
+
+		return {
+			min_delta_position,
+			max_delta_position
+		};
+	};
+
+	const clamp_key_drag_position_delta = (
+		drag: ActiveKeyDrag,
+		delta_position: number
+	): number => {
+		const constraint = drag.position_delta_constraint;
+		if (!constraint) {
+			return delta_position;
+		}
+		return clamp(
+			delta_position,
+			constraint.min_delta_position,
+			constraint.max_delta_position
+		);
+	};
+
+	const build_key_drag_bezier_alignment_constraints = (
+		drag_key_ids: NodeId[]
+	): KeyDragBezierAlignmentConstraint[] => {
+		if (drag_key_ids.length === 0 || parsed_keys.length < 3) {
+			return [];
+		}
+		const index_by_key_id = new Map<NodeId, number>();
+		for (let index = 0; index < parsed_keys.length; index += 1) {
+			index_by_key_id.set(parsed_keys[index].node_id, index);
+		}
+
+		const constraints: KeyDragBezierAlignmentConstraint[] = [];
+		const unique_drag_key_ids = new Set(drag_key_ids);
+		for (const key_id of unique_drag_key_ids) {
+			const index = index_by_key_id.get(key_id);
+			if (index === undefined || index <= 0 || index >= parsed_keys.length - 1) {
+				continue;
+			}
+			const previous = parsed_keys[index - 1];
+			const anchor = parsed_keys[index];
+			const next = parsed_keys[index + 1];
+			const left_segment = resolve_bezier_handle_segment(previous, anchor);
+			const right_segment = resolve_bezier_handle_segment(anchor, next);
+			if (!left_segment || !right_segment) {
+				continue;
+			}
+
+			const in_vector_x = left_segment.in_curve_position - anchor.position;
+			const in_vector_y = left_segment.in_curve_value - anchor.value;
+			const out_vector_x = right_segment.out_curve_position - anchor.position;
+			const out_vector_y = right_segment.out_curve_value - anchor.value;
+			const in_length = Math.hypot(in_vector_x, in_vector_y);
+			const out_length = Math.hypot(out_vector_x, out_vector_y);
+			const denominator = in_length * out_length;
+			if (denominator <= CURVE_EPSILON) {
+				continue;
+			}
+
+			const cross = in_vector_x * out_vector_y - in_vector_y * out_vector_x;
+			const dot = in_vector_x * out_vector_x + in_vector_y * out_vector_y;
+			if (dot >= 0) {
+				continue;
+			}
+			if (Math.abs(cross) / denominator > HANDLE_ALIGNMENT_COSINE_TOLERANCE) {
+				continue;
+			}
+
+			constraints.push({
+				anchor_key_id: anchor.node_id,
+				previous_key_id: previous.node_id,
+				next_key_id: next.node_id,
+				previous_owner_key_id: left_segment.key_id,
+				anchor_owner_key_id: right_segment.key_id,
+				left_span: left_segment.span,
+				right_span: right_segment.span,
+				in_vector_x,
+				in_vector_y,
+				out_vector_x,
+				out_vector_y
+			});
+		}
+
+		return constraints;
 	};
 
 	const override_numeric_param_ref = (
@@ -1124,35 +1371,21 @@
 			return null;
 		}
 		const params = easing.params;
-		const coordinate_space = normalize_coordinate_space(
-			param_string_value(params[DECL_COORDINATE_SPACE]?.value, 'relative')
-		);
 		const out_position = param_number_value(params[DECL_OUT_POSITION]?.value, 1 / 3);
 		const out_value = param_number_value(params[DECL_OUT_VALUE]?.value, 1 / 3);
 		const in_position = param_number_value(params[DECL_IN_POSITION]?.value, -1 / 3);
 		const in_value = param_number_value(params[DECL_IN_VALUE]?.value, -1 / 3);
 
-		let out_curve_position = 0;
-		let out_curve_value = 0;
-		let in_curve_position = 0;
-		let in_curve_value = 0;
-		if (coordinate_space === 'relative') {
-			out_curve_position = finite_or(
-				start.position + out_position * span,
-				start.position + span / 3
-			);
-			out_curve_value = finite_or(start.value + out_value, start.value + 1 / 3);
-			in_curve_position = finite_or(
-				end.position + in_position * span,
-				start.position + (span * 2) / 3
-			);
-			in_curve_value = finite_or(end.value + in_value, end.value - 1 / 3);
-		} else {
-			out_curve_position = finite_or(out_position, start.position + span / 3);
-			out_curve_value = finite_or(start.value + out_value, start.value + 1 / 3);
-			in_curve_position = finite_or(in_position, start.position + (span * 2) / 3);
-			in_curve_value = finite_or(end.value + in_value, end.value - 1 / 3);
-		}
+		let out_curve_position = finite_or(
+			start.position + out_position * span,
+			start.position + span / 3
+		);
+		let out_curve_value = finite_or(start.value + out_value, start.value + 1 / 3);
+		let in_curve_position = finite_or(
+			end.position + in_position * span,
+			start.position + (span * 2) / 3
+		);
+		let in_curve_value = finite_or(end.value + in_value, end.value - 1 / 3);
 
 		out_curve_position = clamp(out_curve_position, start.position, end.position);
 		in_curve_position = clamp(in_curve_position, start.position, end.position);
@@ -1161,7 +1394,6 @@
 			start_key_id: start.node_id,
 			end_key_id: end.node_id,
 			key_id: start.node_id,
-			coordinate_space,
 			start_position: start.position,
 			start_value: start.value,
 			end_position: end.position,
@@ -1249,7 +1481,6 @@
 					anchor_value: segment.start_value,
 					handle_position: segment.out_curve_position,
 					handle_value: segment.out_curve_value,
-					coordinate_space: segment.coordinate_space,
 					segment_start_position: segment.start_position,
 					segment_end_position: segment.end_position,
 					span: segment.span,
@@ -1264,7 +1495,6 @@
 					anchor_value: segment.end_value,
 					handle_position: segment.in_curve_position,
 					handle_value: segment.in_curve_value,
-					coordinate_space: segment.coordinate_space,
 					segment_start_position: segment.start_position,
 					segment_end_position: segment.end_position,
 					span: segment.span,
@@ -1410,6 +1640,384 @@
 	);
 	let compiled_curve = $derived.by(() => compile_curve(parsed_keys));
 
+	const enum_param_value = (value: string): ParamValue => ({ kind: 'enum', value });
+	const float_param_value = (value: number): ParamValue => ({ kind: 'float', value });
+	const str_param_value = (value: string): ParamValue => ({ kind: 'str', value });
+	const set_split_numeric_param = (
+		target: Record<string, ParamValue>,
+		decl_id: string,
+		value: number
+	): void => {
+		if (!Number.isFinite(value)) {
+			return;
+		}
+		target[decl_id] = float_param_value(value);
+	};
+
+	const find_split_source_segment = (
+		position: number,
+		preferred_owner_key_id: NodeId | null
+	): { start: ParsedCurveKey; end: ParsedCurveKey } | null => {
+		if (!Number.isFinite(position) || parsed_keys.length < 2) {
+			return null;
+		}
+		let fallback: { start: ParsedCurveKey; end: ParsedCurveKey } | null = null;
+		for (let index = 0; index + 1 < parsed_keys.length; index += 1) {
+			const start = parsed_keys[index];
+			const end = parsed_keys[index + 1];
+			const span = end.position - start.position;
+			if (!(span > CURVE_EPSILON)) {
+				continue;
+			}
+			if (
+				position <= start.position + CURVE_EPSILON ||
+				position >= end.position - CURVE_EPSILON
+			) {
+				continue;
+			}
+			const candidate = { start, end };
+			if (preferred_owner_key_id !== null && start.node_id === preferred_owner_key_id) {
+				return candidate;
+			}
+			if (!fallback) {
+				fallback = candidate;
+			}
+		}
+		return fallback;
+	};
+
+	const build_split_easing = (
+		start: ParsedCurveKey,
+		end: ParsedCurveKey,
+		split_position: number,
+		split_value: number
+	): PendingSplitEasing | null => {
+		const span = end.position - start.position;
+		if (!(span > CURVE_EPSILON)) {
+			return null;
+		}
+		const ratio = clamp((split_position - start.position) / span, 0, 1);
+		if (ratio <= CURVE_EPSILON || ratio >= 1 - CURVE_EPSILON) {
+			return null;
+		}
+
+		const easing_kind = start.easing?.kind ?? 'linear';
+		const params = start.easing?.params ?? {};
+		const left_param_values: Record<string, ParamValue> = {
+			[DECL_KIND]: enum_param_value(easing_kind)
+		};
+		const right_param_values: Record<string, ParamValue> = {
+			[DECL_KIND]: enum_param_value(easing_kind)
+		};
+
+		if (easing_kind === 'bezier') {
+			const segment = resolve_bezier_handle_segment(start, end);
+			if (!segment) {
+				return null;
+			}
+			const left_span = split_position - start.position;
+			const right_span = end.position - split_position;
+			if (!(left_span > CURVE_EPSILON) || !(right_span > CURVE_EPSILON)) {
+				return null;
+			}
+			const x_curve = cubic_from_points(
+				start.position,
+				segment.out_curve_position,
+				segment.in_curve_position,
+				end.position
+			);
+			const t = solve_bezier_t_for_position(split_position, x_curve, start.position, 1 / span);
+			const mix = (left: number, right: number): number => left + (right - left) * t;
+
+			const point_a_x = mix(start.position, segment.out_curve_position);
+			const point_a_y = mix(start.value, segment.out_curve_value);
+			const point_b_x = mix(segment.out_curve_position, segment.in_curve_position);
+			const point_b_y = mix(segment.out_curve_value, segment.in_curve_value);
+			const point_c_x = mix(segment.in_curve_position, end.position);
+			const point_c_y = mix(segment.in_curve_value, end.value);
+			const point_d_x = mix(point_a_x, point_b_x);
+			const point_d_y = mix(point_a_y, point_b_y);
+			const point_e_x = mix(point_b_x, point_c_x);
+			const point_e_y = mix(point_b_y, point_c_y);
+			const left_out_position = (point_a_x - start.position) / left_span;
+			const left_in_position = (point_d_x - split_position) / left_span;
+			const right_out_position = (point_e_x - split_position) / right_span;
+			const right_in_position = (point_c_x - end.position) / right_span;
+
+			set_split_numeric_param(left_param_values, DECL_OUT_POSITION, left_out_position);
+			set_split_numeric_param(left_param_values, DECL_OUT_VALUE, point_a_y - start.value);
+			set_split_numeric_param(left_param_values, DECL_IN_POSITION, left_in_position);
+			set_split_numeric_param(left_param_values, DECL_IN_VALUE, point_d_y - split_value);
+			set_split_numeric_param(right_param_values, DECL_OUT_POSITION, right_out_position);
+			set_split_numeric_param(right_param_values, DECL_OUT_VALUE, point_e_y - split_value);
+			set_split_numeric_param(right_param_values, DECL_IN_POSITION, right_in_position);
+			set_split_numeric_param(right_param_values, DECL_IN_VALUE, point_c_y - end.value);
+			return {
+				source_start_key_id: start.node_id,
+				source_end_key_id: end.node_id,
+				left_param_values,
+				right_param_values
+			};
+		}
+
+		if (easing_kind === 'steps') {
+			const step_mode = normalize_step_mode(
+				param_string_value(params[DECL_STEP_MODE]?.value, 'numSteps')
+			);
+			left_param_values[DECL_STEP_MODE] = enum_param_value(step_mode);
+			right_param_values[DECL_STEP_MODE] = enum_param_value(step_mode);
+			if (step_mode === 'stepSize') {
+				const step_size = Math.max(
+					CURVE_EPSILON,
+					Math.abs(param_number_value(params[DECL_STEP_SIZE]?.value, 0.1))
+				);
+				set_split_numeric_param(left_param_values, DECL_STEP_SIZE, step_size);
+				set_split_numeric_param(right_param_values, DECL_STEP_SIZE, step_size);
+			} else {
+				const total_steps = Math.max(1, Math.round(param_number_value(params[DECL_NUM_STEPS]?.value, 8)));
+				let left_steps = total_steps;
+				let right_steps = total_steps;
+				if (total_steps > 1) {
+					left_steps = clamp(Math.round(total_steps * ratio), 1, total_steps - 1);
+					right_steps = Math.max(1, total_steps - left_steps);
+				}
+				set_split_numeric_param(left_param_values, DECL_NUM_STEPS, left_steps);
+				set_split_numeric_param(right_param_values, DECL_NUM_STEPS, right_steps);
+			}
+			return {
+				source_start_key_id: start.node_id,
+				source_end_key_id: end.node_id,
+				left_param_values,
+				right_param_values
+			};
+		}
+
+		if (easing_kind === 'shape') {
+			const shape = normalize_shape(param_string_value(params[DECL_SHAPE]?.value, 'sine'));
+			const phase_mode = normalize_phase_mode(
+				param_string_value(params[DECL_PHASE_MODE]?.value, 'frequency')
+			);
+			left_param_values[DECL_SHAPE] = enum_param_value(shape);
+			right_param_values[DECL_SHAPE] = enum_param_value(shape);
+			left_param_values[DECL_PHASE_MODE] = enum_param_value(phase_mode);
+			right_param_values[DECL_PHASE_MODE] = enum_param_value(phase_mode);
+			set_split_numeric_param(
+				left_param_values,
+				DECL_AMPLITUDE,
+				param_number_value(params[DECL_AMPLITUDE]?.value, 1)
+			);
+			set_split_numeric_param(
+				right_param_values,
+				DECL_AMPLITUDE,
+				param_number_value(params[DECL_AMPLITUDE]?.value, 1)
+			);
+			set_split_numeric_param(
+				left_param_values,
+				DECL_FADE_IN,
+				Math.max(0, param_number_value(params[DECL_FADE_IN]?.value, 0))
+			);
+			set_split_numeric_param(
+				right_param_values,
+				DECL_FADE_IN,
+				Math.max(0, param_number_value(params[DECL_FADE_IN]?.value, 0))
+			);
+			set_split_numeric_param(
+				left_param_values,
+				DECL_FADE_OUT,
+				Math.max(0, param_number_value(params[DECL_FADE_OUT]?.value, 0))
+			);
+			set_split_numeric_param(
+				right_param_values,
+				DECL_FADE_OUT,
+				Math.max(0, param_number_value(params[DECL_FADE_OUT]?.value, 0))
+			);
+			if (phase_mode === 'frequency') {
+				const frequency = Math.abs(param_number_value(params[DECL_FREQUENCY]?.value, 1));
+				set_split_numeric_param(left_param_values, DECL_FREQUENCY, frequency);
+				set_split_numeric_param(right_param_values, DECL_FREQUENCY, frequency);
+			} else {
+				const num_phases = Math.abs(param_number_value(params[DECL_NUM_PHASES]?.value, 1));
+				const left_num_phases = num_phases * ratio;
+				const right_num_phases = Math.max(0, num_phases - left_num_phases);
+				set_split_numeric_param(left_param_values, DECL_NUM_PHASES, left_num_phases);
+				set_split_numeric_param(right_param_values, DECL_NUM_PHASES, right_num_phases);
+			}
+			return {
+				source_start_key_id: start.node_id,
+				source_end_key_id: end.node_id,
+				left_param_values,
+				right_param_values
+			};
+		}
+
+		if (easing_kind === 'perlinNoise') {
+			set_split_numeric_param(
+				left_param_values,
+				DECL_FREQUENCY,
+				Math.abs(param_number_value(params[DECL_FREQUENCY]?.value, 1))
+			);
+			set_split_numeric_param(
+				right_param_values,
+				DECL_FREQUENCY,
+				Math.abs(param_number_value(params[DECL_FREQUENCY]?.value, 1))
+			);
+			set_split_numeric_param(
+				left_param_values,
+				DECL_AMPLITUDE,
+				param_number_value(params[DECL_AMPLITUDE]?.value, 1)
+			);
+			set_split_numeric_param(
+				right_param_values,
+				DECL_AMPLITUDE,
+				param_number_value(params[DECL_AMPLITUDE]?.value, 1)
+			);
+			set_split_numeric_param(
+				left_param_values,
+				DECL_OCTAVES,
+				clamp(param_number_value(params[DECL_OCTAVES]?.value, 4), 1, MAX_PERLIN_OCTAVES)
+			);
+			set_split_numeric_param(
+				right_param_values,
+				DECL_OCTAVES,
+				clamp(param_number_value(params[DECL_OCTAVES]?.value, 4), 1, MAX_PERLIN_OCTAVES)
+			);
+			set_split_numeric_param(
+				left_param_values,
+				DECL_FADE_IN,
+				Math.max(0, param_number_value(params[DECL_FADE_IN]?.value, 0))
+			);
+			set_split_numeric_param(
+				right_param_values,
+				DECL_FADE_IN,
+				Math.max(0, param_number_value(params[DECL_FADE_IN]?.value, 0))
+			);
+			set_split_numeric_param(
+				left_param_values,
+				DECL_FADE_OUT,
+				Math.max(0, param_number_value(params[DECL_FADE_OUT]?.value, 0))
+			);
+			set_split_numeric_param(
+				right_param_values,
+				DECL_FADE_OUT,
+				Math.max(0, param_number_value(params[DECL_FADE_OUT]?.value, 0))
+			);
+			set_split_numeric_param(
+				left_param_values,
+				DECL_PHASE,
+				param_number_value(params[DECL_PHASE]?.value, 0)
+			);
+			set_split_numeric_param(
+				right_param_values,
+				DECL_PHASE,
+				param_number_value(params[DECL_PHASE]?.value, 0)
+			);
+			set_split_numeric_param(
+				left_param_values,
+				DECL_SEED,
+				Math.round(param_number_value(params[DECL_SEED]?.value, 0))
+			);
+			set_split_numeric_param(
+				right_param_values,
+				DECL_SEED,
+				Math.round(param_number_value(params[DECL_SEED]?.value, 0))
+			);
+			return {
+				source_start_key_id: start.node_id,
+				source_end_key_id: end.node_id,
+				left_param_values,
+				right_param_values
+			};
+		}
+
+		if (easing_kind === 'random') {
+			set_split_numeric_param(
+				left_param_values,
+				DECL_FREQUENCY,
+				Math.abs(param_number_value(params[DECL_FREQUENCY]?.value, 6))
+			);
+			set_split_numeric_param(
+				right_param_values,
+				DECL_FREQUENCY,
+				Math.abs(param_number_value(params[DECL_FREQUENCY]?.value, 6))
+			);
+			set_split_numeric_param(
+				left_param_values,
+				DECL_FADE_IN,
+				Math.max(0, param_number_value(params[DECL_FADE_IN]?.value, 0))
+			);
+			set_split_numeric_param(
+				right_param_values,
+				DECL_FADE_IN,
+				Math.max(0, param_number_value(params[DECL_FADE_IN]?.value, 0))
+			);
+			set_split_numeric_param(
+				left_param_values,
+				DECL_FADE_OUT,
+				Math.max(0, param_number_value(params[DECL_FADE_OUT]?.value, 0))
+			);
+			set_split_numeric_param(
+				right_param_values,
+				DECL_FADE_OUT,
+				Math.max(0, param_number_value(params[DECL_FADE_OUT]?.value, 0))
+			);
+			set_split_numeric_param(
+				left_param_values,
+				DECL_SEED,
+				Math.round(param_number_value(params[DECL_SEED]?.value, 0))
+			);
+			set_split_numeric_param(
+				right_param_values,
+				DECL_SEED,
+				Math.round(param_number_value(params[DECL_SEED]?.value, 0))
+			);
+			return {
+				source_start_key_id: start.node_id,
+				source_end_key_id: end.node_id,
+				left_param_values,
+				right_param_values
+			};
+		}
+
+		if (easing_kind === 'script') {
+			const source = param_string_value(params[DECL_SCRIPT_SOURCE]?.value, '');
+			left_param_values[DECL_SCRIPT_SOURCE] = str_param_value(source);
+			right_param_values[DECL_SCRIPT_SOURCE] = str_param_value(source);
+			return {
+				source_start_key_id: start.node_id,
+				source_end_key_id: end.node_id,
+				left_param_values,
+				right_param_values
+			};
+		}
+
+		return {
+			source_start_key_id: start.node_id,
+			source_end_key_id: end.node_id,
+			left_param_values,
+			right_param_values
+		};
+	};
+
+	const apply_easing_param_values = async (
+		key: ParsedCurveKey | undefined,
+		values: Record<string, ParamValue>
+	): Promise<void> => {
+		if (!key?.easing || Object.keys(values).length === 0) {
+			return;
+		}
+		const params = key.easing.params;
+		const next_kind = values[DECL_KIND];
+		if (next_kind) {
+			await set_param_value(params[DECL_KIND], next_kind);
+		}
+		for (const [decl_id, value] of Object.entries(values)) {
+			if (decl_id === DECL_KIND) {
+				continue;
+			}
+			await set_param_value(params[decl_id], value);
+		}
+	};
+
 	$effect(() => {
 		if (typeof window === 'undefined') {
 			return;
@@ -1482,6 +2090,13 @@
 				try {
 					await set_numeric_param(key.position_param, pending.position);
 					await set_numeric_param(key.value_param, pending.value);
+					if (pending.split_easing) {
+						await apply_easing_param_values(
+							parsed_key_by_id.get(pending.split_easing.source_start_key_id),
+							pending.split_easing.left_param_values
+						);
+						await apply_easing_param_values(key, pending.split_easing.right_param_values);
+					}
 				} finally {
 					clear_drag_preview(key.node_id);
 					if (pending.edit_session) {
@@ -1852,38 +2467,10 @@
 		};
 	};
 
-	const bezier_preview_handle_curve_x = (
-		control: BezierHandleControl,
-		preview: BezierEasingPreview,
-		kind: BezierHandleKind
-	): number => {
-		const raw =
-			kind === 'out'
-				? control.coordinate_space === 'relative'
-					? control.segment_start_position + preview.out_position * control.span
-					: preview.out_position
-				: control.coordinate_space === 'relative'
-					? control.segment_end_position + preview.in_position * control.span
-					: preview.in_position;
-		return clamp(raw, control.segment_start_position, control.segment_end_position);
-	};
-
 	const clamp_bezier_handle_x = (
 		control: BezierHandleControl,
-		preview: BezierEasingPreview,
-		kind: BezierHandleKind,
 		position: number
-	): number => {
-		let clamped = clamp(position, control.segment_start_position, control.segment_end_position);
-		const out_x = bezier_preview_handle_curve_x(control, preview, 'out');
-		const in_x = bezier_preview_handle_curve_x(control, preview, 'in');
-		if (kind === 'out') {
-			clamped = Math.min(clamped, in_x);
-		} else {
-			clamped = Math.max(clamped, out_x);
-		}
-		return clamped;
-	};
+	): number => clamp(position, control.segment_start_position, control.segment_end_position);
 
 	const with_bezier_preview_handle = (
 		control: BezierHandleControl,
@@ -1895,19 +2482,120 @@
 		const span = Math.max(CURVE_EPSILON, control.span);
 		const next = { ...preview };
 		if (kind === 'out') {
-			next.out_position =
-				control.coordinate_space === 'relative'
-					? (handle_position - control.segment_start_position) / span
-					: handle_position;
+			next.out_position = (handle_position - control.segment_start_position) / span;
 			next.out_value = handle_value - control.anchor_value;
 			return next;
 		}
-		next.in_position =
-			control.coordinate_space === 'relative'
-				? (handle_position - control.segment_end_position) / span
-				: handle_position;
+		next.in_position = (handle_position - control.segment_end_position) / span;
 		next.in_value = handle_value - control.anchor_value;
 		return next;
+	};
+
+	const ensure_bezier_preview_target = (
+		targets: Map<NodeId, BezierEasingPreview>,
+		key_id: NodeId
+	): BezierEasingPreview | null => {
+		const existing = targets.get(key_id);
+		if (existing) {
+			return existing;
+		}
+
+		const out_control = bezier_handle_control_by_id.get(
+			bezier_handle_control_id({ key_id, kind: 'out' })
+		);
+		const in_control = bezier_handle_control_by_id.get(
+			bezier_handle_control_id({ key_id, kind: 'in' })
+		);
+		let preview: BezierEasingPreview | null = null;
+		if (out_control) {
+			preview = bezier_preview_from_control(out_control);
+		} else if (in_control) {
+			preview = bezier_preview_from_control(in_control);
+		} else {
+			const params = bezier_param_refs_by_key_id(key_id);
+			if (!params) {
+				return null;
+			}
+			preview = {
+				out_position: param_number_value(params[DECL_OUT_POSITION]?.value, 1 / 3),
+				out_value: param_number_value(params[DECL_OUT_VALUE]?.value, 1 / 3),
+				in_position: param_number_value(params[DECL_IN_POSITION]?.value, -1 / 3),
+				in_value: param_number_value(params[DECL_IN_VALUE]?.value, -1 / 3)
+			};
+		}
+		targets.set(key_id, preview);
+		return preview;
+	};
+
+	const update_key_drag_bezier_alignment_targets = (
+		drag: ActiveKeyDrag,
+		commit_targets: Map<NodeId, DragPreview>
+	): Map<NodeId, BezierEasingPreview> => {
+		const targets = new Map<NodeId, BezierEasingPreview>();
+		if (drag.bezier_alignment_constraints.length === 0) {
+			return targets;
+		}
+
+		const curve_point_for_key = (key_id: NodeId): { position: number; value: number } | null => {
+			const translated = commit_targets.get(key_id);
+			if (translated) {
+				return translated;
+			}
+			const key = parsed_key_by_id.get(key_id);
+			if (!key) {
+				return null;
+			}
+			return { position: key.position, value: key.value };
+		};
+
+		for (const constraint of drag.bezier_alignment_constraints) {
+			const previous_point = curve_point_for_key(constraint.previous_key_id);
+			const anchor_point = curve_point_for_key(constraint.anchor_key_id);
+			const next_point = curve_point_for_key(constraint.next_key_id);
+			if (!previous_point || !anchor_point || !next_point) {
+				continue;
+			}
+
+			const left_span = anchor_point.position - previous_point.position;
+			const right_span = next_point.position - anchor_point.position;
+			if (
+				!(constraint.left_span > CURVE_EPSILON) ||
+				!(constraint.right_span > CURVE_EPSILON) ||
+				!(left_span > CURVE_EPSILON) ||
+				!(right_span > CURVE_EPSILON)
+			) {
+				continue;
+			}
+
+			const in_scale = left_span / constraint.left_span;
+			const out_scale = right_span / constraint.right_span;
+			if (!Number.isFinite(in_scale) || !Number.isFinite(out_scale)) {
+				continue;
+			}
+			const scaled_in_vector_x = constraint.in_vector_x * in_scale;
+			const scaled_in_vector_y = constraint.in_vector_y * in_scale;
+			const scaled_out_vector_x = constraint.out_vector_x * out_scale;
+			const scaled_out_vector_y = constraint.out_vector_y * out_scale;
+
+			const previous_owner_preview = ensure_bezier_preview_target(
+				targets,
+				constraint.previous_owner_key_id
+			);
+			if (previous_owner_preview) {
+				previous_owner_preview.in_position = scaled_in_vector_x / left_span;
+				previous_owner_preview.in_value = scaled_in_vector_y;
+			}
+			const anchor_owner_preview = ensure_bezier_preview_target(
+				targets,
+				constraint.anchor_owner_key_id
+			);
+			if (anchor_owner_preview) {
+				anchor_owner_preview.out_position = scaled_out_vector_x / right_span;
+				anchor_owner_preview.out_value = scaled_out_vector_y;
+			}
+		}
+
+		return targets;
 	};
 
 	const flush_queued_drag = (): void => {
@@ -2020,8 +2708,12 @@
 		let did_finish = false;
 		if (active_drag && (pointer_id === undefined || active_drag.pointer_id === pointer_id)) {
 			flush_queued_drag();
+			flush_queued_bezier_handle();
 			for (const entry of active_drag.origins) {
 				clear_drag_preview(entry.key_id);
+			}
+			for (const key_id of active_drag.touched_bezier_key_ids) {
+				clear_easing_drag_preview(key_id);
 			}
 			const release_pointer_id = pointer_id ?? active_drag.pointer_id;
 			if (canvas_element && canvas_element.hasPointerCapture(release_pointer_id)) {
@@ -2089,12 +2781,7 @@
 		}
 
 		const active_base_preview = bezier_preview_from_control(control);
-		const dragged_x = clamp_bezier_handle_x(
-			control,
-			active_base_preview,
-			drag.ref.kind,
-			curve_point.position
-		);
+		const dragged_x = clamp_bezier_handle_x(control, curve_point.position);
 		const active_preview = with_bezier_preview_handle(
 			control,
 			active_base_preview,
@@ -2125,12 +2812,7 @@
 		const opposite_direction_y = -vector_y / vector_length;
 		const projected_opposite_x = opposite.anchor_position + opposite_direction_x * drag.opposite_length;
 		const projected_opposite_y = opposite.anchor_value + opposite_direction_y * drag.opposite_length;
-		const opposite_x = clamp_bezier_handle_x(
-			opposite,
-			opposite_base_preview,
-			opposite.ref.kind,
-			projected_opposite_x
-		);
+		const opposite_x = clamp_bezier_handle_x(opposite, projected_opposite_x);
 		const opposite_preview = with_bezier_preview_handle(
 			opposite,
 			opposite_base_preview,
@@ -2258,6 +2940,10 @@
 			if (!anchor_origin) {
 				return;
 			}
+			const position_delta_constraint = constrainKeysToNeighbors
+				? build_key_drag_position_delta_constraint(drag_origins)
+				: null;
+			const bezier_alignment_constraints = build_key_drag_bezier_alignment_constraints(drag_key_ids);
 
 			begin_drag_edit_session('Move Curve Key', 'curve-key-drag');
 			active_drag = {
@@ -2265,7 +2951,10 @@
 				anchor_key_id: anchor_origin.key_id,
 				anchor_start_position: anchor_origin.position,
 				anchor_start_value: anchor_origin.value,
-				origins: drag_origins
+				origins: drag_origins,
+				position_delta_constraint,
+				bezier_alignment_constraints,
+				touched_bezier_key_ids: new Set<NodeId>()
 			};
 			canvas_element.setPointerCapture(event.pointerId);
 			event.preventDefault();
@@ -2360,7 +3049,8 @@
 				return;
 			}
 			hover_bezier_handle = null;
-			const delta_position = curve_point.position - active_drag.anchor_start_position;
+			const raw_delta_position = curve_point.position - active_drag.anchor_start_position;
+			const delta_position = clamp_key_drag_position_delta(active_drag, raw_delta_position);
 			const delta_value = curve_point.value - active_drag.anchor_start_value;
 			const commit_targets = new Map<NodeId, DragPreview>();
 			for (const origin of active_drag.origins) {
@@ -2372,6 +3062,25 @@
 				commit_targets.set(origin.key_id, translated);
 			}
 			queue_drag_commit(commit_targets);
+			const bezier_alignment_updates = update_key_drag_bezier_alignment_targets(
+				active_drag,
+				commit_targets
+			);
+			const updated_key_ids = new Set<NodeId>(bezier_alignment_updates.keys());
+			for (const key_id of [...active_drag.touched_bezier_key_ids]) {
+				if (updated_key_ids.has(key_id)) {
+					continue;
+				}
+				clear_easing_drag_preview(key_id);
+				active_drag.touched_bezier_key_ids.delete(key_id);
+			}
+			if (bezier_alignment_updates.size > 0) {
+				for (const [key_id, preview] of bezier_alignment_updates.entries()) {
+					set_easing_drag_preview(key_id, preview);
+					active_drag.touched_bezier_key_ids.add(key_id);
+				}
+				queue_bezier_handle_commit(bezier_alignment_updates);
+			}
 			return;
 		}
 
@@ -2446,18 +3155,43 @@
 		event.preventDefault();
 	};
 
-	const add_key_at = async (position: number, value: number): Promise<void> => {
+	const add_key_at = async (
+		position: number,
+		value: number,
+		options: AddKeyOptions = {}
+	): Promise<void> => {
 		if (!key_creatable_item || adding_key) {
 			return;
 		}
 		const clamped = clamp_curve_point_to_active_range(position, value);
+		let target_value = clamped.value;
+		let split_easing: PendingSplitEasing | null = null;
+		if (options.preserve_curve_shape) {
+			const split_source = find_split_source_segment(
+				clamped.position,
+				options.preferred_owner_key_id ?? null
+			);
+			if (split_source) {
+				const sampled_value = sample_compiled_curve(compiled_curve, clamped.position);
+				if (sampled_value !== null && Number.isFinite(sampled_value)) {
+					target_value = clamp_curve_value_to_active_range(sampled_value);
+				}
+				split_easing = build_split_easing(
+					split_source.start,
+					split_source.end,
+					clamped.position,
+					target_value
+				);
+			}
+		}
 		const edit_session = createUiEditSession('Add Curve Key', 'curve-key-add');
 		await edit_session.begin();
 		adding_key = true;
 		pending_create_target = {
 			known_key_ids: new Set(parsed_keys.map((entry) => entry.node_id)),
 			position: clamped.position,
-			value: clamped.value,
+			value: target_value,
+			split_easing,
 			edit_session
 		};
 		const created = await sendCreateUserItemIntent(liveNode.node_id, key_creatable_item);
@@ -2477,7 +3211,12 @@
 		if (!curve_point) {
 			return;
 		}
-		void add_key_at(curve_point.position, curve_point.value);
+		const curve_owner = nearest_curve_owner_key(point.x, point.y, Math.max(4, rem_base_px * 0.45));
+		const add_on_curve = curve_owner !== null;
+		void add_key_at(curve_point.position, curve_point.value, {
+			preserve_curve_shape: add_on_curve,
+			preferred_owner_key_id: curve_owner
+		});
 	};
 
 	const remove_selected_key = async (): Promise<void> => {
