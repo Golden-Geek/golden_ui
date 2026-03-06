@@ -951,7 +951,7 @@
 			) {
 				return;
 			}
-			await sendSetParamIntent(ref.node_id, coerced, 'Append');
+			await sendSetParamIntent(ref.node_id, coerced, 'Coalesce');
 		})();
 		pending_param_write_promises.add(operation);
 		void operation.finally(() => {

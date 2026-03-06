@@ -74,6 +74,16 @@ export interface WorkbenchSession {
 	mount(): () => void;
 }
 
+interface IntentWaiter {
+	resolve: () => void;
+	reject: (reason?: unknown) => void;
+}
+
+interface QueuedIntent {
+	intent: UiEditIntent;
+	waiters: IntentWaiter[];
+}
+
 const DEFAULT_RETRY_MS = 1000;
 const DEFAULT_WARNING_ID = '';
 
@@ -231,7 +241,8 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 	let resyncQueued = false;
 	let snapshotRequestInFlight: Promise<UiSnapshot> | null = null;
 	let hasLoadedSnapshot = false;
-	let intentQueueTail: Promise<void> = Promise.resolve();
+	const pendingIntentQueue: QueuedIntent[] = [];
+	let intentQueueProcessing = false;
 
 	const client = createWebSocketUiClient({
 		wsUrl: options.wsUrl,
@@ -902,10 +913,78 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 		}
 	};
 
+	const findQueuedSetParamIndex = (node: NodeId): number => {
+		for (let index = pendingIntentQueue.length - 1; index >= 0; index -= 1) {
+			const queued = pendingIntentQueue[index];
+			if (queued?.intent.kind === 'setParam' && queued.intent.node === node) {
+				return index;
+			}
+		}
+		return -1;
+	};
+
+	const processIntentQueue = async (): Promise<void> => {
+		if (intentQueueProcessing) {
+			return;
+		}
+		intentQueueProcessing = true;
+		try {
+			while (pendingIntentQueue.length > 0) {
+				const queued = pendingIntentQueue.shift();
+				if (!queued) {
+					continue;
+				}
+				try {
+					await runIntent(queued.intent);
+					for (const waiter of queued.waiters) {
+						waiter.resolve();
+					}
+				} catch (error) {
+					for (const waiter of queued.waiters) {
+						waiter.reject(error);
+					}
+				}
+			}
+		} finally {
+			intentQueueProcessing = false;
+			if (pendingIntentQueue.length > 0) {
+				void processIntentQueue();
+			}
+		}
+	};
+
+	const rejectQueuedIntents = (reason: Error): void => {
+		while (pendingIntentQueue.length > 0) {
+			const queued = pendingIntentQueue.shift();
+			if (!queued) {
+				continue;
+			}
+			for (const waiter of queued.waiters) {
+				waiter.reject(reason);
+			}
+		}
+	};
+
 	const sendIntent = (intent: UiEditIntent): Promise<void> => {
-		const queued = intentQueueTail.then(() => runIntent(intent));
-		intentQueueTail = queued.catch(() => {});
-		return queued;
+		return new Promise<void>((resolve, reject) => {
+			if (intent.kind === 'setParam') {
+				const queuedSetParamIndex = findQueuedSetParamIndex(intent.node);
+				if (queuedSetParamIndex >= 0) {
+					const queued = pendingIntentQueue[queuedSetParamIndex];
+					if (queued) {
+						queued.intent = intent;
+						queued.waiters.push({ resolve, reject });
+						void processIntentQueue();
+						return;
+					}
+				}
+			}
+			pendingIntentQueue.push({
+				intent,
+				waiters: [{ resolve, reject }]
+			});
+			void processIntentQueue();
+		});
 	};
 
 	const undo = async (): Promise<void> => {
@@ -1037,6 +1116,7 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 		mountedCleanup = (): void => {
 			stopped = true;
 			clearRetry();
+			rejectQueuedIntents(new Error('workbench session unmounted'));
 			if (typeof window !== 'undefined') {
 				window.removeEventListener('keydown', onWindowKeydown);
 			}
