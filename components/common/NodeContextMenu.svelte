@@ -581,6 +581,7 @@
 			items.push({
 				id: 'duplicate',
 				label: 'Duplicate',
+				commandId: 'edit.duplicate',
 				icon: duplicateIcon,
 				action: selectDuplicateNode
 			});
@@ -589,6 +590,7 @@
 			items.push({
 				id: 'delete',
 				label: 'Delete',
+				commandId: 'edit.deleteSelection',
 				color: 'color-mix(in srgb, #ff8b8b 82%, white 18%)',
 				hoverColor: 'color-mix(in srgb, #ff5c5c 23%, transparent)',
 				icon: deleteIcon,

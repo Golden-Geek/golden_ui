@@ -3,10 +3,15 @@
 	import {
 		createUiEditSession,
 		sendCreateUserItemIntent,
-		sendRemoveNodeIntent,
+		sendRemoveNodesIntent,
 		sendSetParamIntent,
 		type UiEditSession
 	} from '$lib/golden_ui/store/ui-intents';
+	import { registerCommandHandler } from '$lib/golden_ui/store/commands.svelte';
+	import {
+		curveClipboardState,
+		type CurveClipboardKey
+	} from '$lib/golden_ui/store/curve-clipboard.svelte';
 	import type { NodeId, ParamValue, UiNodeDto, UiParamConstraints } from '$lib/golden_ui/types';
 	import AnimationCurveCanvas from './AnimationCurveCanvas.svelte';
 
@@ -208,6 +213,7 @@
 		position: number;
 		value: number;
 		split_easing: PendingSplitEasing | null;
+		easing_values: Record<string, ParamValue> | null;
 		edit_session: UiEditSession | null;
 	}
 
@@ -221,6 +227,7 @@
 	interface AddKeyOptions {
 		preserve_curve_shape?: boolean;
 		preferred_owner_key_id?: NodeId | null;
+		easing_values?: Record<string, ParamValue> | null;
 	}
 
 	interface ActiveKeyDrag {
@@ -418,6 +425,7 @@ interface ActiveCurveDrag {
 	let drag_edit_session = $state<UiEditSession | null>(null);
 	let drag_edit_session_begin_promise: Promise<void> | null = null;
 	let hover_curve_position = $state<{ position: number; value: number } | null>(null);
+	let is_canvas_focused = $state(false);
 
 	let interaction_transform = $state<CanvasTransform | null>(null);
 	let queued_drag_targets: Map<NodeId, DragPreview> | null = null;
@@ -2302,6 +2310,8 @@ interface ActiveCurveDrag {
 							pending.split_easing.left_param_values
 						);
 						await apply_easing_param_values(key, pending.split_easing.right_param_values);
+					} else if (pending.easing_values) {
+						await apply_easing_param_values(key, pending.easing_values);
 					}
 				} finally {
 					clear_drag_preview(key.node_id);
@@ -3474,6 +3484,8 @@ interface ActiveCurveDrag {
 			return;
 		}
 		blur_active_editable_element();
+		canvas_element.focus();
+		is_canvas_focused = true;
 		hover_curve_position = screen_to_curve_point(point.x, point.y);
 
 		if (event.button === 1) {
@@ -3892,6 +3904,14 @@ interface ActiveCurveDrag {
 		hover_curve_position = null;
 	};
 
+	const on_canvas_focus = (): void => {
+		is_canvas_focused = true;
+	};
+
+	const on_canvas_blur = (): void => {
+		is_canvas_focused = false;
+	};
+
 	const on_canvas_wheel = (event: WheelEvent): void => {
 		if (!interaction_transform) {
 			return;
@@ -3964,6 +3984,7 @@ interface ActiveCurveDrag {
 			position: clamped.position,
 			value: target_value,
 			split_easing,
+			easing_values: options.easing_values ?? null,
 			edit_session
 		};
 		const created = await sendCreateUserItemIntent(liveNode.node_id, key_creatable_item);
@@ -3991,25 +4012,137 @@ interface ActiveCurveDrag {
 		});
 	};
 
+	const clone_param_value = (value: ParamValue): ParamValue => {
+		return JSON.parse(JSON.stringify(value)) as ParamValue;
+	};
+
+	const selected_key_ids_ordered = (): NodeId[] => {
+		if (selected_key_ids.length > 0) {
+			const selected_set = new Set(selected_key_ids);
+			return parsed_keys
+				.filter((entry) => selected_set.has(entry.node_id))
+				.map((entry) => entry.node_id);
+		}
+		return selected_key_id === null ? [] : [selected_key_id];
+	};
+
+	const wait_pending_key_create = async (): Promise<void> => {
+		const deadline = Date.now() + 550;
+		while (pending_create_target !== null && Date.now() <= deadline) {
+			await new Promise((resolve) => {
+				setTimeout(resolve, 16);
+			});
+		}
+	};
+
+	const remove_selected_keys = async (): Promise<boolean> => {
+		const ids = selected_key_ids_ordered();
+		if (ids.length === 0) {
+			return false;
+		}
+		const id_set = new Set(ids);
+		const removed = await sendRemoveNodesIntent(ids);
+		if (!removed) {
+			return false;
+		}
+		const remaining = selected_key_ids.filter((key_id) => !id_set.has(key_id));
+		if (remaining.length > 0) {
+			selected_key_ids = remaining;
+			selected_key_id = remaining[0] ?? null;
+			return true;
+		}
+		const fallback = parsed_keys.find((entry) => !id_set.has(entry.node_id))?.node_id ?? null;
+		set_single_selected_key(fallback);
+		return true;
+	};
+
+	const set_all_keys_selected = (): void => {
+		const all_ids = parsed_keys.map((entry) => entry.node_id);
+		selected_key_ids = all_ids;
+		selected_key_id = all_ids[0] ?? null;
+		selected_curve_owner_key_ids = [];
+	};
+
+	const frame_view = (): void => {
+		set_curve_view_mode('adaptive');
+	};
+
+	const key_anchor_point = (): { position: number; value: number } => {
+		return hover_curve_position ?? axis_midpoint();
+	};
+
+	const easing_values_for_key = (key: ParsedCurveKey): Record<string, ParamValue> => {
+		const values: Record<string, ParamValue> = {};
+		if (!key.easing) {
+			return values;
+		}
+		for (const [decl_id, ref] of Object.entries(key.easing.params)) {
+			values[decl_id] = clone_param_value(ref.value);
+		}
+		return values;
+	};
+
+	const selected_keys_as_clipboard_entries = (): CurveClipboardKey[] => {
+		const ordered_ids = selected_key_ids_ordered();
+		if (ordered_ids.length === 0) {
+			return [];
+		}
+		const ordered_keys = ordered_ids
+			.map((key_id) => parsed_key_by_id.get(key_id))
+			.filter((key): key is ParsedCurveKey => key !== undefined);
+		const anchor = ordered_keys[0];
+		if (!anchor) {
+			return [];
+		}
+		return ordered_keys.map((key) => ({
+			position_offset: key.position - anchor.position,
+			value_offset: key.value - anchor.value,
+			easing_values: easing_values_for_key(key)
+		}));
+	};
+
+	const apply_clipboard_entries_at_anchor = async (
+		entries: CurveClipboardKey[]
+	): Promise<boolean> => {
+		if (entries.length === 0) {
+			return false;
+		}
+		const anchor = key_anchor_point();
+		for (const entry of entries) {
+			await add_key_at(anchor.position + entry.position_offset, anchor.value + entry.value_offset, {
+				easing_values: entry.easing_values
+			});
+			await wait_pending_key_create();
+		}
+		return true;
+	};
+
+	const copy_selected_keys_to_clipboard = (): boolean => {
+		const entries = selected_keys_as_clipboard_entries();
+		curveClipboardState.sourceCurveNodeId = liveNode.node_id;
+		curveClipboardState.keys = entries;
+		return entries.length > 0;
+	};
+
+	const cut_selected_keys_to_clipboard = async (): Promise<boolean> => {
+		const copied = copy_selected_keys_to_clipboard();
+		if (!copied) {
+			return false;
+		}
+		await remove_selected_keys();
+		return true;
+	};
+
+	const duplicate_selected_keys = async (): Promise<boolean> => {
+		return apply_clipboard_entries_at_anchor(selected_keys_as_clipboard_entries());
+	};
+
+	const paste_clipboard_keys = async (): Promise<boolean> => {
+		return apply_clipboard_entries_at_anchor(curveClipboardState.keys);
+	};
+
 	const remove_selected_key = async (): Promise<void> => {
-		if (!selected_key) {
-			return;
-		}
-		const index = parsed_keys.findIndex((entry) => entry.node_id === selected_key.node_id);
-		const next_fallback = parsed_keys[index + 1] ?? parsed_keys[index - 1] ?? null;
-		const ok = await sendRemoveNodeIntent(selected_key.node_id);
-		if (!ok) {
-			return;
-		}
-		const remaining_selection = selected_key_ids.filter(
-			(key_id) => key_id !== selected_key.node_id
-		);
-		if (remaining_selection.length > 0) {
-			selected_key_ids = remaining_selection;
-			selected_key_id = remaining_selection[0];
-			return;
-		}
-		set_single_selected_key(next_fallback?.node_id ?? null);
+		await remove_selected_keys();
 	};
 
 	const set_curve_view_mode = (mode: CurveViewMode): void => {
@@ -4036,6 +4169,90 @@ interface ActiveCurveDrag {
 			value: (interaction_transform.y_min + interaction_transform.y_max) * 0.5
 		};
 	};
+
+	$effect(() => {
+		const unregisterHandlers = [
+			registerCommandHandler(
+				'edit.deleteSelection',
+				() => {
+					if (!is_canvas_focused) {
+						return false;
+					}
+					return remove_selected_keys().then(() => true);
+				},
+				{ priority: 200 }
+			),
+			registerCommandHandler(
+				'select.all',
+				() => {
+					if (!is_canvas_focused) {
+						return false;
+					}
+					set_all_keys_selected();
+					return true;
+				},
+				{ priority: 200 }
+			),
+			registerCommandHandler(
+				'edit.copy',
+				() => {
+					if (!is_canvas_focused) {
+						return false;
+					}
+					copy_selected_keys_to_clipboard();
+					return true;
+				},
+				{ priority: 200 }
+			),
+			registerCommandHandler(
+				'edit.cut',
+				() => {
+					if (!is_canvas_focused) {
+						return false;
+					}
+					return cut_selected_keys_to_clipboard().then(() => true);
+				},
+				{ priority: 200 }
+			),
+			registerCommandHandler(
+				'edit.duplicate',
+				() => {
+					if (!is_canvas_focused) {
+						return false;
+					}
+					return duplicate_selected_keys().then(() => true);
+				},
+				{ priority: 200 }
+			),
+			registerCommandHandler(
+				'edit.paste',
+				() => {
+					if (!is_canvas_focused) {
+						return false;
+					}
+					return paste_clipboard_keys().then(() => true);
+				},
+				{ priority: 200 }
+			),
+			registerCommandHandler(
+				'view.frame',
+				() => {
+					if (!is_canvas_focused) {
+						return false;
+					}
+					frame_view();
+					return true;
+				},
+				{ priority: 200 }
+			)
+		];
+
+		return () => {
+			for (const unregister of unregisterHandlers) {
+				unregister();
+			}
+		};
+	});
 
 	$effect(() => {
 		return () => {
@@ -4150,7 +4367,9 @@ interface ActiveCurveDrag {
 				onpointercancel={on_canvas_pointer_cancel}
 				onpointerleave={on_canvas_pointer_leave}
 				onwheel={on_canvas_wheel}
-				ondblclick={on_canvas_double_click} />
+				ondblclick={on_canvas_double_click}
+				onfocus={on_canvas_focus}
+				onblur={on_canvas_blur} />
 		</div>
 	</div>
 {/if}

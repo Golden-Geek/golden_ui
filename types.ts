@@ -401,6 +401,7 @@ export type UiEditIntent =
 	| { kind: 'setParamControlState'; node: NodeId; state: UiParameterControlState }
 	| { kind: 'moveNode'; node: NodeId; new_parent: NodeId; new_prev_sibling?: NodeId }
 	| { kind: 'removeNode'; node: NodeId }
+	| { kind: 'removeNodes'; nodes: NodeId[] }
 	| { kind: 'createUserItem'; parent: NodeId; node_type: string; label?: string }
 	| { kind: 'patchMeta'; node: NodeId; patch: Partial<UiNodeMetaDto> }
 	| { kind: 'reevaluateGraph' }
@@ -433,6 +434,8 @@ export interface UiClient {
 	scriptState(nodeId: NodeId): Promise<UiScriptState>;
 	setScriptConfig(nodeId: NodeId, config: UiScriptConfig, forceReload?: boolean): Promise<void>;
 	reloadScript(nodeId: NodeId): Promise<void>;
+	projectSave(path: string): Promise<void>;
+	projectLoad(path: string): Promise<void>;
 }
 
 export const wholeGraphScope: UiSubscriptionScope = { kind: 'wholeGraph' };

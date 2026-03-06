@@ -95,6 +95,10 @@ export interface RustScriptReloadRequest {
 	node: number;
 }
 
+interface RustProjectPathRequest {
+	path: string;
+}
+
 export type RustParamValue =
 	| string
 	| {
@@ -1347,6 +1351,16 @@ export const createHttpUiClient = (options: HttpClientOptions = {}): UiClient =>
 		async reloadScript(nodeId: number): Promise<void> {
 			const request: RustScriptReloadRequest = { node: nodeId };
 			await postJson<{ ok?: boolean }>('/script-reload', request);
+		},
+
+		async projectSave(path: string): Promise<void> {
+			const request: RustProjectPathRequest = { path };
+			await postJson<{ ok?: boolean }>('/project-save', request);
+		},
+
+		async projectLoad(path: string): Promise<void> {
+			const request: RustProjectPathRequest = { path };
+			await postJson<{ ok?: boolean }>('/project-load', request);
 		}
 	};
 

@@ -154,7 +154,9 @@
 		onpointercancel,
 		onpointerleave,
 		onwheel,
-		ondblclick
+		ondblclick,
+		onfocus,
+		onblur
 	}: {
 		parsedKeys: ParsedCurveKeyLike[];
 		compiledCurve: CompiledCurveLike;
@@ -186,6 +188,8 @@
 		onpointerleave?: (event: PointerEvent) => void;
 		onwheel?: (event: WheelEvent) => void;
 		ondblclick?: (event: MouseEvent) => void;
+		onfocus?: (event: FocusEvent) => void;
+		onblur?: (event: FocusEvent) => void;
 	} = $props();
 
 	let rem_base_px = $state(16);
@@ -356,7 +360,7 @@
 				0,
 				1
 			);
-			const major_alpha = (0.05 + 0.13 * level.weight) * major_visibility;
+			const major_alpha = (0.01 + 0.13 * level.weight) * major_visibility;
 			draw_grid_lines(
 				context,
 				min_value,
@@ -541,6 +545,7 @@
 		plot_top: number,
 		plot_width: number,
 		plot_height: number,
+		border_radius: number,
 		bounded_range: boolean
 	): void => {
 		const border_x = plot_left + 0.5;
@@ -562,7 +567,9 @@
 			const dash = Math.max(2, rem_base_px * 0.14);
 			context.setLineDash([dash, dash * 0.9]);
 		}
-		context.strokeRect(border_x, border_y, border_width, border_height);
+		context.beginPath();
+		context.roundRect(border_x, border_y, border_width, border_height, border_radius);
+		context.stroke();
 		context.restore();
 	};
 
@@ -634,10 +641,7 @@
 			screen_y.push(sy);
 		};
 
-		const max_points = Math.max(
-			768,
-			Math.min(CURVE_RENDER_MAX_POINTS, Math.round(plot_width * 8))
-		);
+		const max_points = Math.max(768, Math.min(CURVE_RENDER_MAX_POINTS, Math.round(plot_width * 8)));
 		const min_world_dx = x_span / Math.max(1, plot_width * 3.6);
 		type Interval = {
 			x0: number;
@@ -763,8 +767,6 @@
 		const height = Math.max(1, canvas_height_px);
 
 		context.clearRect(0, 0, width, height);
-		context.fillStyle = curve_canvas_theme.canvas_bg;
-		context.fillRect(0, 0, width, height);
 
 		const keys = compiledCurve.keys;
 		if (keys.length === 0) {
@@ -786,7 +788,7 @@
 
 		const pad_left = Math.max(width * 0.03, rem_base_px * 1.8);
 		const pad_right = Math.max(width * 0.03, rem_base_px * 0.8);
-		const pad_top = Math.max(height * 0.06, rem_base_px * 0.7)
+		const pad_top = Math.max(height * 0.06, rem_base_px * 0.7);
 		const pad_bottom = Math.max(height * 0.03, rem_base_px * 1.3);
 		const plot_width = Math.max(1, width - pad_left - pad_right);
 		const plot_height = Math.max(1, height - pad_top - pad_bottom);
@@ -958,6 +960,24 @@
 			}
 		}
 
+		const border_radius = rem_base_px * 0.3;
+		context.save();
+		context.beginPath();
+		context.roundRect(plot_left, plot_top, plot_width, plot_height, border_radius);
+		context.fillStyle = 'rgba(0,0,0,.2)'; // A nice blue color
+		context.fill();
+		context.clip();
+
+		context.beginPath();
+		context.rect(plot_left - 10, plot_top - 10, plot_width + 20, plot_height + 20);
+		context.rect(plot_left, plot_top, plot_width, plot_height);
+		context.shadowColor = 'rgba(0, 0, 0, .5)'; // Dark, semi-transparent shadow
+		context.shadowBlur = 30; // How soft the shadow is
+		context.shadowOffsetX = 0; // Shift shadow X (0 makes it even on all sides)
+		context.shadowOffsetY = 0; // Shift shadow Y
+		context.fillStyle = 'black';
+		context.fill('evenodd');
+
 		const target_major_spacing_px = Math.max(34, rem_base_px * 5.8);
 		if (showGrid) {
 			draw_adaptive_axis_grid(
@@ -1003,9 +1023,11 @@
 			}
 		}
 
+		context.restore();
+
 		context.save();
 		context.beginPath();
-		context.rect(plot_left, plot_top, plot_width, plot_height);
+		context.rect(plot_left - 2, plot_top - 2, plot_width + 4, plot_height + 4, border_radius);
 		context.clip();
 
 		context.strokeStyle = curve_canvas_theme.line_idle;
@@ -1091,10 +1113,7 @@
 		const selected_key_set = new Set<NodeId>(selected_key_id_list);
 		const selected_curve_owner_key_set = new Set<NodeId>(selectedCurveOwnerKeyIds);
 
-		if (
-			hoverCurveOwnerKeyId !== null &&
-			!selected_curve_owner_key_set.has(hoverCurveOwnerKeyId)
-		) {
+		if (hoverCurveOwnerKeyId !== null && !selected_curve_owner_key_set.has(hoverCurveOwnerKeyId)) {
 			if (stroke_owned_segment(hoverCurveOwnerKeyId, 'rgba(117, 205, 255, 0.26)', 2.65)) {
 				stroke_owned_segment(hoverCurveOwnerKeyId, 'rgba(163, 223, 255, 0.86)', 1.38);
 			}
@@ -1270,9 +1289,11 @@
 				plot_top,
 				plot_width,
 				plot_height,
+				border_radius,
 				Boolean(active_range)
 			);
 		}
+
 		const next_bounds_label = `Bounds : X [min: ${format_number(x_min)}, max: ${format_number(x_max)}] | Y [min: ${format_number(y_min)}, max: ${format_number(y_max)}]`;
 		if (bounds_label !== next_bounds_label) {
 			bounds_label = next_bounds_label;
@@ -1430,13 +1451,16 @@
 		<canvas
 			class="curve-canvas {activeCanvasPan ? 'panning' : ''}"
 			bind:this={canvasElement}
+			tabindex="0"
 			{onpointerdown}
 			{onpointermove}
 			{onpointerup}
 			{onpointercancel}
 			{onpointerleave}
 			{onwheel}
-			{ondblclick}></canvas>
+			{ondblclick}
+			{onfocus}
+			{onblur}></canvas>
 	</div>
 	{#if showBounds}
 		<div class="curve-bounds-readout">{bounds_label}</div>
@@ -1455,10 +1479,7 @@
 	.curve-canvas-wrap {
 		flex: 1 1 auto;
 		min-height: 0;
-		border-radius: 0.44rem;
 		overflow: hidden;
-		border: solid 0.06rem var(--gc-color-curve-canvas-wrap-border, rgba(182, 190, 202, 0.2));
-		background: var(--gc-color-curve-canvas-wrap-bg, #111418);
 	}
 
 	.curve-canvas {
@@ -1466,6 +1487,13 @@
 		width: 100%;
 		height: 100%;
 		cursor: crosshair;
+	}
+
+	.curve-canvas-wrap:focus,
+	.curve-canvas:focus,
+	.curve-canvas-wrap:focus-visible,
+	.curve-canvas:focus-visible {
+		outline: none;
 	}
 
 	.curve-canvas.panning {

@@ -23,6 +23,17 @@ import {
 	savePersistedSelection
 } from './ui-persistence';
 import { DEFAULT_LOG_UI_UPDATE_HZ, normalizeLogUiUpdateHz } from './logger-ui-config';
+import {
+	handleCommandShortcut,
+	registerCommandHandler,
+	type CommandId
+} from './commands.svelte';
+import {
+	openProjectFile,
+	reopenLastProjectFile,
+	saveProjectFile,
+	saveProjectFileAs
+} from './project-files.svelte';
 
 export type SelectionMode = 'REPLACE' | 'ADD' | 'REMOVE' | 'TOGGLE';
 
@@ -92,6 +103,11 @@ type PendingLogMutation =
 	| { kind: 'clear' }
 	| { kind: 'replaceTail'; record: UiLogRecord }
 	| { kind: 'append'; records: UiLogRecord[] };
+
+interface NodeClipboardEntry {
+	node_type: string;
+	label: string;
+}
 
 const formatEventTime = (value: { tick: number; micro: number; seq: number }): string =>
 	`${value.tick}:${value.micro}:${value.seq}`;
@@ -226,6 +242,7 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 
 	let status = $state('Connecting to engine...');
 	let selectedNodeIds = $state<NodeId[]>([]);
+	let nodeClipboard = $state<NodeClipboardEntry[]>([]);
 	const persistedSelection = loadPersistedSelection();
 	let shouldRestorePersistedSelection = persistedSelection.length > 0;
 	let historyBusy = $state(false);
@@ -712,6 +729,284 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 		selectNodes([nodeId], selectionMode);
 	};
 
+	const getNodeDepth = (nodeId: NodeId): number => {
+		let depth = 0;
+		let current = graph.state.parentById.get(nodeId);
+		while (current !== undefined) {
+			depth += 1;
+			current = graph.state.parentById.get(current);
+		}
+		return depth;
+	};
+
+	const isNodeRemovable = (node: UiNodeDto): boolean => {
+		if (graph.state.rootId === node.node_id) {
+			return false;
+		}
+		return node.meta.user_permissions.can_remove_and_duplicate;
+	};
+
+	const isFolderNode = (node: UiNodeDto): boolean => node.node_type === 'folder';
+
+	const canParentCreateNodeType = (parentId: NodeId, nodeType: string): boolean => {
+		const parent = graph.state.nodesById.get(parentId);
+		if (!parent) {
+			return false;
+		}
+		return parent.creatable_user_items.some((item) => item.node_type === nodeType);
+	};
+
+	const nextLabelInParent = (parentId: NodeId, baseLabel: string): string => {
+		const parent = graph.state.nodesById.get(parentId);
+		if (!parent) {
+			return baseLabel;
+		}
+		const usedLabels = new Set<string>();
+		for (const childId of parent.children) {
+			const sibling = graph.state.nodesById.get(childId);
+			if (!sibling) {
+				continue;
+			}
+			const label = sibling.meta.label.trim();
+			if (label.length > 0) {
+				usedLabels.add(label);
+			}
+		}
+
+		if (!usedLabels.has(baseLabel)) {
+			return baseLabel;
+		}
+
+		let suffix = 2;
+		while (usedLabels.has(`${baseLabel} ${suffix}`)) {
+			suffix += 1;
+		}
+		return `${baseLabel} ${suffix}`;
+	};
+
+	const waitForCreatedChild = async (
+		parentId: NodeId,
+		knownChildren: Set<NodeId>,
+		expectedNodeType: string
+	): Promise<NodeId | null> => {
+		const deadline = Date.now() + 450;
+		while (Date.now() <= deadline) {
+			const parent = graph.state.nodesById.get(parentId);
+			if (parent) {
+				for (const childId of parent.children) {
+					if (knownChildren.has(childId)) {
+						continue;
+					}
+					const child = graph.state.nodesById.get(childId);
+					if (!child) {
+						continue;
+					}
+					if (child.node_type === expectedNodeType) {
+						return childId;
+					}
+				}
+			}
+			await new Promise((resolve) => {
+				setTimeout(resolve, 16);
+			});
+		}
+		return null;
+	};
+
+	const createNodeUnderParent = async (
+		parentId: NodeId,
+		nodeType: string,
+		label: string,
+		insertAfterNodeId: NodeId | null
+	): Promise<NodeId | null> => {
+		const parentBefore = graph.state.nodesById.get(parentId);
+		if (!parentBefore) {
+			return null;
+		}
+		const knownChildren = new Set(parentBefore.children);
+		await sendIntent({
+			kind: 'createUserItem',
+			parent: parentId,
+			node_type: nodeType,
+			label
+		});
+		const createdNodeId = await waitForCreatedChild(parentId, knownChildren, nodeType);
+		if (createdNodeId === null || insertAfterNodeId === null) {
+			return createdNodeId;
+		}
+		await sendIntent({
+			kind: 'moveNode',
+			node: createdNodeId,
+			new_parent: parentId,
+			new_prev_sibling: insertAfterNodeId
+		});
+		return createdNodeId;
+	};
+
+	const removeSelectedNodesCommand = async (): Promise<boolean> => {
+		const selected = getSelectedNodes();
+		if (selected.length === 0) {
+			return false;
+		}
+
+		const removable = selected.filter((node) => isNodeRemovable(node));
+		if (removable.length === 0) {
+			return false;
+		}
+
+		removable.sort((left, right) => getNodeDepth(right.node_id) - getNodeDepth(left.node_id));
+		await sendIntent({
+			kind: 'removeNodes',
+			nodes: removable.map((node) => node.node_id)
+		});
+		return true;
+	};
+
+	const selectSiblingNodesCommand = (): boolean => {
+		const anchorNode = getFirstSelectedNode();
+		if (!anchorNode) {
+			return false;
+		}
+		const parentId = graph.state.parentById.get(anchorNode.node_id);
+		if (parentId === undefined) {
+			return false;
+		}
+		const parent = graph.state.nodesById.get(parentId);
+		if (!parent || parent.children.length === 0) {
+			return false;
+		}
+		selectNodes([...parent.children], 'REPLACE');
+		return true;
+	};
+
+	const copySelectedNodesCommand = (): boolean => {
+		const selected = getSelectedNodes();
+		if (selected.length === 0) {
+			return false;
+		}
+		nodeClipboard = selected.map((node) => ({
+			node_type: node.node_type,
+			label: node.meta.label.trim().length > 0 ? node.meta.label.trim() : node.node_type
+		}));
+		return true;
+	};
+
+	const cutSelectedNodesCommand = async (): Promise<boolean> => {
+		if (!copySelectedNodesCommand()) {
+			return false;
+		}
+		return removeSelectedNodesCommand();
+	};
+
+	const duplicateSelectedNodesCommand = async (): Promise<boolean> => {
+		const selectedSet = new Set(selectedNodeIds);
+		const anchorNode = getFirstSelectedNode();
+		if (!anchorNode) {
+			return false;
+		}
+		const parentId = graph.state.parentById.get(anchorNode.node_id);
+		if (parentId === undefined) {
+			return false;
+		}
+		const parent = graph.state.nodesById.get(parentId);
+		if (!parent) {
+			return false;
+		}
+
+		const selectedSiblingIds = parent.children.filter((childId) => selectedSet.has(childId));
+		if (selectedSiblingIds.length === 0) {
+			return false;
+		}
+
+		let insertAfterNodeId: NodeId | null = selectedSiblingIds[selectedSiblingIds.length - 1] ?? null;
+		const createdNodeIds: NodeId[] = [];
+		for (const sourceId of selectedSiblingIds) {
+			const source = graph.state.nodesById.get(sourceId);
+			if (!source) {
+				continue;
+			}
+			if (!source.meta.user_permissions.can_remove_and_duplicate) {
+				continue;
+			}
+			if (!canParentCreateNodeType(parentId, source.node_type)) {
+				continue;
+			}
+
+			const baseLabel =
+				source.meta.label.trim().length > 0
+					? `${source.meta.label.trim()} Copy`
+					: `${source.node_type} Copy`;
+			const label = nextLabelInParent(parentId, baseLabel);
+			const createdNodeId = await createNodeUnderParent(
+				parentId,
+				source.node_type,
+				label,
+				insertAfterNodeId
+			);
+			if (createdNodeId === null) {
+				continue;
+			}
+			createdNodeIds.push(createdNodeId);
+			insertAfterNodeId = createdNodeId;
+		}
+
+		if (createdNodeIds.length === 0) {
+			return false;
+		}
+		selectNodes(createdNodeIds, 'REPLACE');
+		return true;
+	};
+
+	const pasteNodesCommand = async (): Promise<boolean> => {
+		if (nodeClipboard.length === 0) {
+			return false;
+		}
+
+		const anchorNode = getFirstSelectedNode();
+		if (!anchorNode) {
+			return false;
+		}
+
+		let targetParentId: NodeId | undefined;
+		let insertAfterNodeId: NodeId | null = null;
+		if (isFolderNode(anchorNode)) {
+			targetParentId = anchorNode.node_id;
+		} else {
+			targetParentId = graph.state.parentById.get(anchorNode.node_id);
+			insertAfterNodeId = anchorNode.node_id;
+		}
+		if (targetParentId === undefined) {
+			return false;
+		}
+
+		const createdNodeIds: NodeId[] = [];
+		for (const entry of nodeClipboard) {
+			if (!canParentCreateNodeType(targetParentId, entry.node_type)) {
+				continue;
+			}
+			const label = nextLabelInParent(targetParentId, entry.label);
+			const createdNodeId = await createNodeUnderParent(
+				targetParentId,
+				entry.node_type,
+				label,
+				insertAfterNodeId
+			);
+			if (createdNodeId === null) {
+				continue;
+			}
+			createdNodeIds.push(createdNodeId);
+			if (insertAfterNodeId !== null) {
+				insertAfterNodeId = createdNodeId;
+			}
+		}
+
+		if (createdNodeIds.length === 0) {
+			return false;
+		}
+		selectNodes(createdNodeIds, 'REPLACE');
+		return true;
+	};
+
 	const applyHistoryState = (history: UiHistoryState | undefined): void => {
 		if (!history) {
 			return;
@@ -1091,6 +1386,45 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 		}
 	};
 
+	const registerWorkbenchCommandHandlers = (): (() => void) => {
+		type CommandHandlerResult = boolean | void | Promise<boolean | void>;
+		const cleanups: Array<() => void> = [];
+		const bind = (commandId: CommandId, handler: () => CommandHandlerResult, priority = 10): void => {
+			cleanups.push(
+				registerCommandHandler(
+					commandId,
+					() => handler(),
+					{ priority }
+				)
+			);
+		};
+
+		bind('edit.undo', () => {
+			void undo();
+			return true;
+		}, 20);
+		bind('edit.redo', () => {
+			void redo();
+			return true;
+		}, 20);
+		bind('edit.deleteSelection', () => removeSelectedNodesCommand(), 10);
+		bind('select.all', () => selectSiblingNodesCommand(), 10);
+		bind('edit.copy', () => copySelectedNodesCommand(), 10);
+		bind('edit.cut', () => cutSelectedNodesCommand(), 10);
+		bind('edit.duplicate', () => duplicateSelectedNodesCommand(), 10);
+		bind('edit.paste', () => pasteNodesCommand(), 10);
+		bind('file.save', () => saveProjectFile(), 15);
+		bind('file.saveAs', () => saveProjectFileAs(), 15);
+		bind('file.open', () => openProjectFile(), 15);
+		bind('file.reopenLast', () => reopenLastProjectFile(), 15);
+
+		return (): void => {
+			for (const cleanup of cleanups) {
+				cleanup();
+			}
+		};
+	};
+
 	const mount = (): (() => void) => {
 		if (mountedCleanup !== null) {
 			return mountedCleanup;
@@ -1099,6 +1433,7 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 		let stopped = false;
 		let subscribed = false;
 		let unsubscribe = () => {};
+		let unregisterCommands = () => {};
 		let bootstrapInFlight = false;
 		let retryTimer: ReturnType<typeof setTimeout> | null = null;
 		let retryDelayMs = retryMs;
@@ -1167,27 +1502,10 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 			if (isEditableTarget(event.target)) {
 				return;
 			}
-			if ((!event.ctrlKey && !event.metaKey) || event.altKey) {
-				return;
-			}
-
-			const key = event.key.toLowerCase();
-			if (key === 'z') {
-				event.preventDefault();
-				if (event.shiftKey) {
-					void redo();
-				} else {
-					void undo();
-				}
-				return;
-			}
-
-			if (key === 'y' && !event.shiftKey) {
-				event.preventDefault();
-				void redo();
-			}
+			void handleCommandShortcut(event);
 		};
 
+		unregisterCommands = registerWorkbenchCommandHandlers();
 		if (typeof window !== 'undefined') {
 			window.addEventListener('keydown', onWindowKeydown);
 		}
@@ -1200,11 +1518,13 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 			if (typeof window !== 'undefined') {
 				window.removeEventListener('keydown', onWindowKeydown);
 			}
+			unregisterCommands();
 			unsubscribe();
 			graph.reset();
 			invalidateWarningCaches();
 			resetPendingLogMutations();
 			selectedNodeIds = [];
+			nodeClipboard = [];
 			logRecords = [];
 			logMaxEntries = 0;
 			hasLoadedSnapshot = false;

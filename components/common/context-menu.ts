@@ -1,3 +1,5 @@
+import type { CommandId } from '../../store/commands.svelte';
+
 export type ContextMenuPlacement =
 	| 'bottom-start'
 	| 'bottom-end'
@@ -28,6 +30,7 @@ export interface ContextMenuItem {
 	label?: string;
 	icon?: string;
 	hint?: string;
+	commandId?: CommandId;
 	separator?: boolean;
 	visible?: boolean;
 	disabled?: boolean;

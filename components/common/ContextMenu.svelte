@@ -9,6 +9,7 @@
 		getMainViewportBounds,
 		remToPx
 	} from './floating-panel';
+	import { getCommandShortcutHint } from '$lib/golden_ui/store/commands.svelte';
 	import {
 		normalizeContextMenuItems,
 		type ContextMenuAnchor,
@@ -95,6 +96,16 @@
 
 	const hasSubmenu = (item: ContextMenuItem): boolean => {
 		return submenuItemsFor(item).length > 0;
+	};
+
+	const itemShortcutHint = (item: ContextMenuItem): string | undefined => {
+		if (item.hint && item.hint.trim().length > 0) {
+			return item.hint;
+		}
+		if (!item.commandId) {
+			return undefined;
+		}
+		return getCommandShortcutHint(item.commandId);
 	};
 
 	let rootItems = $derived.by(() => normalizeContextMenuItems(items));
@@ -677,6 +688,7 @@
 				{#each layer.items as item, index (`menu-item-${layer.depth}-${item.id ?? item.label ?? 'item'}-${index}`)}
 					{@const submenuOpen = submenuPath[layer.depth] === index}
 					{@const hasChildren = hasSubmenu(item)}
+					{@const shortcutHint = itemShortcutHint(item)}
 					{#if item.separator}
 						<hr class="gc-context-separator" />
 					{:else}
@@ -702,8 +714,8 @@
 									{/if}
 								</span>
 								<span class="gc-context-item-label">{item.label}</span>
-								{#if item.hint}
-									<span class="gc-context-item-hint">{item.hint}</span>
+								{#if shortcutHint}
+									<span class="gc-context-item-hint">{shortcutHint}</span>
 								{/if}
 								{#if hasChildren}
 									<span class="gc-context-item-chevron" aria-hidden="true">></span>
@@ -736,14 +748,14 @@
 		gap: 0.05rem;
 		padding: 0.24rem;
 		border-radius: 0.5rem;
-		border: solid 0.0625rem rgba(from var(--gc-color-text) r g b / 11%);
+		border: solid 0.0625rem rgba(from var(--gc-color-text) r g b / 5%);
 		background:
 			radial-gradient(
 				circle at top right,
-				rgba(from var(--gc-color-selection) r g b / 11%),
+				rgba(from var(--gc-color-selection) r g b / 5%),
 				transparent 58%
 			),
-			color-mix(in srgb, var(--gc-color-panel) 96%, black);
+			color-mix(in srgb, var(--gc-color-panel) 50%, rgba(8, 8, 8, 0.4));
 		-webkit-backdrop-filter: blur(0.3rem);
 		backdrop-filter: blur(0.3rem);
 		box-shadow:

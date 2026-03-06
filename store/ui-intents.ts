@@ -91,6 +91,16 @@ export const sendRemoveNodeIntent = async (node: NodeId): Promise<boolean> => {
 	});
 };
 
+export const sendRemoveNodesIntent = async (nodes: NodeId[]): Promise<boolean> => {
+	if (nodes.length === 0) {
+		return false;
+	}
+	return sendUiIntent({
+		kind: 'removeNodes',
+		nodes
+	});
+};
+
 export const sendCreateUserItemIntent = async (
 	parent: NodeId,
 	item: UiCreatableUserItem

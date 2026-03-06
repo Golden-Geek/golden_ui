@@ -630,6 +630,14 @@ export const createWebSocketUiClient = (options: WebSocketUiClientOptions = {}):
 
 		async reloadScript(nodeId) {
 			return httpClient.reloadScript(nodeId);
+		},
+
+		async projectSave(path) {
+			return httpClient.projectSave(path);
+		},
+
+		async projectLoad(path) {
+			return httpClient.projectLoad(path);
 		}
 	};
 
