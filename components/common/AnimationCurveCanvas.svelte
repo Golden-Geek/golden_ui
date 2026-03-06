@@ -1089,40 +1089,6 @@
 			}
 		}
 
-		const key_screen_points = new Map<NodeId, { x: number; y: number }>();
-		const key_stride = parsedKeys.length > 2200 ? Math.ceil(parsedKeys.length / 2200) : 1;
-		for (let index = 0; index < parsedKeys.length; index += 1) {
-			const key = parsedKeys[index];
-			const key_position = active_range
-				? clamp(key.position, active_range.x_min, active_range.x_max)
-				: key.position;
-			const key_value = active_range
-				? clamp(key.value, active_range.y_min, active_range.y_max)
-				: key.value;
-			const x = to_screen_x(key_position);
-			const y = to_screen_y(key_value);
-			key_screen_points.set(key.node_id, { x, y });
-
-			const selected = selected_key_set.has(key.node_id);
-			const hovered = key.node_id === hoverKeyId;
-			if (!selected && !hovered && index % key_stride !== 0) {
-				continue;
-			}
-
-			const radius = selected ? Math.max(2, rem_base_px * 0.27) : Math.max(1.5, rem_base_px * 0.2);
-			context.fillStyle = selected
-				? 'rgba(255, 229, 112, 0.98)'
-				: hovered
-					? 'rgba(255, 182, 96, 0.95)'
-					: curve_canvas_theme.point_idle;
-			context.strokeStyle = 'rgba(8, 12, 18, 0.9)';
-			context.lineWidth = selected ? 1.25 : 1;
-			context.beginPath();
-			context.arc(x, y, radius, 0, Math.PI * 2);
-			context.fill();
-			context.stroke();
-		}
-
 		for (const handle of bezierHandles) {
 			const anchor_x = to_screen_x(handle.anchor_position);
 			const anchor_y = to_screen_y(handle.anchor_value);
@@ -1156,6 +1122,40 @@
 			context.lineWidth = active ? 1.2 : 1;
 			context.beginPath();
 			context.arc(handle_x, handle_y, radius, 0, Math.PI * 2);
+			context.fill();
+			context.stroke();
+		}
+
+		const key_screen_points = new Map<NodeId, { x: number; y: number }>();
+		const key_stride = parsedKeys.length > 2200 ? Math.ceil(parsedKeys.length / 2200) : 1;
+		for (let index = 0; index < parsedKeys.length; index += 1) {
+			const key = parsedKeys[index];
+			const key_position = active_range
+				? clamp(key.position, active_range.x_min, active_range.x_max)
+				: key.position;
+			const key_value = active_range
+				? clamp(key.value, active_range.y_min, active_range.y_max)
+				: key.value;
+			const x = to_screen_x(key_position);
+			const y = to_screen_y(key_value);
+			key_screen_points.set(key.node_id, { x, y });
+
+			const selected = selected_key_set.has(key.node_id);
+			const hovered = key.node_id === hoverKeyId;
+			if (!selected && !hovered && index % key_stride !== 0) {
+				continue;
+			}
+
+			const radius = selected ? Math.max(2, rem_base_px * 0.27) : Math.max(1.5, rem_base_px * 0.2);
+			context.fillStyle = selected
+				? 'rgba(255, 229, 112, 0.98)'
+				: hovered
+					? 'rgba(255, 182, 96, 0.95)'
+					: curve_canvas_theme.point_idle;
+			context.strokeStyle = 'rgba(8, 12, 18, 0.9)';
+			context.lineWidth = selected ? 1.25 : 1;
+			context.beginPath();
+			context.arc(x, y, radius, 0, Math.PI * 2);
 			context.fill();
 			context.stroke();
 		}
