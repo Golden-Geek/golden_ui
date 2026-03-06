@@ -299,7 +299,7 @@
 	}
 
 	.node-inspector {
-		padding-top: 1rem;
+		padding-top: .6rem;
 	}
 
 	.node-inspector.parameter {
@@ -353,7 +353,7 @@
 			gap: 0.25rem;
 			background-color: rgb(from var(--container-color) r g b / 30%);
 			border-radius: 0.5rem 0.5rem 0 0;
-			padding: 0.25rem;
+			padding: 0.2rem;
 			box-sizing: border-box;
 			border-left: solid 2px var(--container-color);
 			vertical-align: middle;

@@ -1286,6 +1286,21 @@ export const createHttpUiClient = (options: HttpClientOptions = {}): UiClient =>
 			return ack;
 		},
 
+		async sendIntents(intents: UiEditIntent[]): Promise<UiAck[]> {
+			if (intents.length === 0) {
+				return [];
+			}
+			if (intents.length === 1) {
+				return [await client.sendIntent(intents[0])];
+			}
+			const payload = intents.map((intent) => toRustIntent(intent));
+			const acks = await postJson<UiAck[]>('/intent/batch', payload);
+			if (!Array.isArray(acks)) {
+				throw new Error('POST /intent/batch returned invalid payload');
+			}
+			return acks;
+		},
+
 		async replay(scope: UiSubscriptionScope, from?: EventTime): Promise<UiEventBatch> {
 			const request: RustReplayRequest = { scope: toRustScope(scope), from };
 			const batch = await postJson<RustUiEventBatch>('/replay', request);

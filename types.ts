@@ -426,6 +426,7 @@ export interface UiClient {
 		onBatch: (batch: UiEventBatch) => void
 	): () => void;
 	sendIntent(intent: UiEditIntent): Promise<UiAck>;
+	sendIntents(intents: UiEditIntent[]): Promise<UiAck[]>;
 	replay(scope: UiSubscriptionScope, from?: EventTime): Promise<UiEventBatch>;
 	referenceTargets(paramNodeId: NodeId): Promise<UiReferenceTargets>;
 	paramControlInfo(paramNodeId: NodeId): Promise<UiParamControlInfo>;

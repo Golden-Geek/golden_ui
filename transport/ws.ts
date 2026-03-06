@@ -48,17 +48,30 @@ type WsClientMessage =
 			request_id: string;
 			intent: unknown;
 			include_self_events: boolean;
+	  }
+	| {
+			kind: 'intentBatch';
+			request_id: string;
+			intents: unknown[];
+			include_self_events: boolean;
 	  };
 
 type WsServerMessage =
 	| { kind: 'hello'; protocol_version: string; client_id: number; session_id?: string }
 	| { kind: 'batch'; subscription_id: string; batch: RustUiEventBatch }
 	| { kind: 'intentAck'; request_id: string; ack: UiAck }
+	| { kind: 'intentBatchAck'; request_id: string; acks: UiAck[] }
 	| { kind: 'resyncRequired'; subscription_id: string; reason: string }
 	| { kind: 'error'; message: string; request_id?: string };
 
 interface PendingIntent {
 	resolve: (ack: UiAck) => void;
+	reject: (error: Error) => void;
+	timer: ReturnType<typeof setTimeout>;
+}
+
+interface PendingIntentBatch {
+	resolve: (acks: UiAck[]) => void;
 	reject: (error: Error) => void;
 	timer: ReturnType<typeof setTimeout>;
 }
@@ -108,6 +121,7 @@ export const createWebSocketUiClient = (options: WebSocketUiClientOptions = {}):
 
 	const subscriptions = new Map<string, SubscriptionState>();
 	const pendingIntents = new Map<string, PendingIntent>();
+	const pendingIntentBatches = new Map<string, PendingIntentBatch>();
 
 	let seq = 0;
 	const nextId = (prefix: string): string => {
@@ -120,6 +134,11 @@ export const createWebSocketUiClient = (options: WebSocketUiClientOptions = {}):
 			clearTimeout(pending.timer);
 			pending.reject(new Error(message));
 			pendingIntents.delete(requestId);
+		}
+		for (const [requestId, pending] of pendingIntentBatches) {
+			clearTimeout(pending.timer);
+			pending.reject(new Error(message));
+			pendingIntentBatches.delete(requestId);
 		}
 	};
 
@@ -342,6 +361,16 @@ export const createWebSocketUiClient = (options: WebSocketUiClientOptions = {}):
 				pending.resolve(message.ack);
 				return;
 			}
+			case 'intentBatchAck': {
+				const pending = pendingIntentBatches.get(message.request_id);
+				if (!pending) {
+					return;
+				}
+				clearTimeout(pending.timer);
+				pendingIntentBatches.delete(message.request_id);
+				pending.resolve(message.acks);
+				return;
+			}
 			case 'resyncRequired':
 				handleResyncRequired(message.subscription_id, message.reason);
 				return;
@@ -352,6 +381,13 @@ export const createWebSocketUiClient = (options: WebSocketUiClientOptions = {}):
 						clearTimeout(pending.timer);
 						pendingIntents.delete(message.request_id);
 						pending.reject(new Error(message.message));
+						return;
+					}
+					const pendingBatch = pendingIntentBatches.get(message.request_id);
+					if (pendingBatch) {
+						clearTimeout(pendingBatch.timer);
+						pendingIntentBatches.delete(message.request_id);
+						pendingBatch.reject(new Error(message.message));
 						return;
 					}
 				}
@@ -533,6 +569,42 @@ export const createWebSocketUiClient = (options: WebSocketUiClientOptions = {}):
 				return ack;
 			} catch {
 				return httpClient.sendIntent(intent);
+			}
+		},
+
+		async sendIntents(intents: UiEditIntent[]): Promise<UiAck[]> {
+			if (intents.length === 0) {
+				return [];
+			}
+			if (intents.length === 1) {
+				return [await client.sendIntent(intents[0])];
+			}
+			try {
+				const requestId = nextId('intent-batch');
+				const includeSelfEvents = true;
+				const timeoutMs = INTENT_TIMEOUT_MS + Math.min(16000, intents.length * 16);
+				const acks = await new Promise<UiAck[]>(async (resolve, reject) => {
+					const timer = setTimeout(() => {
+						pendingIntentBatches.delete(requestId);
+						reject(new Error(`intent batch timeout (${requestId})`));
+					}, timeoutMs);
+					pendingIntentBatches.set(requestId, { resolve, reject, timer });
+					try {
+						await sendWsMessage({
+							kind: 'intentBatch',
+							request_id: requestId,
+							intents: intents.map((intent) => toRustIntent(intent)),
+							include_self_events: includeSelfEvents
+						});
+					} catch (error) {
+						clearTimeout(timer);
+						pendingIntentBatches.delete(requestId);
+						reject(error as Error);
+					}
+				});
+				return acks;
+			} catch {
+				return httpClient.sendIntents(intents);
 			}
 		},
 

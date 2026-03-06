@@ -11,6 +11,7 @@ import type {
 	UiEventDto,
 	UiLogRecord,
 	UiHistoryState,
+	UiAck,
 	UiSnapshot,
 	UiSubscriptionScope,
 	UiParameterControlState
@@ -243,6 +244,8 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 	let hasLoadedSnapshot = false;
 	const pendingIntentQueue: QueuedIntent[] = [];
 	let intentQueueProcessing = false;
+	// Keep batch payloads bounded while still reducing setParam fan-out.
+	const MAX_SET_PARAM_BATCH_SIZE = 512;
 
 	const client = createWebSocketUiClient({
 		wsUrl: options.wsUrl,
@@ -913,6 +916,41 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 		}
 	};
 
+	const runIntentBatch = async (intents: UiEditIntent[]): Promise<void> => {
+		if (intents.length === 0) {
+			return;
+		}
+		if (intents.length === 1) {
+			await runIntent(intents[0]);
+			return;
+		}
+		try {
+			const acks = await client.sendIntents(intents);
+			if (acks.length !== intents.length) {
+				throw new Error(
+					`intent batch acknowledgement count mismatch (${acks.length}/${intents.length})`
+				);
+			}
+			let firstFailure: UiAck | null = null;
+			for (const ack of acks) {
+				applyHistoryState(ack.history);
+				if (!ack.success && firstFailure === null) {
+					firstFailure = ack;
+				}
+			}
+			if (firstFailure) {
+				status = `Error: ${firstFailure.error_message ?? firstFailure.error_code ?? 'unknown error'}`;
+				return;
+			}
+			if (graph.state.requiresResync) {
+				await resyncSnapshot('Snapshot resynced.');
+			}
+		} catch (error) {
+			const message = error instanceof Error ? error.message : 'unknown error';
+			status = `Error: ${message}`;
+		}
+	};
+
 	const findQueuedSetParamIndex = (node: NodeId): number => {
 		for (let index = pendingIntentQueue.length - 1; index >= 0; index -= 1) {
 			const queued = pendingIntentQueue[index];
@@ -923,6 +961,37 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 		return -1;
 	};
 
+	const drainLeadingSetParamIntents = (): QueuedIntent[] => {
+		const drained: QueuedIntent[] = [];
+		while (drained.length < MAX_SET_PARAM_BATCH_SIZE && pendingIntentQueue.length > 0) {
+			const next = pendingIntentQueue[0];
+			if (!next || next.intent.kind !== 'setParam') {
+				break;
+			}
+			const queued = pendingIntentQueue.shift();
+			if (queued) {
+				drained.push(queued);
+			}
+		}
+		return drained;
+	};
+
+	const resolveQueuedIntents = (queuedIntents: QueuedIntent[]): void => {
+		for (const queued of queuedIntents) {
+			for (const waiter of queued.waiters) {
+				waiter.resolve();
+			}
+		}
+	};
+
+	const rejectQueuedIntentsBatch = (queuedIntents: QueuedIntent[], error: unknown): void => {
+		for (const queued of queuedIntents) {
+			for (const waiter of queued.waiters) {
+				waiter.reject(error);
+			}
+		}
+	};
+
 	const processIntentQueue = async (): Promise<void> => {
 		if (intentQueueProcessing) {
 			return;
@@ -930,19 +999,30 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 		intentQueueProcessing = true;
 		try {
 			while (pendingIntentQueue.length > 0) {
+				const next = pendingIntentQueue[0];
+				if (next?.intent.kind === 'setParam') {
+					const queued_batch = drainLeadingSetParamIntents();
+					if (queued_batch.length === 0) {
+						continue;
+					}
+					try {
+						await runIntentBatch(queued_batch.map((entry) => entry.intent));
+						resolveQueuedIntents(queued_batch);
+					} catch (error) {
+						rejectQueuedIntentsBatch(queued_batch, error);
+					}
+					continue;
+				}
+
 				const queued = pendingIntentQueue.shift();
 				if (!queued) {
 					continue;
 				}
 				try {
 					await runIntent(queued.intent);
-					for (const waiter of queued.waiters) {
-						waiter.resolve();
-					}
+					resolveQueuedIntents([queued]);
 				} catch (error) {
-					for (const waiter of queued.waiters) {
-						waiter.reject(error);
-					}
+					rejectQueuedIntentsBatch([queued], error);
 				}
 			}
 		} finally {

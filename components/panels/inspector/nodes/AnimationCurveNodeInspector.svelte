@@ -6,7 +6,7 @@
 	import SelectNodeButton from '../../../common/SelectNodeButton.svelte';
 	import AnimationCurveNodeEditor from '../../../common/AnimationCurveNodeEditor.svelte';
 
-	let { node, level, defaultHeader }: NodeInspectorComponentProps = $props();
+	let { node, level, defaultHeader, collapsed }: NodeInspectorComponentProps = $props();
 
 	const CURVE_NODE_TYPE = 'animation_curve';
 	const KEY_NODE_TYPE = 'animation_curve_key';
@@ -104,6 +104,8 @@
 
 {#if liveNode.node_type === CURVE_NODE_TYPE}
 	{@render defaultHeader?.(curveHeaderExtra)}
+
+	{#if !collapsed}
 	<div class="node-inspector-content animation-curve-node-inspector">
 		<div class="curve-editor">
 			<AnimationCurveNodeEditor
@@ -133,6 +135,7 @@
 			{/if}
 		</div>
 	</div>
+	{/if}
 {/if}
 
 <style>

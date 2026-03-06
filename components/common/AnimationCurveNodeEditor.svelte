@@ -1187,6 +1187,48 @@ interface ActiveCurveDrag {
 		easing_drag_preview_by_key_id = next;
 	};
 
+	const clear_drag_previews_if_unchanged = (snapshots: Map<NodeId, DragPreview>): void => {
+		if (snapshots.size === 0 || drag_preview_by_key_id.size === 0) {
+			return;
+		}
+		const current = drag_preview_by_key_id;
+		const next = new Map(current);
+		let changed = false;
+		for (const [key_id, snapshot] of snapshots.entries()) {
+			if (current.get(key_id) !== snapshot) {
+				continue;
+			}
+			if (next.delete(key_id)) {
+				changed = true;
+			}
+		}
+		if (changed) {
+			drag_preview_by_key_id = next;
+		}
+	};
+
+	const clear_easing_drag_previews_if_unchanged = (
+		snapshots: Map<NodeId, BezierEasingPreview>
+	): void => {
+		if (snapshots.size === 0 || easing_drag_preview_by_key_id.size === 0) {
+			return;
+		}
+		const current = easing_drag_preview_by_key_id;
+		const next = new Map(current);
+		let changed = false;
+		for (const [key_id, snapshot] of snapshots.entries()) {
+			if (current.get(key_id) !== snapshot) {
+				continue;
+			}
+			if (next.delete(key_id)) {
+				changed = true;
+			}
+		}
+		if (changed) {
+			easing_drag_preview_by_key_id = next;
+		}
+	};
+
 	const HANDLE_ALIGNMENT_COSINE_TOLERANCE = 0.035;
 	const KEY_NEIGHBOR_POSITION_GAP = 1e-8;
 
@@ -3270,14 +3312,22 @@ interface ActiveCurveDrag {
 
 	const finish_drag = (pointer_id?: number): void => {
 		let did_finish = false;
+		const drag_previews_to_clear = new Map<NodeId, DragPreview>();
+		const easing_previews_to_clear = new Map<NodeId, BezierEasingPreview>();
 		if (active_drag && (pointer_id === undefined || active_drag.pointer_id === pointer_id)) {
 			flush_queued_drag();
 			flush_queued_bezier_handle();
 			for (const entry of active_drag.origins) {
-				clear_drag_preview(entry.key_id);
+				const preview = drag_preview_by_key_id.get(entry.key_id);
+				if (preview) {
+					drag_previews_to_clear.set(entry.key_id, preview);
+				}
 			}
 			for (const key_id of active_drag.touched_bezier_key_ids) {
-				clear_easing_drag_preview(key_id);
+				const preview = easing_drag_preview_by_key_id.get(key_id);
+				if (preview) {
+					easing_previews_to_clear.set(key_id, preview);
+				}
 			}
 			const release_pointer_id = pointer_id ?? active_drag.pointer_id;
 			if (canvas_element && canvas_element.hasPointerCapture(release_pointer_id)) {
@@ -3292,7 +3342,10 @@ interface ActiveCurveDrag {
 		) {
 			flush_queued_bezier_handle();
 			for (const key_id of active_bezier_handle_drag.touched_key_ids) {
-				clear_easing_drag_preview(key_id);
+				const preview = easing_drag_preview_by_key_id.get(key_id);
+				if (preview) {
+					easing_previews_to_clear.set(key_id, preview);
+				}
 			}
 			hover_bezier_handle = null;
 			const release_pointer_id = pointer_id ?? active_bezier_handle_drag.pointer_id;
@@ -3308,7 +3361,10 @@ interface ActiveCurveDrag {
 		) {
 			flush_queued_bezier_handle();
 			for (const key_id of active_curve_drag.touched_key_ids) {
-				clear_easing_drag_preview(key_id);
+				const preview = easing_drag_preview_by_key_id.get(key_id);
+				if (preview) {
+					easing_previews_to_clear.set(key_id, preview);
+				}
 			}
 			hover_bezier_handle = null;
 			const release_pointer_id = pointer_id ?? active_curve_drag.pointer_id;
@@ -3330,8 +3386,13 @@ interface ActiveCurveDrag {
 				if (pending_param_write_promises.size > 0) {
 					await Promise.allSettled([...pending_param_write_promises]);
 				}
+				clear_drag_previews_if_unchanged(drag_previews_to_clear);
+				clear_easing_drag_previews_if_unchanged(easing_previews_to_clear);
 				await edit_session.end();
 			})();
+		} else if (did_finish) {
+			clear_drag_previews_if_unchanged(drag_previews_to_clear);
+			clear_easing_drag_previews_if_unchanged(easing_previews_to_clear);
 		}
 	};
 
