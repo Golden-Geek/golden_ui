@@ -10,6 +10,17 @@
 	--gc-color-panel: #1f2021;
 	--gc-color-panel-outline: #7c7c7c4c;
 
+	/* CURVE EDITOR */
+	--gc-color-curve-canvas-bg: #171b20;
+	--gc-color-curve-canvas-wrap-bg: #111418;
+	--gc-color-curve-canvas-wrap-border: rgba(182, 190, 202, 0.2);
+	--gc-color-curve-line-idle: #9aa1ac;
+	--gc-color-curve-point-idle: #b1bac9;
+	--gc-color-curve-grid-line-rgb: 164, 174, 191;
+	--gc-color-curve-grid-label-rgb: 186, 195, 210;
+	--gc-color-curve-border-unbounded: rgba(138, 147, 161, 0.46);
+	--gc-color-curve-border-bounded: rgba(185, 199, 219, 0.82);
+
 
 	/* SELECTION */
 	--gc-color-selection: #d81dac;
