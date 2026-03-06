@@ -261,34 +261,67 @@
 		touched_key_ids: Set<NodeId>;
 	}
 
-	interface CurveSegmentHit {
-		owner_key_id: NodeId;
-		curve_position: number;
-		curve_value: number;
-	}
+interface CurveSegmentHit {
+	owner_key_id: NodeId;
+	curve_position: number;
+	curve_value: number;
+}
 
-	interface ActiveCurveDrag {
-		pointer_id: number;
-		owner_key_id: NodeId;
-		start_screen_x: number;
+interface CurveOppositeAlignment {
+	anchor_key_id: NodeId;
+	opposite_ref: BezierHandleRef;
+	opposite_length: number;
+}
+
+interface ActiveCurveDrag {
+	pointer_id: number;
+	owner_key_id: NodeId;
+	start_screen_x: number;
 		start_curve_position: number;
 		start_curve_value: number;
 		segment: BezierHandleSegment;
 		normalized_t: number;
 		base_out_curve_position: number;
 		base_out_curve_value: number;
-		base_in_curve_position: number;
-		base_in_curve_value: number;
-		out_length: number;
-		in_length: number;
-		touched_key_ids: Set<NodeId>;
-	}
+	base_in_curve_position: number;
+	base_in_curve_value: number;
+	out_length: number;
+	in_length: number;
+	start_opposite_alignment: CurveOppositeAlignment | null;
+	end_opposite_alignment: CurveOppositeAlignment | null;
+	touched_key_ids: Set<NodeId>;
+}
 
 	interface ActiveCanvasPan {
 		pointer_id: number;
 		start_screen_x: number;
 		start_screen_y: number;
 		start_bounds: CurveViewBounds;
+	}
+
+	type SelectionMode = 'replace' | 'add' | 'toggle';
+
+	interface ActiveBoxSelection {
+		pointer_id: number;
+		start_screen_x: number;
+		start_screen_y: number;
+		current_screen_x: number;
+		current_screen_y: number;
+		mode: SelectionMode;
+	}
+
+	interface ScreenRect {
+		left: number;
+		right: number;
+		top: number;
+		bottom: number;
+	}
+
+	interface CanvasSelectionRect {
+		left: number;
+		top: number;
+		width: number;
+		height: number;
 	}
 
 	interface CurveViewBounds {
@@ -302,6 +335,7 @@
 		curveNode,
 		selected_key_id = $bindable<NodeId | null>(null),
 		selected_key_ids = $bindable<NodeId[]>([]),
+		selected_curve_owner_key_ids = $bindable<NodeId[]>([]),
 		showToolbar = true,
 		showHints = true,
 		showGrid = true,
@@ -313,6 +347,7 @@
 		curveNode: UiNodeDto;
 		selected_key_id?: NodeId | null;
 		selected_key_ids?: NodeId[];
+		selected_curve_owner_key_ids?: NodeId[];
 		showToolbar?: boolean;
 		showHints?: boolean;
 		showGrid?: boolean;
@@ -366,6 +401,7 @@
 
 	let rem_base_px = $state(16);
 	let hover_key_id = $state<NodeId | null>(null);
+	let hover_curve_owner_key_id = $state<NodeId | null>(null);
 	let hover_bezier_handle = $state<BezierHandleRef | null>(null);
 	let drag_preview_by_key_id = $state<Map<NodeId, DragPreview>>(new Map());
 	let easing_drag_preview_by_key_id = $state<Map<NodeId, BezierEasingPreview>>(new Map());
@@ -377,6 +413,7 @@
 	let active_drag = $state<ActiveKeyDrag | null>(null);
 	let active_bezier_handle_drag = $state<ActiveBezierHandleDrag | null>(null);
 	let active_curve_drag = $state<ActiveCurveDrag | null>(null);
+	let active_box_selection = $state<ActiveBoxSelection | null>(null);
 	let active_canvas_pan = $state<ActiveCanvasPan | null>(null);
 	let drag_edit_session = $state<UiEditSession | null>(null);
 	let drag_edit_session_begin_promise: Promise<void> | null = null;
@@ -1061,6 +1098,64 @@
 		}
 	};
 
+	const has_selected_curve_owner_key = (key_id: NodeId): boolean =>
+		selected_curve_owner_key_ids.includes(key_id);
+
+	const set_single_selected_curve_owner_key = (key_id: NodeId | null): void => {
+		selected_curve_owner_key_ids = key_id === null ? [] : [key_id];
+	};
+
+	const add_selected_curve_owner_key = (key_id: NodeId): void => {
+		if (has_selected_curve_owner_key(key_id)) {
+			return;
+		}
+		selected_curve_owner_key_ids = [...selected_curve_owner_key_ids, key_id];
+	};
+
+	const toggle_selected_curve_owner_key = (key_id: NodeId): void => {
+		if (!has_selected_curve_owner_key(key_id)) {
+			add_selected_curve_owner_key(key_id);
+			return;
+		}
+		selected_curve_owner_key_ids = selected_curve_owner_key_ids.filter((entry) => entry !== key_id);
+	};
+
+	const ordered_node_ids = (node_ids: Iterable<NodeId>): NodeId[] => {
+		const selected = new Set(node_ids);
+		const ordered: NodeId[] = [];
+		for (const key of parsed_keys) {
+			if (selected.has(key.node_id)) {
+				ordered.push(key.node_id);
+			}
+		}
+		return ordered;
+	};
+
+	const apply_selection_mode = (
+		current_selection: NodeId[],
+		hits: NodeId[],
+		mode: SelectionMode
+	): NodeId[] => {
+		if (mode === 'replace') {
+			return hits;
+		}
+		const next = new Set(current_selection);
+		if (mode === 'add') {
+			for (const key_id of hits) {
+				next.add(key_id);
+			}
+			return ordered_node_ids(next);
+		}
+		for (const key_id of hits) {
+			if (next.has(key_id)) {
+				next.delete(key_id);
+			} else {
+				next.add(key_id);
+			}
+		}
+		return ordered_node_ids(next);
+	};
+
 	const set_drag_preview = (key_id: NodeId, position: number, value: number): void => {
 		const clamped = clamp_curve_point_to_active_range(position, value);
 		const next = new Map(drag_preview_by_key_id);
@@ -1458,25 +1553,25 @@
 		return segments;
 	});
 
-	let selected_curve_owner_key_ids = $derived.by((): NodeId[] => {
-		const selected = selected_key_ids.length > 0
-			? selected_key_ids
-			: selected_key_id === null
-				? []
-				: [selected_key_id];
-		if (selected.length === 0) {
-			return [];
+	let bezier_handle_owner_key_ids = $derived.by((): NodeId[] => {
+		if (selected_curve_owner_key_ids.length > 0) {
+			return selected_curve_owner_key_ids;
 		}
-		const available = new Set(parsed_keys.map((entry) => entry.node_id));
-		return selected.filter((key_id) => available.has(key_id));
+		if (selected_key_ids.length > 0) {
+			return selected_key_ids;
+		}
+		if (selected_key_id !== null) {
+			return [selected_key_id];
+		}
+		return [];
 	});
 
 	let bezier_visible_anchor_key_ids = $derived.by((): NodeId[] => {
-		if (selected_curve_owner_key_ids.length === 0) {
+		if (bezier_handle_owner_key_ids.length === 0) {
 			return [];
 		}
-		const owner_set = new Set(selected_curve_owner_key_ids);
-		const visible = new Set<NodeId>(selected_curve_owner_key_ids);
+		const owner_set = new Set(bezier_handle_owner_key_ids);
+		const visible = new Set<NodeId>(bezier_handle_owner_key_ids);
 		for (let index = 0; index + 1 < parsed_keys.length; index += 1) {
 			const start = parsed_keys[index];
 			const end = parsed_keys[index + 1];
@@ -2122,6 +2217,28 @@
 	});
 
 	$effect(() => {
+		if (parsed_keys.length === 0) {
+			if (selected_curve_owner_key_ids.length > 0) {
+				selected_curve_owner_key_ids = [];
+			}
+			if (hover_curve_owner_key_id !== null) {
+				hover_curve_owner_key_id = null;
+			}
+			return;
+		}
+		const available_key_ids = new Set(parsed_keys.map((entry) => entry.node_id));
+		const filtered_selection = selected_curve_owner_key_ids.filter((key_id) =>
+			available_key_ids.has(key_id)
+		);
+		if (!same_node_id_array(filtered_selection, selected_curve_owner_key_ids)) {
+			selected_curve_owner_key_ids = filtered_selection;
+		}
+		if (hover_curve_owner_key_id !== null && !available_key_ids.has(hover_curve_owner_key_id)) {
+			hover_curve_owner_key_id = null;
+		}
+	});
+
+	$effect(() => {
 		const pending = pending_create_target;
 		if (!pending) {
 			return;
@@ -2484,6 +2601,122 @@
 	): NodeId | null =>
 		nearest_curve_hit(screen_x, screen_y, threshold_px)?.owner_key_id ?? null;
 
+	const normalized_screen_rect = (
+		x0: number,
+		y0: number,
+		x1: number,
+		y1: number
+	): ScreenRect => ({
+		left: Math.min(x0, x1),
+		right: Math.max(x0, x1),
+		top: Math.min(y0, y1),
+		bottom: Math.max(y0, y1)
+	});
+
+	const point_in_screen_rect = (x: number, y: number, rect: ScreenRect): boolean =>
+		x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
+
+	const box_selection_rect = (selection: ActiveBoxSelection): ScreenRect =>
+		normalized_screen_rect(
+			selection.start_screen_x,
+			selection.start_screen_y,
+			selection.current_screen_x,
+			selection.current_screen_y
+		);
+
+	let active_box_selection_rect = $derived.by((): CanvasSelectionRect | null => {
+		const selection = active_box_selection;
+		if (!selection) {
+			return null;
+		}
+		const rect = box_selection_rect(selection);
+		return {
+			left: rect.left,
+			top: rect.top,
+			width: rect.right - rect.left,
+			height: rect.bottom - rect.top
+		};
+	});
+
+	const collect_key_ids_in_screen_rect = (rect: ScreenRect): NodeId[] => {
+		if (!interaction_transform) {
+			return [];
+		}
+		const selected = new Set<NodeId>();
+		for (const [key_id, point] of interaction_transform.key_screen_points.entries()) {
+			if (point_in_screen_rect(point.x, point.y, rect)) {
+				selected.add(key_id);
+			}
+		}
+		return ordered_node_ids(selected);
+	};
+
+	const collect_curve_owner_key_ids_in_screen_rect = (rect: ScreenRect): NodeId[] => {
+		if (!interaction_transform) {
+			return [];
+		}
+		const selected = new Set<NodeId>();
+		const curve_x = interaction_transform.curve_screen_x;
+		const curve_y = interaction_transform.curve_screen_y;
+		const owners = interaction_transform.curve_owner_key_ids;
+		for (let index = 0; index < curve_x.length; index += 1) {
+			const owner = owners[index];
+			if (owner === null) {
+				continue;
+			}
+			if (point_in_screen_rect(curve_x[index], curve_y[index], rect)) {
+				selected.add(owner);
+			}
+		}
+		return ordered_node_ids(selected);
+	};
+
+	const finish_box_selection = (pointer_id?: number): void => {
+		const active = active_box_selection;
+		if (!active) {
+			return;
+		}
+		if (pointer_id !== undefined && active.pointer_id !== pointer_id) {
+			return;
+		}
+
+		const release_pointer_id = pointer_id ?? active.pointer_id;
+		if (canvas_element && canvas_element.hasPointerCapture(release_pointer_id)) {
+			canvas_element.releasePointerCapture(release_pointer_id);
+		}
+
+		const rect = box_selection_rect(active);
+		const drag_size = Math.max(rect.right - rect.left, rect.bottom - rect.top);
+		const drag_threshold = Math.max(3, rem_base_px * 0.24);
+		const performed_drag = drag_size >= drag_threshold;
+		if (!performed_drag) {
+			if (active.mode === 'replace') {
+				set_single_selected_key(null);
+				set_single_selected_curve_owner_key(null);
+			}
+			active_box_selection = null;
+			return;
+		}
+
+		const key_hits = collect_key_ids_in_screen_rect(rect);
+		const curve_hits = collect_curve_owner_key_ids_in_screen_rect(rect);
+		const current_key_selection =
+			selected_key_ids.length > 0
+				? selected_key_ids
+				: selected_key_id === null
+					? []
+					: [selected_key_id];
+		const next_key_selection = apply_selection_mode(current_key_selection, key_hits, active.mode);
+		selected_key_ids = next_key_selection;
+		selected_key_id = next_key_selection[0] ?? null;
+		selected_curve_owner_key_ids = apply_selection_mode(
+			selected_curve_owner_key_ids,
+			curve_hits,
+			active.mode
+		);
+		active_box_selection = null;
+	};
+
 	const nearest_bezier_handle = (
 		screen_x: number,
 		screen_y: number,
@@ -2590,6 +2823,114 @@
 		}
 		targets.set(key_id, preview);
 		return preview;
+	};
+
+	const vectors_are_aligned_and_opposite = (
+		ax: number,
+		ay: number,
+		bx: number,
+		by: number
+	): boolean => {
+		const a_length = Math.hypot(ax, ay);
+		const b_length = Math.hypot(bx, by);
+		const denominator = a_length * b_length;
+		if (denominator <= CURVE_EPSILON) {
+			return false;
+		}
+		const dot = ax * bx + ay * by;
+		if (dot >= 0) {
+			return false;
+		}
+		const cross = ax * by - ay * bx;
+		return Math.abs(cross) / denominator <= HANDLE_ALIGNMENT_COSINE_TOLERANCE;
+	};
+
+	const resolve_curve_drag_opposite_alignment = (
+		anchor_key_id: NodeId,
+		primary_ref: BezierHandleRef
+	): CurveOppositeAlignment | null => {
+		const primary = bezier_handle_control_by_id.get(bezier_handle_control_id(primary_ref));
+		if (!primary) {
+			return null;
+		}
+		const opposite_candidates = bezier_handle_refs_by_anchor_key_id.get(anchor_key_id) ?? [];
+		let opposite_ref: BezierHandleRef | null = null;
+		for (const candidate of opposite_candidates) {
+			if (bezier_handle_control_id(candidate) === bezier_handle_control_id(primary_ref)) {
+				continue;
+			}
+			opposite_ref = candidate;
+			break;
+		}
+		if (!opposite_ref) {
+			return null;
+		}
+		const opposite = bezier_handle_control_by_id.get(bezier_handle_control_id(opposite_ref));
+		if (!opposite) {
+			return null;
+		}
+		const primary_dx = primary.handle_position - primary.anchor_position;
+		const primary_dy = primary.handle_value - primary.anchor_value;
+		const opposite_dx = opposite.handle_position - opposite.anchor_position;
+		const opposite_dy = opposite.handle_value - opposite.anchor_value;
+		if (
+			!vectors_are_aligned_and_opposite(
+				primary_dx,
+				primary_dy,
+				opposite_dx,
+				opposite_dy
+			)
+		) {
+			return null;
+		}
+		const opposite_length = Math.hypot(opposite_dx, opposite_dy);
+		if (!(opposite_length > CURVE_EPSILON)) {
+			return null;
+		}
+		return {
+			anchor_key_id,
+			opposite_ref,
+			opposite_length
+		};
+	};
+
+	const apply_curve_drag_opposite_alignment = (
+		targets: Map<NodeId, BezierEasingPreview>,
+		alignment: CurveOppositeAlignment,
+		primary_handle_position: number,
+		primary_handle_value: number,
+		anchor_position: number,
+		anchor_value: number
+	): void => {
+		const opposite_control = bezier_handle_control_by_id.get(
+			bezier_handle_control_id(alignment.opposite_ref)
+		);
+		if (!opposite_control || !(alignment.opposite_length > CURVE_EPSILON)) {
+			return;
+		}
+		const primary_dx = primary_handle_position - anchor_position;
+		const primary_dy = primary_handle_value - anchor_value;
+		const primary_length = Math.hypot(primary_dx, primary_dy);
+		if (primary_length <= CURVE_EPSILON) {
+			return;
+		}
+		const opposite_direction_x = -primary_dx / primary_length;
+		const opposite_direction_y = -primary_dy / primary_length;
+		const projected_x = anchor_position + opposite_direction_x * alignment.opposite_length;
+		const projected_y = anchor_value + opposite_direction_y * alignment.opposite_length;
+		const clamped_x = clamp_bezier_handle_x(opposite_control, projected_x);
+		const opposite_preview = ensure_bezier_preview_target(targets, opposite_control.ref.key_id);
+		if (!opposite_preview) {
+			return;
+		}
+		const updated_preview = with_bezier_preview_handle(
+			opposite_control,
+			opposite_preview,
+			opposite_control.ref.kind,
+			clamped_x,
+			projected_y
+		);
+		targets.set(opposite_control.ref.key_id, updated_preview);
 	};
 
 	const bezier_preview_from_absolute_handles = (
@@ -2717,16 +3058,36 @@
 		const in_curve_position = drag.base_in_curve_position + delta_position * in_weight;
 		const in_curve_value = drag.base_in_curve_value + delta_value * in_weight;
 
-		targets.set(
-			segment.key_id,
-			bezier_preview_from_absolute_handles(
-				segment,
+		const current_segment_preview = bezier_preview_from_absolute_handles(
+			segment,
+			out_curve_position,
+			out_curve_value,
+			in_curve_position,
+			in_curve_value
+		);
+		targets.set(segment.key_id, current_segment_preview);
+
+		if (drag.start_opposite_alignment) {
+			apply_curve_drag_opposite_alignment(
+				targets,
+				drag.start_opposite_alignment,
 				out_curve_position,
 				out_curve_value,
+				segment.start_position,
+				segment.start_value
+			);
+		}
+		if (drag.end_opposite_alignment) {
+			apply_curve_drag_opposite_alignment(
+				targets,
+				drag.end_opposite_alignment,
 				in_curve_position,
-				in_curve_value
-			)
-		);
+				in_curve_value,
+				segment.end_position,
+				segment.end_value
+			);
+		}
+
 		return targets;
 	};
 
@@ -3060,6 +3421,7 @@
 				return;
 			}
 			hover_key_id = null;
+			hover_curve_owner_key_id = null;
 			active_canvas_pan = {
 				pointer_id: event.pointerId,
 				start_screen_x: point.x,
@@ -3081,12 +3443,14 @@
 		if (selection !== null) {
 			if (toggle_selection) {
 				toggle_selected_key(selection);
+				hover_curve_owner_key_id = null;
 				event.preventDefault();
 				return;
 			}
 			if (additive_selection) {
 				add_selected_key(selection);
 				selected_key_id = selection;
+				hover_curve_owner_key_id = null;
 				event.preventDefault();
 				return;
 			}
@@ -3132,6 +3496,7 @@
 				touched_bezier_key_ids: new Set<NodeId>()
 			};
 			canvas_element.setPointerCapture(event.pointerId);
+			hover_curve_owner_key_id = null;
 			event.preventDefault();
 			return;
 		}
@@ -3144,6 +3509,7 @@
 			}
 			hover_bezier_handle = bezier_handle;
 			hover_key_id = control.anchor_key_id;
+			hover_curve_owner_key_id = null;
 
 			const opposite_candidates = bezier_handle_refs_by_anchor_key_id.get(control.anchor_key_id) ?? [];
 			let opposite_ref: BezierHandleRef | null = null;
@@ -3188,17 +3554,17 @@
 		if (curve_hit) {
 			const curve_selection = curve_hit.owner_key_id;
 			if (toggle_selection) {
-				toggle_selected_key(curve_selection);
+				toggle_selected_curve_owner_key(curve_selection);
 				event.preventDefault();
 				return;
 			}
 			if (additive_selection) {
-				add_selected_key(curve_selection);
-				selected_key_id = curve_selection;
-			} else if (!has_selected_key(curve_selection) || selected_key_ids.length !== 1) {
-				set_single_selected_key(curve_selection);
-			} else {
-				selected_key_id = curve_selection;
+				add_selected_curve_owner_key(curve_selection);
+			} else if (
+				!has_selected_curve_owner_key(curve_selection) ||
+				selected_curve_owner_key_ids.length !== 1
+			) {
+				set_single_selected_curve_owner_key(curve_selection);
 			}
 
 			const segment = bezier_segment_by_owner_key_id.get(curve_selection);
@@ -3219,6 +3585,14 @@
 				segment.in_curve_position - segment.end_position,
 				segment.in_curve_value - segment.end_value
 			);
+			const start_opposite_alignment = resolve_curve_drag_opposite_alignment(
+				segment.start_key_id,
+				{ key_id: segment.key_id, kind: 'out' }
+			);
+			const end_opposite_alignment = resolve_curve_drag_opposite_alignment(
+				segment.end_key_id,
+				{ key_id: segment.key_id, kind: 'in' }
+			);
 
 			begin_drag_edit_session('Sculpt Curve Segment', 'curve-segment-drag');
 			active_curve_drag = {
@@ -3235,16 +3609,35 @@
 				base_in_curve_value: segment.in_curve_value,
 				out_length,
 				in_length,
+				start_opposite_alignment,
+				end_opposite_alignment,
 				touched_key_ids: new Set<NodeId>([curve_selection])
 			};
 			canvas_element.setPointerCapture(event.pointerId);
+			hover_curve_owner_key_id = curve_selection;
+			hover_key_id = null;
 			event.preventDefault();
 			return;
 		}
 
-		if (!toggle_selection && !additive_selection) {
-			set_single_selected_key(null);
-		}
+		const mode: SelectionMode = toggle_selection
+			? 'toggle'
+			: additive_selection
+				? 'add'
+				: 'replace';
+		active_box_selection = {
+			pointer_id: event.pointerId,
+			start_screen_x: point.x,
+			start_screen_y: point.y,
+			current_screen_x: point.x,
+			current_screen_y: point.y,
+			mode
+		};
+		hover_key_id = null;
+		hover_curve_owner_key_id = null;
+		hover_bezier_handle = null;
+		canvas_element.setPointerCapture(event.pointerId);
+		event.preventDefault();
 	};
 
 	const on_canvas_pointer_move = (event: PointerEvent): void => {
@@ -3260,6 +3653,7 @@
 			interaction_transform
 		) {
 			hover_key_id = null;
+			hover_curve_owner_key_id = null;
 			hover_bezier_handle = null;
 			const delta_x = point.x - active_canvas_pan.start_screen_x;
 			const delta_y = point.y - active_canvas_pan.start_screen_y;
@@ -3274,6 +3668,18 @@
 				y_min: start.y_min + delta_y * units_per_px_y,
 				y_max: start.y_max + delta_y * units_per_px_y
 			});
+			return;
+		}
+
+		if (active_box_selection && active_box_selection.pointer_id === event.pointerId) {
+			active_box_selection = {
+				...active_box_selection,
+				current_screen_x: point.x,
+				current_screen_y: point.y
+			};
+			hover_key_id = null;
+			hover_curve_owner_key_id = null;
+			hover_bezier_handle = null;
 			return;
 		}
 
@@ -3302,6 +3708,7 @@
 			if (active_control) {
 				hover_key_id = active_control.anchor_key_id;
 			}
+			hover_curve_owner_key_id = null;
 			return;
 		}
 
@@ -3321,12 +3728,21 @@
 			if (preview_updates.size === 0) {
 				return;
 			}
+			const updated_key_ids = new Set<NodeId>(preview_updates.keys());
+			for (const key_id of [...active_curve_drag.touched_key_ids]) {
+				if (updated_key_ids.has(key_id)) {
+					continue;
+				}
+				clear_easing_drag_preview(key_id);
+				active_curve_drag.touched_key_ids.delete(key_id);
+			}
 			for (const [key_id, preview] of preview_updates.entries()) {
 				set_easing_drag_preview(key_id, preview);
 				active_curve_drag.touched_key_ids.add(key_id);
 			}
 			queue_bezier_handle_commit(preview_updates);
-			hover_key_id = active_curve_drag.owner_key_id;
+			hover_key_id = null;
+			hover_curve_owner_key_id = active_curve_drag.owner_key_id;
 			return;
 		}
 
@@ -3368,12 +3784,14 @@
 				}
 				queue_bezier_handle_commit(bezier_alignment_updates);
 			}
+			hover_curve_owner_key_id = null;
 			return;
 		}
 
 		const hovered_key = nearest_key(point.x, point.y, Math.max(6, rem_base_px * 0.56));
 		if (hovered_key !== null) {
 			hover_key_id = hovered_key;
+			hover_curve_owner_key_id = null;
 			hover_bezier_handle = null;
 			return;
 		}
@@ -3389,21 +3807,26 @@
 				bezier_handle_control_id(hovered_bezier_handle)
 			);
 			hover_key_id = hovered_control?.anchor_key_id ?? hovered_bezier_handle.key_id;
+			hover_curve_owner_key_id = null;
 			return;
 		}
-		hover_key_id = nearest_curve_owner_key(point.x, point.y, Math.max(4, rem_base_px * 0.42));
+		hover_key_id = null;
+		hover_curve_owner_key_id = nearest_curve_owner_key(point.x, point.y, Math.max(4, rem_base_px * 0.42));
 	};
 
 	const on_canvas_pointer_up = (event: PointerEvent): void => {
 		finish_drag(event.pointerId);
 		finish_canvas_pan(event.pointerId);
+		finish_box_selection(event.pointerId);
 	};
 	const on_canvas_pointer_cancel = (event: PointerEvent): void => {
 		finish_drag(event.pointerId);
 		finish_canvas_pan(event.pointerId);
+		finish_box_selection(event.pointerId);
 	};
 	const on_canvas_pointer_leave = (): void => {
 		hover_key_id = null;
+		hover_curve_owner_key_id = null;
 		hover_bezier_handle = null;
 		hover_curve_position = null;
 	};
@@ -3561,6 +3984,7 @@
 			}
 			finish_drag();
 			finish_canvas_pan();
+			finish_box_selection();
 			const pending = pending_create_target;
 			pending_create_target = null;
 			if (pending?.edit_session) {
@@ -3630,7 +4054,7 @@
 				Wheel: zoom | Shift + wheel: horizontal pan | Alt + wheel: vertical pan | Middle drag: pan |
 				Shift + click: add key | Ctrl/Cmd + click: toggle key | Drag selected keys: move | Drag
 				bezier handles: ease | Drag curve: sculpt | Alt + drag curve: absolute sculpt | Shift +
-				drag curve: ease/slowmo sculpt
+				drag curve: ease/slowmo sculpt | Drag on empty canvas: box select
 			</div>
 		{/if}
 
@@ -3640,11 +4064,14 @@
 				parsedKeys={parsed_keys}
 				selectedKeyId={selected_key_id}
 				selectedKeyIds={selected_key_ids}
+				selectedCurveOwnerKeyIds={selected_curve_owner_key_ids}
 				hoverKeyId={hover_key_id}
+				hoverCurveOwnerKeyId={hover_curve_owner_key_id}
 				bezierHandles={bezier_handle_visuals}
 				activeBezierHandle={active_bezier_handle_drag ? active_bezier_handle_drag.ref : null}
 				hoverBezierHandle={hover_bezier_handle}
 				hoverCurvePosition={hover_curve_position}
+				selectionRect={active_box_selection_rect}
 				activeCurveRangeConstraint={active_curve_range_constraint}
 				curveViewMode={curve_view_mode}
 				bind:fixedViewBounds={fixed_view_bounds}

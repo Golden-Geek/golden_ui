@@ -37,6 +37,13 @@
 		y_max: number;
 	}
 
+	interface CanvasSelectionRect {
+		left: number;
+		top: number;
+		width: number;
+		height: number;
+	}
+
 	interface CanvasTransform {
 		plot_left: number;
 		plot_top: number;
@@ -122,11 +129,14 @@
 		compiledCurve,
 		selectedKeyId,
 		selectedKeyIds = [],
+		selectedCurveOwnerKeyIds = [],
 		hoverKeyId,
+		hoverCurveOwnerKeyId = null,
 		bezierHandles = [],
 		activeBezierHandle = null,
 		hoverBezierHandle = null,
 		hoverCurvePosition,
+		selectionRect = null,
 		activeCurveRangeConstraint = null,
 		curveViewMode,
 		fixedViewBounds = $bindable<CurveViewBounds | null>(null),
@@ -150,11 +160,14 @@
 		compiledCurve: CompiledCurveLike;
 		selectedKeyId: NodeId | null;
 		selectedKeyIds?: NodeId[];
+		selectedCurveOwnerKeyIds?: NodeId[];
 		hoverKeyId: NodeId | null;
+		hoverCurveOwnerKeyId?: NodeId | null;
 		bezierHandles?: BezierHandleVisual[];
 		activeBezierHandle?: BezierHandleRef | null;
 		hoverBezierHandle?: BezierHandleRef | null;
 		hoverCurvePosition: { position: number; value: number } | null;
+		selectionRect?: CanvasSelectionRect | null;
 		activeCurveRangeConstraint?: CurveRangeConstraint | null;
 		curveViewMode: CurveViewMode;
 		fixedViewBounds?: CurveViewBounds | null;
@@ -1076,16 +1089,20 @@
 		const selected_key_id_list =
 			selectedKeyIds.length > 0 ? selectedKeyIds : selectedKeyId === null ? [] : [selectedKeyId];
 		const selected_key_set = new Set<NodeId>(selected_key_id_list);
+		const selected_curve_owner_key_set = new Set<NodeId>(selectedCurveOwnerKeyIds);
 
-		if (hoverKeyId !== null && !selected_key_set.has(hoverKeyId)) {
-			if (stroke_owned_segment(hoverKeyId, 'rgba(255, 171, 103, 0.25)', 2.6)) {
-				stroke_owned_segment(hoverKeyId, 'rgba(255, 197, 139, 0.82)', 1.35);
+		if (
+			hoverCurveOwnerKeyId !== null &&
+			!selected_curve_owner_key_set.has(hoverCurveOwnerKeyId)
+		) {
+			if (stroke_owned_segment(hoverCurveOwnerKeyId, 'rgba(117, 205, 255, 0.26)', 2.65)) {
+				stroke_owned_segment(hoverCurveOwnerKeyId, 'rgba(163, 223, 255, 0.86)', 1.38);
 			}
 		}
 
-		for (const key_id of selected_key_id_list) {
-			if (stroke_owned_segment(key_id, 'rgba(255, 224, 126, 0.32)', 3.1)) {
-				stroke_owned_segment(key_id, 'rgba(255, 232, 149, 0.94)', 1.75);
+		for (const curve_owner_key_id of selectedCurveOwnerKeyIds) {
+			if (stroke_owned_segment(curve_owner_key_id, 'rgba(122, 238, 201, 0.32)', 3.1)) {
+				stroke_owned_segment(curve_owner_key_id, 'rgba(182, 249, 226, 0.95)', 1.76);
 			}
 		}
 
@@ -1195,6 +1212,24 @@
 		}
 
 		context.restore();
+
+		if (selectionRect && selectionRect.width > 0 && selectionRect.height > 0) {
+			const box_left = clamp(selectionRect.left, 0, width);
+			const box_top = clamp(selectionRect.top, 0, height);
+			const box_right = clamp(selectionRect.left + selectionRect.width, 0, width);
+			const box_bottom = clamp(selectionRect.top + selectionRect.height, 0, height);
+			const box_width = Math.max(0, box_right - box_left);
+			const box_height = Math.max(0, box_bottom - box_top);
+			if (box_width > 0 && box_height > 0) {
+				context.fillStyle = 'rgba(114, 210, 255, 0.14)';
+				context.strokeStyle = 'rgba(158, 228, 255, 0.9)';
+				context.lineWidth = 1.05;
+				context.setLineDash([Math.max(2, rem_base_px * 0.11), Math.max(2, rem_base_px * 0.14)]);
+				context.fillRect(box_left, box_top, box_width, box_height);
+				context.strokeRect(box_left, box_top, box_width, box_height);
+				context.setLineDash([]);
+			}
+		}
 
 		if (showNumbers) {
 			const axis_label_font_px = Math.max(7, Math.round(height * 0.032));
@@ -1370,11 +1405,14 @@
 		parsedKeys;
 		selectedKeyId;
 		selectedKeyIds;
+		selectedCurveOwnerKeyIds;
 		hoverKeyId;
+		hoverCurveOwnerKeyId;
 		bezierHandles;
 		activeBezierHandle;
 		hoverBezierHandle;
 		hoverCurvePosition;
+		selectionRect;
 		rem_base_px;
 		curve_canvas_theme;
 		curveViewMode;
