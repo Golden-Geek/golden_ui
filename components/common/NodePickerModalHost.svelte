@@ -14,6 +14,10 @@
 		getMainViewportBounds,
 		type ViewportRect
 	} from '$lib/golden_ui/components/common/floating-panel';
+	import {
+		collectOutlinerAncestorNodeIds,
+		scrollOutlinerNodeIntoView
+	} from '$lib/golden_ui/components/panels/outliner/navigation';
 
 	let request = $derived(nodePickerModalState.request);
 	let options = $derived(request?.options ?? null);
@@ -27,6 +31,9 @@
 	let panelResizeObserver = $state<ResizeObserver | null>(null);
 	let graphState = $derived(appState.session?.graph.state ?? null);
 	let selectedNodeId = $state<number | null>(null);
+	let autoExpandAncestorNodeIds = $derived.by(() =>
+		collectOutlinerAncestorNodeIds(graphState, selectedNodeId)
+	);
 	let selectedProjection = $state<UiParamValueProjection | undefined>(undefined);
 
 	const getLiveAnchorRect = (): ViewportRect | null => {
@@ -67,13 +74,7 @@
 	};
 
 	const scrollToSelectedNode = (): void => {
-		if (!treeElement || selectedNodeId === null) {
-			return;
-		}
-		const target = treeElement.querySelector<HTMLElement>(
-			`.outliner-item-content[data-node-id="${selectedNodeId}"]`
-		);
-		target?.scrollIntoView({ block: 'center', inline: 'nearest' });
+		scrollOutlinerNodeIntoView(treeElement, selectedNodeId);
 	};
 
 	const nodeById = (nodeId: number | null): UiNodeDto | null => {
@@ -102,12 +103,8 @@
 	};
 
 	let selectedNode = $derived.by(() => nodeById(selectedNodeId));
-	let selectedProjectionOptions = $derived.by(() =>
-		projectionOptionsForNode(selectedNode)
-	);
-	let selectedProjectionRequired = $derived.by(() =>
-		projectionRequiredForNode(selectedNode)
-	);
+	let selectedProjectionOptions = $derived.by(() => projectionOptionsForNode(selectedNode));
+	let selectedProjectionRequired = $derived.by(() => projectionRequiredForNode(selectedNode));
 	let canConfirmPick = $derived.by(() => {
 		if (!selectedNode) {
 			return false;
@@ -128,10 +125,7 @@
 		}
 		const projectionOptions = projectionOptionsForNode(candidate);
 		const projectionRequired = projectionRequiredForNode(candidate);
-		if (
-			selectedProjection !== undefined &&
-			projectionOptions.includes(selectedProjection)
-		) {
+		if (selectedProjection !== undefined && projectionOptions.includes(selectedProjection)) {
 			return;
 		}
 		if (projectionRequired && projectionOptions.length === 1) {
@@ -346,65 +340,60 @@
 				bind:value={query} />
 			<div class="picker-tree" bind:this={treeElement}>
 				{#if options.rootNode}
-						<OutlinerItem
-							node={options.rootNode}
-							mode="tree"
-							initiallyExpandedDepth={options.initiallyExpandedDepth}
-							transitionDurationMs={90}
-							focusedNodeId={selectedNodeId}
-							autoExpandToNodeId={selectedNodeId}
-							nodeFilter={passesFilter}
-							nodeSelectable={selectableByConstraints}
-							onSelectNode={(candidate) => {
-								if (!options.projectionOptions) {
-									resolveNodePickerModal({ kind: 'pick', node: candidate });
-									return;
-								}
-								selectedNodeId = candidate.node_id;
-								alignProjectionForNode(candidate);
-							}} />
-					{:else}
-						<div class="picker-empty">No root available</div>
-					{/if}
-				</div>
-				{#if options.projectionOptions}
-					<div class="projection-controls">
-						<span class="projection-label">Projection</span>
-						<select
-							class="projection-select"
-							disabled={!selectedNode}
-							value={selectedProjection ?? ''}
-							onchange={(event) => {
-								const value = (event.target as HTMLSelectElement).value;
-								selectedProjection =
-									value.length > 0
-										? (value as UiParamValueProjection)
-										: undefined;
-							}}>
-							{#if !selectedProjectionRequired}
-								<option value="">Auto</option>
-							{/if}
-							{#each selectedProjectionOptions as projection}
-								<option value={projection}>{projectionLabel(projection)}</option>
-							{/each}
-						</select>
-					</div>
+					<OutlinerItem
+						node={options.rootNode}
+						mode="tree"
+						initiallyExpandedDepth={options.initiallyExpandedDepth}
+						transitionDurationMs={90}
+						focusedNodeId={selectedNodeId}
+						{autoExpandAncestorNodeIds}
+						nodeFilter={passesFilter}
+						nodeSelectable={selectableByConstraints}
+						onSelectNode={(candidate) => {
+							if (!options.projectionOptions) {
+								resolveNodePickerModal({ kind: 'pick', node: candidate });
+								return;
+							}
+							selectedNodeId = candidate.node_id;
+							alignProjectionForNode(candidate);
+						}} />
+				{:else}
+					<div class="picker-empty">No root available</div>
 				{/if}
-				<footer class="picker-actions">
-					{#if options.clearable}
-						<button type="button" onclick={() => resolveNodePickerModal({ kind: 'clear' })}>
-							Clear
-						</button>
-					{/if}
-					{#if options.projectionOptions}
-						<button type="button" disabled={!canConfirmPick} onclick={confirmPick}>
-							Select
-						</button>
-					{/if}
-					<button type="button" onclick={() => closeNodePickerModal()}>Cancel</button>
-				</footer>
 			</div>
+			{#if options.projectionOptions}
+				<div class="projection-controls">
+					<span class="projection-label">Projection</span>
+					<select
+						class="projection-select"
+						disabled={!selectedNode}
+						value={selectedProjection ?? ''}
+						onchange={(event) => {
+							const value = (event.target as HTMLSelectElement).value;
+							selectedProjection = value.length > 0 ? (value as UiParamValueProjection) : undefined;
+						}}>
+						{#if !selectedProjectionRequired}
+							<option value="">Auto</option>
+						{/if}
+						{#each selectedProjectionOptions as projection}
+							<option value={projection}>{projectionLabel(projection)}</option>
+						{/each}
+					</select>
+				</div>
+			{/if}
+			<footer class="picker-actions">
+				{#if options.clearable}
+					<button type="button" onclick={() => resolveNodePickerModal({ kind: 'clear' })}>
+						Clear
+					</button>
+				{/if}
+				{#if options.projectionOptions}
+					<button type="button" disabled={!canConfirmPick} onclick={confirmPick}> Select </button>
+				{/if}
+				<button type="button" onclick={() => closeNodePickerModal()}>Cancel</button>
+			</footer>
 		</div>
+	</div>
 {/if}
 
 <style>

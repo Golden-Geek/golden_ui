@@ -2,7 +2,9 @@
 	import type { PanelProps, PanelState } from '../../../dockview/panel-types';
 	import type { UiNodeDto } from '../../../types';
 	import { appState } from '$lib/golden_ui/store/workbench.svelte';
+	import { tick } from 'svelte';
 	import OutlinerItem from './OutlinerItem.svelte';
+	import { collectOutlinerAncestorNodeIds, scrollOutlinerNodeIntoView } from './navigation';
 
 	let { panelId, panelType, title, params }: PanelProps = $props();
 	let panel = $state<PanelState>({
@@ -26,7 +28,12 @@
 	};
 
 	let mainGraphState = $derived(appState.session?.graph.state);
+	let selectedNodeId = $derived(appState.session?.selectedNodeId ?? null);
+	let autoExpandAncestorNodeIds = $derived.by(() =>
+		collectOutlinerAncestorNodeIds(mainGraphState ?? null, selectedNodeId)
+	);
 	let query = $state('');
+	let treeElement = $state<HTMLDivElement | null>(null);
 
 	let rootNode = $derived(mainGraphState?.nodesById.get(mainGraphState?.rootId ?? 0) ?? null);
 
@@ -39,6 +46,43 @@
 			`${candidate.meta.label} ${candidate.meta.short_name} ${candidate.node_type}`.toLowerCase();
 		return haystack.includes(normalizedQuery);
 	};
+
+	$effect(() => {
+		query;
+		if (!treeElement || selectedNodeId === null) {
+			return;
+		}
+
+		let cancelled = false;
+		let frameId: number | null = null;
+		let attempts = 0;
+		const maxAttempts = 8;
+
+		const revealSelectedNode = (): void => {
+			if (cancelled) {
+				return;
+			}
+			if (scrollOutlinerNodeIntoView(treeElement, selectedNodeId)) {
+				return;
+			}
+			if (attempts >= maxAttempts || typeof requestAnimationFrame === 'undefined') {
+				return;
+			}
+			attempts += 1;
+			frameId = requestAnimationFrame(revealSelectedNode);
+		};
+
+		void tick().then(() => {
+			revealSelectedNode();
+		});
+
+		return () => {
+			cancelled = true;
+			if (frameId !== null && typeof cancelAnimationFrame !== 'undefined') {
+				cancelAnimationFrame(frameId);
+			}
+		};
+	});
 </script>
 
 {#if rootNode}
@@ -46,9 +90,13 @@
 		<div class="outliner-header">
 			<input type="text" placeholder="Search..." class="outliner-search" bind:value={query} />
 		</div>
-		<div class="outliner-content">
+		<div class="outliner-content" bind:this={treeElement}>
 			<div class="outliner-tree">
-				<OutlinerItem node={rootNode} {nodeFilter} initiallyExpandedDepth={3} />
+				<OutlinerItem
+					node={rootNode}
+					initiallyExpandedDepth={3}
+					{autoExpandAncestorNodeIds}
+					{nodeFilter} />
 			</div>
 		</div>
 	</div>
@@ -63,11 +111,11 @@
 	.outliner-header {
 		box-sizing: border-box;
 	}
-    
+
 	.outliner-search {
 		width: 100%;
 		padding: 0.25rem;
-        box-sizing: border-box;
+		box-sizing: border-box;
 	}
 	.outliner-content {
 		flex: 1;

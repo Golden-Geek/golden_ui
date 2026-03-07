@@ -27,7 +27,6 @@
 	type CurveStepMode = 'stepSize' | 'numSteps';
 	type CurvePhaseMode = 'frequency' | 'numPhases';
 	type CurveShape = 'sine' | 'triangle' | 'saw' | 'reverseSaw' | 'square';
-	type CurveViewMode = 'adaptive' | 'fixed';
 
 	interface ParamNodeRef {
 		node_id: NodeId;
@@ -414,7 +413,6 @@ interface ActiveCurveDrag {
 	let easing_drag_preview_by_key_id = $state<Map<NodeId, BezierEasingPreview>>(new Map());
 	let pending_create_target = $state<PendingCreateTarget | null>(null);
 	let adding_key = $state(false);
-	let curve_view_mode = $state<CurveViewMode>('adaptive');
 	let fixed_view_bounds = $state<CurveViewBounds | null>(null);
 	let canvas_element = $state<HTMLCanvasElement | null>(null);
 	let active_drag = $state<ActiveKeyDrag | null>(null);
@@ -2398,6 +2396,131 @@ interface ActiveCurveDrag {
 		};
 	};
 
+	const padded_axis_bounds = (
+		min_candidate: number,
+		max_candidate: number,
+		minimum_span_candidate: number,
+		pad_ratio: number
+	): { min: number; max: number } | null => {
+		if (!Number.isFinite(min_candidate) || !Number.isFinite(max_candidate)) {
+			return null;
+		}
+		const min = Math.min(min_candidate, max_candidate);
+		const max = Math.max(min_candidate, max_candidate);
+		const minimum_span = Math.max(
+			MIN_VIEW_SPAN,
+			Number.isFinite(minimum_span_candidate) ? minimum_span_candidate : MIN_VIEW_SPAN
+		);
+		const base_span = Math.max(max - min, minimum_span);
+		const center = (min + max) * 0.5;
+		const half_span = base_span * (0.5 + pad_ratio);
+		return {
+			min: center - half_span,
+			max: center + half_span
+		};
+	};
+
+	const selected_frame_key_ids = (): NodeId[] => {
+		const selected_ids = selected_key_ids_ordered();
+		if (selected_ids.length > 0) {
+			return selected_ids;
+		}
+		if (selected_curve_owner_key_ids.length === 0) {
+			return [];
+		}
+		const owner_set = new Set(selected_curve_owner_key_ids);
+		const framed = new Set<NodeId>();
+		for (let index = 0; index < parsed_keys.length; index += 1) {
+			const key = parsed_keys[index];
+			if (!owner_set.has(key.node_id)) {
+				continue;
+			}
+			framed.add(key.node_id);
+			const next = parsed_keys[index + 1];
+			if (next) {
+				framed.add(next.node_id);
+			}
+		}
+		return parsed_keys
+			.filter((entry) => framed.has(entry.node_id))
+			.map((entry) => entry.node_id);
+	};
+
+	const estimate_frame_x_span = (keys: ParsedCurveKey[]): number => {
+		if (keys.length >= 2) {
+			return Math.max(MIN_VIEW_SPAN, keys[keys.length - 1].position - keys[0].position);
+		}
+		const focus = keys[0];
+		if (!focus) {
+			const active_range = active_curve_range_constraint;
+			if (active_range) {
+				return Math.max(MIN_VIEW_SPAN, active_range.x_max - active_range.x_min);
+			}
+			const current = current_view_bounds();
+			if (current) {
+				return Math.max(MIN_VIEW_SPAN, current.x_max - current.x_min);
+			}
+			return 1;
+		}
+
+		const index = parsed_keys.findIndex((entry) => entry.node_id === focus.node_id);
+		const previous = index > 0 ? parsed_keys[index - 1] : null;
+		const next = index >= 0 && index + 1 < parsed_keys.length ? parsed_keys[index + 1] : null;
+		if (previous && next) {
+			return Math.max(MIN_VIEW_SPAN, next.position - previous.position);
+		}
+		if (previous) {
+			return Math.max(MIN_VIEW_SPAN, (focus.position - previous.position) * 2);
+		}
+		if (next) {
+			return Math.max(MIN_VIEW_SPAN, (next.position - focus.position) * 2);
+		}
+
+		const active_range = active_curve_range_constraint;
+		if (active_range) {
+			return Math.max(MIN_VIEW_SPAN, (active_range.x_max - active_range.x_min) * 0.18);
+		}
+		const current = current_view_bounds();
+		if (current) {
+			return Math.max(MIN_VIEW_SPAN, (current.x_max - current.x_min) * 0.18);
+		}
+		return 1;
+	};
+
+	const sampled_curve_value_bounds = (
+		x_min_candidate: number,
+		x_max_candidate: number
+	): { min: number; max: number } | null => {
+		if (
+			compiled_curve.keys.length === 0 ||
+			!Number.isFinite(x_min_candidate) ||
+			!Number.isFinite(x_max_candidate)
+		) {
+			return null;
+		}
+		const x_min = Math.min(x_min_candidate, x_max_candidate);
+		const x_max = Math.max(x_min_candidate, x_max_candidate);
+		const sample_count = x_max - x_min <= CURVE_EPSILON ? 1 : 96;
+		let y_min = Number.POSITIVE_INFINITY;
+		let y_max = Number.NEGATIVE_INFINITY;
+		for (let index = 0; index < sample_count; index += 1) {
+			const t = sample_count <= 1 ? 0 : index / (sample_count - 1);
+			const position = sample_count <= 1 ? x_min : x_min + (x_max - x_min) * t;
+			const sampled = sample_compiled_curve(compiled_curve, position);
+			if (sampled === null) {
+				continue;
+			}
+			const value = clamp_curve_value_to_active_range(sampled);
+			if (value < y_min) {
+				y_min = value;
+			}
+			if (value > y_max) {
+				y_max = value;
+			}
+		}
+		return Number.isFinite(y_min) && Number.isFinite(y_max) ? { min: y_min, max: y_max } : null;
+	};
+
 	const sanitize_view_bounds = (bounds: CurveViewBounds): CurveViewBounds | null => {
 		if (
 			!Number.isFinite(bounds.x_min) ||
@@ -2480,7 +2603,6 @@ interface ActiveCurveDrag {
 		if (!sanitized) {
 			return;
 		}
-		curve_view_mode = 'fixed';
 		fixed_view_bounds = sanitized;
 	};
 
@@ -4063,8 +4185,63 @@ interface ActiveCurveDrag {
 		selected_curve_owner_key_ids = [];
 	};
 
-	const frame_view = (): void => {
-		set_curve_view_mode('adaptive');
+	const frame_selected_view = (): boolean => {
+		const frame_keys = selected_frame_key_ids()
+			.map((key_id) => parsed_key_by_id.get(key_id))
+			.filter((key): key is ParsedCurveKey => key !== undefined);
+		if (frame_keys.length === 0) {
+			return false;
+		}
+
+		let x_min = frame_keys[0].position;
+		let x_max = frame_keys[frame_keys.length - 1].position;
+		const focus_x_span = estimate_frame_x_span(frame_keys);
+		if (x_max - x_min <= CURVE_EPSILON) {
+			const center = (x_min + x_max) * 0.5;
+			x_min = center - focus_x_span * 0.5;
+			x_max = center + focus_x_span * 0.5;
+		}
+
+		const sampled_y = sampled_curve_value_bounds(x_min, x_max);
+		let y_min = Number.POSITIVE_INFINITY;
+		let y_max = Number.NEGATIVE_INFINITY;
+		for (const key of frame_keys) {
+			const value = clamp_curve_value_to_active_range(key.value);
+			if (value < y_min) {
+				y_min = value;
+			}
+			if (value > y_max) {
+				y_max = value;
+			}
+		}
+		if (sampled_y) {
+			y_min = Math.min(y_min, sampled_y.min);
+			y_max = Math.max(y_max, sampled_y.max);
+		}
+		if (!Number.isFinite(y_min) || !Number.isFinite(y_max)) {
+			return false;
+		}
+
+		const y_center = (y_min + y_max) * 0.5;
+		const y_minimum_span =
+			y_max - y_min > CURVE_EPSILON ? y_max - y_min : Math.max(0.5, Math.abs(y_center) * 0.2);
+		const padded_x = padded_axis_bounds(x_min, x_max, focus_x_span, 0.08);
+		const padded_y = padded_axis_bounds(y_min, y_max, y_minimum_span, 0.1);
+		if (!padded_x || !padded_y) {
+			return false;
+		}
+
+		apply_view_bounds({
+			x_min: padded_x.min,
+			x_max: padded_x.max,
+			y_min: padded_y.min,
+			y_max: padded_y.max
+		});
+		return true;
+	};
+
+	const home_view = (): void => {
+		fixed_view_bounds = null;
 	};
 
 	const key_anchor_point = (): { position: number; value: number } => {
@@ -4143,14 +4320,6 @@ interface ActiveCurveDrag {
 
 	const remove_selected_key = async (): Promise<void> => {
 		await remove_selected_keys();
-	};
-
-	const set_curve_view_mode = (mode: CurveViewMode): void => {
-		if (curve_view_mode === mode && mode === 'fixed' && fixed_view_bounds) {
-			return;
-		}
-		curve_view_mode = mode;
-		fixed_view_bounds = null;
 	};
 
 	const axis_midpoint = (): { position: number; value: number } => {
@@ -4240,7 +4409,17 @@ interface ActiveCurveDrag {
 					if (!is_canvas_focused) {
 						return false;
 					}
-					frame_view();
+					return frame_selected_view();
+				},
+				{ priority: 200 }
+			),
+			registerCommandHandler(
+				'view.home',
+				() => {
+					if (!is_canvas_focused) {
+						return false;
+					}
+					home_view();
 					return true;
 				},
 				{ priority: 200 }
@@ -4295,31 +4474,22 @@ interface ActiveCurveDrag {
 					}}>
 					Delete Key
 				</button>
-				<div class="view-mode-toggle" role="group" aria-label="Curve viewport mode">
-					<button
-						type="button"
-						class="toolbar-button mode-button {curve_view_mode === 'adaptive' ? 'active' : ''}"
-						onclick={() => {
-							set_curve_view_mode('adaptive');
-						}}>
-						Adaptive
-					</button>
-					<button
-						type="button"
-						class="toolbar-button mode-button {curve_view_mode === 'fixed' ? 'active' : ''}"
-						onclick={() => {
-							set_curve_view_mode('fixed');
-						}}>
-						Fixed
-					</button>
-				</div>
+				<button
+					type="button"
+					class="toolbar-button"
+					disabled={selected_frame_key_ids().length === 0}
+					onclick={() => {
+						frame_selected_view();
+					}}>
+					Frame Selected
+				</button>
 				<button
 					type="button"
 					class="toolbar-button"
 					onclick={() => {
-						set_curve_view_mode('adaptive');
+						home_view();
 					}}>
-					Fit View
+					Home
 				</button>
 				<div class="curve-stats">
 					<div><strong>{parsed_keys.length}</strong> keys</div>
@@ -4329,10 +4499,11 @@ interface ActiveCurveDrag {
 		{/if}
 		{#if showHints}
 			<div class="curve-nav-hint">
-				Wheel: zoom | Shift + wheel: horizontal pan | Alt + wheel: vertical pan | Middle drag: pan |
-				Shift + click: add key | Ctrl/Cmd + click: toggle key | Drag selected keys: move | Drag
-				bezier handles: ease | Drag curve: sculpt | Alt + drag curve: absolute sculpt | Shift +
-				drag curve: ease/slowmo sculpt | Drag on empty canvas: box select
+				F: frame selection | H: home | Wheel: zoom | Shift + wheel: horizontal pan | Alt +
+				wheel: vertical pan | Middle drag: pan | Shift + click: add key | Ctrl/Cmd + click:
+				toggle key | Drag selected keys: move | Drag bezier handles: ease | Drag curve: sculpt |
+				Alt + drag curve: absolute sculpt | Shift + drag curve: ease/slowmo sculpt | Drag on
+				empty canvas: box select
 			</div>
 		{/if}
 
@@ -4351,7 +4522,6 @@ interface ActiveCurveDrag {
 				hoverCurvePosition={hover_curve_position}
 				selectionRect={active_box_selection_rect}
 				activeCurveRangeConstraint={active_curve_range_constraint}
-				curveViewMode={curve_view_mode}
 				bind:fixedViewBounds={fixed_view_bounds}
 				bind:interactionTransform={interaction_transform}
 				bind:canvasElement={canvas_element}
@@ -4421,30 +4591,6 @@ interface ActiveCurveDrag {
 		opacity: 0.64;
 		padding: 0 0.12rem;
 		letter-spacing: 0.01em;
-	}
-
-	.view-mode-toggle {
-		display: inline-flex;
-		align-items: center;
-		border-radius: 0.32rem;
-		overflow: hidden;
-		border: solid 0.06rem rgba(189, 215, 247, 0.28);
-	}
-
-	.mode-button {
-		border-radius: 0;
-		border: none;
-		border-right: solid 0.06rem rgba(189, 215, 247, 0.18);
-		height: 1.5rem;
-		min-width: 4.8rem;
-	}
-
-	.mode-button:last-child {
-		border-right: none;
-	}
-
-	.mode-button.active {
-		background: rgba(127, 230, 201, 0.24);
 	}
 
 	.curve-canvas-shell {

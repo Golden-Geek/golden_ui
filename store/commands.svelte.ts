@@ -3,6 +3,7 @@ import { platform } from './platform.svelte';
 export type CommandId =
 	| 'edit.deleteSelection'
 	| 'view.frame'
+	| 'view.home'
 	| 'select.all'
 	| 'edit.copy'
 	| 'edit.cut'
@@ -50,8 +51,13 @@ const commandDefinitions: CommandDefinition[] = [
 	},
 	{
 		id: 'view.frame',
-		label: 'Frame',
+		label: 'Frame Selection',
 		shortcuts: [{ key: 'f' }]
+	},
+	{
+		id: 'view.home',
+		label: 'Home',
+		shortcuts: [{ key: 'h' }]
 	},
 	{
 		id: 'select.all',

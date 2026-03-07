@@ -1,11 +1,13 @@
 <script lang="ts">
 	import { appState } from '$lib/golden_ui/store/workbench.svelte';
-	import type { UiNodeDto } from '$lib/golden_ui/types';
+	import type { NodeId, UiNodeDto } from '$lib/golden_ui/types';
 	import Self from './OutlinerItem.svelte';
 	import { getIconURLForNode } from '$lib/golden_ui/store/node-types';
 	import { slide } from 'svelte/transition';
 	import NodeWarningBadge from '$lib/golden_ui/components/common/NodeWarningBadge.svelte';
 	import EnableButton from '../../common/EnableButton.svelte';
+
+	const EMPTY_AUTO_EXPAND_ANCESTORS: ReadonlySet<NodeId> = new Set<NodeId>();
 
 	let {
 		node,
@@ -15,7 +17,7 @@
 		initiallyExpandedDepth = 5,
 		transitionDurationMs = 150,
 		focusedNodeId = null,
-		autoExpandToNodeId = null,
+		autoExpandAncestorNodeIds = EMPTY_AUTO_EXPAND_ANCESTORS,
 		nodeFilter = (_candidate: UiNodeDto) => true,
 		nodeSelectable = (_candidate: UiNodeDto) => true,
 		onSelectNode = null
@@ -27,7 +29,7 @@
 		initiallyExpandedDepth?: number;
 		transitionDurationMs?: number;
 		focusedNodeId?: number | null;
-		autoExpandToNodeId?: number | null;
+		autoExpandAncestorNodeIds?: ReadonlySet<NodeId>;
 		nodeFilter?: (candidate: UiNodeDto) => boolean;
 		nodeSelectable?: (candidate: UiNodeDto) => boolean;
 		onSelectNode?: ((next: UiNodeDto, event: MouseEvent) => void) | null;
@@ -59,22 +61,6 @@
 		);
 	};
 
-	const subtreeContainsNodeId = (candidate: UiNodeDto | null, targetNodeId: number): boolean => {
-		if (!candidate) {
-			return false;
-		}
-		if (candidate.node_id === targetNodeId) {
-			return true;
-		}
-		for (const childId of candidate.children ?? []) {
-			const childNode = mainGraphState?.nodesById.get(childId) ?? null;
-			if (subtreeContainsNodeId(childNode, targetNodeId)) {
-				return true;
-			}
-		}
-		return false;
-	};
-
 	let isExpanded = $state(false);
 	let didInitExpanded = $state(false);
 
@@ -82,13 +68,16 @@
 		if (didInitExpanded) {
 			return;
 		}
-		const shouldAutoExpandToTarget =
-			autoExpandToNodeId !== null &&
-			node !== null &&
-			node.node_id !== autoExpandToNodeId &&
-			subtreeContainsNodeId(node, autoExpandToNodeId);
+		const shouldAutoExpandToTarget = node !== null && autoExpandAncestorNodeIds.has(node.node_id);
 		isExpanded = level < initiallyExpandedDepth || shouldAutoExpandToTarget;
 		didInitExpanded = true;
+	});
+
+	$effect(() => {
+		if (node === null || !autoExpandAncestorNodeIds.has(node.node_id)) {
+			return;
+		}
+		isExpanded = true;
 	});
 
 	let isSelected = $derived(session?.isNodeSelected(node?.node_id ?? -1) ?? false);
@@ -107,9 +96,7 @@
 		return Number(presentation.show_child_warnings_max_depth ?? 0) > 0;
 	});
 	let warnings = $derived(
-		node && canHaveVisibleWarnings
-			? (session?.getNodeVisibleWarnings(node.node_id) ?? [])
-			: []
+		node && canHaveVisibleWarnings ? (session?.getNodeVisibleWarnings(node.node_id) ?? []) : []
 	);
 
 	const passesFilter = (candidate: UiNodeDto | null): boolean => {
@@ -198,7 +185,7 @@
 						{initiallyExpandedDepth}
 						{transitionDurationMs}
 						{focusedNodeId}
-						{autoExpandToNodeId}
+						{autoExpandAncestorNodeIds}
 						{nodeFilter}
 						{nodeSelectable}
 						{onSelectNode} />

@@ -56,7 +56,7 @@
 	--gc-color-curve-canvas-wrap-border: transparent;
 	--gc-color-curve-line-idle: #9aa1ac;
 	--gc-color-curve-point-idle: #b1bac9;
-	--gc-color-curve-fill-rgb: 160, 0, 120;
+	--gc-color-curve-fill-rgb: 0, 110, 120;
 	--gc-color-curve-grid-line-rgb: 164, 174, 191;
 	--gc-color-curve-grid-label-rgb: 100, 100, 100;
 	--gc-color-curve-border-unbounded: rgba(138, 147, 161, 0.1);

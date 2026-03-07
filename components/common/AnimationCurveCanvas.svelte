@@ -91,8 +91,6 @@
 		kind: BezierHandleKind;
 	}
 
-	type CurveViewMode = 'adaptive' | 'fixed';
-
 	const CURVE_EPSILON = 1e-12;
 	const GRID_MANTISSAS = [1, 2, 5] as const;
 	const GRID_MAX_LINES = 4000;
@@ -139,7 +137,6 @@
 		hoverCurvePosition,
 		selectionRect = null,
 		activeCurveRangeConstraint = null,
-		curveViewMode,
 		fixedViewBounds = $bindable<CurveViewBounds | null>(null),
 		interactionTransform = $bindable<CanvasTransform | null>(null),
 		canvasElement = $bindable<HTMLCanvasElement | null>(null),
@@ -172,7 +169,6 @@
 		hoverCurvePosition: { position: number; value: number } | null;
 		selectionRect?: CanvasSelectionRect | null;
 		activeCurveRangeConstraint?: CurveRangeConstraint | null;
-		curveViewMode: CurveViewMode;
 		fixedViewBounds?: CurveViewBounds | null;
 		interactionTransform?: CanvasTransform | null;
 		canvasElement?: HTMLCanvasElement | null;
@@ -875,16 +871,7 @@
 					y_max: active_range.y_max
 				}
 			: { x_min, x_max, y_min, y_max };
-		let active_bounds = adaptive_bounds;
-		if (curveViewMode === 'fixed') {
-			if (fixedViewBounds) {
-				active_bounds = fixedViewBounds;
-			} else {
-				fixedViewBounds = adaptive_bounds;
-			}
-		} else if (fixedViewBounds) {
-			fixedViewBounds = null;
-		}
+		const active_bounds = fixedViewBounds ?? adaptive_bounds;
 
 		if (
 			Math.abs(active_bounds.x_min - x_min) > CURVE_EPSILON ||
@@ -904,7 +891,7 @@
 			}
 		}
 
-		if (curveViewMode === 'fixed') {
+		if (fixedViewBounds) {
 			y_min = active_bounds.y_min;
 			y_max = active_bounds.y_max;
 		} else {
@@ -1497,7 +1484,6 @@
 		selectionRect;
 		rem_base_px;
 		curve_canvas_theme;
-		curveViewMode;
 		fixedViewBounds;
 		activeCurveRangeConstraint;
 		showGrid;
