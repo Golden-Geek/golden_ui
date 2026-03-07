@@ -193,6 +193,7 @@
 	}
 
 	interface BezierHandleVisual {
+		anchor_key_id: NodeId;
 		key_id: NodeId;
 		kind: BezierHandleKind;
 		anchor_position: number;
@@ -267,10 +268,14 @@
 		anchor_owner_key_id: NodeId;
 		left_span: number;
 		right_span: number;
+		previous_out_vector_x: number;
+		previous_out_vector_y: number;
 		in_vector_x: number;
 		in_vector_y: number;
 		out_vector_x: number;
 		out_vector_y: number;
+		next_in_vector_x: number;
+		next_in_vector_y: number;
 	}
 
 	interface ActiveBezierHandleDrag {
@@ -1429,10 +1434,14 @@ interface ActiveCurveDrag {
 				anchor_owner_key_id: right_segment.key_id,
 				left_span: left_segment.span,
 				right_span: right_segment.span,
+				previous_out_vector_x: left_segment.out_curve_position - previous.position,
+				previous_out_vector_y: left_segment.out_curve_value - previous.value,
 				in_vector_x,
 				in_vector_y,
 				out_vector_x,
-				out_vector_y
+				out_vector_y,
+				next_in_vector_x: right_segment.in_curve_position - next.position,
+				next_in_vector_y: right_segment.in_curve_value - next.value
 			});
 		}
 
@@ -1669,14 +1678,22 @@ interface ActiveCurveDrag {
 		}
 		const owner_set = new Set(bezier_handle_owner_key_ids);
 		const visible = new Set<NodeId>(bezier_handle_owner_key_ids);
+		const show_neighbors_on_both_sides = selected_key_ids.length > 0 || selected_key_id !== null;
 		for (let index = 0; index + 1 < parsed_keys.length; index += 1) {
 			const start = parsed_keys[index];
 			const end = parsed_keys[index + 1];
 			if (!owner_set.has(start.node_id)) {
+				if (!(show_neighbors_on_both_sides && owner_set.has(end.node_id))) {
+					continue;
+				}
+				visible.add(start.node_id);
 				continue;
 			}
 			// Selected curve/key means current and next anchors are involved.
 			visible.add(end.node_id);
+			if (show_neighbors_on_both_sides) {
+				visible.add(start.node_id);
+			}
 		}
 		return [...visible];
 	});
@@ -1789,6 +1806,7 @@ interface ActiveCurveDrag {
 
 	let bezier_handle_visuals = $derived.by((): BezierHandleVisual[] =>
 		bezier_handle_controls.map((control) => ({
+			anchor_key_id: control.anchor_key_id,
 			key_id: control.ref.key_id,
 			kind: control.ref.kind,
 			anchor_position: control.anchor_position,
@@ -3454,6 +3472,9 @@ interface ActiveCurveDrag {
 				constraint.previous_owner_key_id
 			);
 			if (previous_owner_preview) {
+				previous_owner_preview.out_position =
+					(constraint.previous_out_vector_x * in_scale) / left_span;
+				previous_owner_preview.out_value = constraint.previous_out_vector_y * in_scale;
 				previous_owner_preview.in_position = scaled_in_vector_x / left_span;
 				previous_owner_preview.in_value = scaled_in_vector_y;
 			}
@@ -3464,6 +3485,9 @@ interface ActiveCurveDrag {
 			if (anchor_owner_preview) {
 				anchor_owner_preview.out_position = scaled_out_vector_x / right_span;
 				anchor_owner_preview.out_value = scaled_out_vector_y;
+				anchor_owner_preview.in_position =
+					(constraint.next_in_vector_x * out_scale) / right_span;
+				anchor_owner_preview.in_value = constraint.next_in_vector_y * out_scale;
 			}
 		}
 

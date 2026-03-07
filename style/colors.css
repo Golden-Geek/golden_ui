@@ -70,11 +70,15 @@
 	--gc-color-curve-selected-segment-underlay: rgba(92, 241, 170, 0.34);
 	--gc-color-curve-selected-segment: rgba(150, 255, 203, 0.96);
 	--gc-color-curve-handle-line: rgba(222, 232, 251, 0.32);
+	--gc-color-curve-handle-line-aligned: rgba(120, 234, 198, 0.46);
+	--gc-color-curve-handle-line-unlocked: rgba(255, 177, 118, 0.42);
 	--gc-color-curve-handle-active: rgba(255, 224, 130, 0.98);
 	--gc-color-curve-handle-hover: rgba(255, 199, 138, 0.95);
 	--gc-color-curve-handle-out: rgba(172, 235, 220, 0.9);
 	--gc-color-curve-handle-in: rgba(164, 205, 245, 0.9);
 	--gc-color-curve-handle-stroke: rgba(10, 16, 24, 0.95);
+	--gc-color-curve-handle-anchor-aligned: rgba(141, 245, 205, 0.94);
+	--gc-color-curve-handle-anchor-unlocked: rgba(255, 183, 125, 0.94);
 	--gc-color-curve-key-selected: rgba(255, 229, 112, 0.98);
 	--gc-color-curve-key-hover: rgba(255, 182, 96, 0.95);
 	--gc-color-curve-key-stroke: rgba(8, 12, 18, 0.9);

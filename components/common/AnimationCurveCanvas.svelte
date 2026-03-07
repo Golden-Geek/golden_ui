@@ -84,11 +84,15 @@
 		selected_segment_underlay: string;
 		selected_segment: string;
 		handle_line: string;
+		handle_line_aligned: string;
+		handle_line_unlocked: string;
 		handle_active: string;
 		handle_hover: string;
 		handle_out: string;
 		handle_in: string;
 		handle_stroke: string;
+		handle_anchor_aligned: string;
+		handle_anchor_unlocked: string;
 		key_selected: string;
 		key_hover: string;
 		key_stroke: string;
@@ -100,14 +104,17 @@
 	}
 
 	type BezierHandleKind = 'out' | 'in';
+	type BezierHandleAlignmentState = 'single' | 'aligned' | 'unlocked';
 
 	interface BezierHandleVisual {
+		anchor_key_id: NodeId;
 		key_id: NodeId;
 		kind: BezierHandleKind;
 		anchor_position: number;
 		anchor_value: number;
 		handle_position: number;
 		handle_value: number;
+		alignment_state: BezierHandleAlignmentState;
 	}
 
 	interface BezierHandleRef {
@@ -238,11 +245,15 @@
 		selected_segment_underlay: 'rgba(92, 241, 170, 0.34)',
 		selected_segment: 'rgba(150, 255, 203, 0.96)',
 		handle_line: 'rgba(222, 232, 251, 0.32)',
+		handle_line_aligned: 'rgba(120, 234, 198, 0.46)',
+		handle_line_unlocked: 'rgba(255, 177, 118, 0.42)',
 		handle_active: 'rgba(255, 224, 130, 0.98)',
 		handle_hover: 'rgba(255, 199, 138, 0.95)',
 		handle_out: 'rgba(172, 235, 220, 0.9)',
 		handle_in: 'rgba(164, 205, 245, 0.9)',
 		handle_stroke: 'rgba(10, 16, 24, 0.95)',
+		handle_anchor_aligned: 'rgba(141, 245, 205, 0.94)',
+		handle_anchor_unlocked: 'rgba(255, 183, 125, 0.94)',
 		key_selected: 'rgba(255, 229, 112, 0.98)',
 		key_hover: 'rgba(255, 182, 96, 0.95)',
 		key_stroke: 'rgba(8, 12, 18, 0.9)',
@@ -1306,18 +1317,45 @@
 			}
 		}
 
+		const drawn_handle_anchor_keys = new Set<NodeId>();
 		for (const handle of bezierHandles) {
 			const anchor_x = to_screen_x(handle.anchor_position);
 			const anchor_y = to_screen_y(handle.anchor_value);
 			const handle_x = to_screen_x(handle.handle_position);
 			const handle_y = to_screen_y(handle.handle_value);
+			const handle_line_color =
+				handle.alignment_state === 'aligned'
+					? curve_canvas_theme.handle_line_aligned
+					: handle.alignment_state === 'unlocked'
+						? curve_canvas_theme.handle_line_unlocked
+						: curve_canvas_theme.handle_line;
+			const handle_anchor_color =
+				handle.alignment_state === 'aligned'
+					? curve_canvas_theme.handle_anchor_aligned
+					: handle.alignment_state === 'unlocked'
+						? curve_canvas_theme.handle_anchor_unlocked
+						: null;
 
-			context.strokeStyle = curve_canvas_theme.handle_line;
-			context.lineWidth = 0.9;
+			context.save();
+			context.strokeStyle = handle_line_color;
+			context.lineWidth = handle.alignment_state === 'unlocked' ? 1 : 0.9;
+			if (handle.alignment_state === 'unlocked') {
+				context.setLineDash([Math.max(2, rem_base_px * 0.16), Math.max(2, rem_base_px * 0.12)]);
+			}
 			context.beginPath();
 			context.moveTo(anchor_x, anchor_y);
 			context.lineTo(handle_x, handle_y);
 			context.stroke();
+			context.restore();
+
+			if (handle_anchor_color !== null && !drawn_handle_anchor_keys.has(handle.anchor_key_id)) {
+				drawn_handle_anchor_keys.add(handle.anchor_key_id);
+				context.strokeStyle = handle_anchor_color;
+				context.lineWidth = 1.05;
+				context.beginPath();
+				context.arc(anchor_x, anchor_y, Math.max(2.1, rem_base_px * 0.13), 0, Math.PI * 2);
+				context.stroke();
+			}
 
 			const active =
 				activeBezierHandle &&
@@ -1580,6 +1618,16 @@
 					'--gc-color-curve-handle-line',
 					'rgba(222, 232, 251, 0.32)'
 				),
+				handle_line_aligned: css_var_or(
+					styles,
+					'--gc-color-curve-handle-line-aligned',
+					'rgba(120, 234, 198, 0.46)'
+				),
+				handle_line_unlocked: css_var_or(
+					styles,
+					'--gc-color-curve-handle-line-unlocked',
+					'rgba(255, 177, 118, 0.42)'
+				),
 				handle_active: css_var_or(
 					styles,
 					'--gc-color-curve-handle-active',
@@ -1604,6 +1652,16 @@
 					styles,
 					'--gc-color-curve-handle-stroke',
 					'rgba(10, 16, 24, 0.95)'
+				),
+				handle_anchor_aligned: css_var_or(
+					styles,
+					'--gc-color-curve-handle-anchor-aligned',
+					'rgba(141, 245, 205, 0.94)'
+				),
+				handle_anchor_unlocked: css_var_or(
+					styles,
+					'--gc-color-curve-handle-anchor-unlocked',
+					'rgba(255, 183, 125, 0.94)'
 				),
 				key_selected: css_var_or(
 					styles,
