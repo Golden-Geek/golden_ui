@@ -22,6 +22,7 @@ export { default as Outliner } from './components/panels/outliner/OutlinerPanel.
 export { default as Inspector } from './components/panels/inspector/InspectorPanel.svelte';
 export { default as LoggerPanel } from './components/panels/logger/LoggerPanel.svelte';
 export { default as WarningsPanel } from './components/panels/warnings/WarningsPanel.svelte';
+export { default as DashboardPanel } from './components/panels/dashboard/DashboardPanel.svelte';
 export {
 	registerNodeInspector,
 	registerNodeInspectors,

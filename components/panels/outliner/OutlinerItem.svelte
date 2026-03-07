@@ -6,6 +6,7 @@
 	import { slide } from 'svelte/transition';
 	import NodeWarningBadge from '$lib/golden_ui/components/common/NodeWarningBadge.svelte';
 	import EnableButton from '../../common/EnableButton.svelte';
+	import { beginDashboardNodeDrag } from '../dashboard/dashboard-drag';
 
 	const EMPTY_AUTO_EXPAND_ANCESTORS: ReadonlySet<NodeId> = new Set<NodeId>();
 
@@ -161,8 +162,12 @@
 				<button
 					class="outliner-item-label"
 					class:non-selectable={!rowSelectable}
+					draggable={rowSelectable && isOutlinerMode}
 					type="button"
 					disabled={!rowSelectable}
+					ondragstart={(event) => {
+						beginDashboardNodeDrag(event, node);
+					}}
 					onclick={(event) => selectNode(node, event)}>{meta?.label ?? ''}</button>
 				{#if isOutlinerMode}
 					<NodeWarningBadge {warnings} />
@@ -245,6 +250,7 @@
 		font: inherit;
 		text-align: left;
 		cursor: pointer;
+		cursor: grab;
 		outline: solid 1px transparent;
 		border-radius: 0.3rem;
 		transition:
@@ -254,6 +260,10 @@
 
 	.outliner-item-label.non-selectable {
 		cursor: default;
+	}
+
+	.outliner-item-label:active {
+		cursor: grabbing;
 	}
 
 	.outliner-item-label:hover {

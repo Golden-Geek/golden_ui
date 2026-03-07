@@ -103,15 +103,36 @@ export const sendRemoveNodesIntent = async (nodes: NodeId[]): Promise<boolean> =
 	});
 };
 
+export const sendMoveNodeIntent = async (
+	node: NodeId,
+	new_parent: NodeId,
+	new_prev_sibling?: NodeId
+): Promise<boolean> => {
+	return sendUiIntent({
+		kind: 'moveNode',
+		node,
+		new_parent,
+		new_prev_sibling
+	});
+};
+
 export const sendCreateUserItemIntent = async (
 	parent: NodeId,
 	item: UiCreatableUserItem
 ): Promise<boolean> => {
+	return sendCreateUserItemByTypeIntent(parent, item.node_type, item.label);
+};
+
+export const sendCreateUserItemByTypeIntent = async (
+	parent: NodeId,
+	node_type: string,
+	label?: string
+): Promise<boolean> => {
 	return sendUiIntent({
 		kind: 'createUserItem',
 		parent,
-		node_type: item.node_type,
-		label: item.label
+		node_type,
+		label
 	});
 };
 

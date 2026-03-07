@@ -35,6 +35,7 @@
 	import { fade } from 'svelte/transition';
 	import type { Snippet } from 'svelte';
 	import Self from './ParameterInspector.svelte';
+	import { beginDashboardParameterDrag } from '../dashboard/dashboard-drag';
 
 	let {
 		node,
@@ -326,6 +327,13 @@
 		void resetValueInSinglePass();
 	};
 
+	const startParameterLabelDrag = (event: DragEvent): void => {
+		if (!param || renamingState.isRenaming) {
+			return;
+		}
+		beginDashboardParameterDrag(event, liveNode);
+	};
+
 	const resetValueInSinglePass = async (): Promise<void> => {
 		if (!param || readOnly || !enabled || !isValueOverridden) {
 			return;
@@ -565,8 +573,10 @@
 							{:else}
 								<span
 									class="custom-prop-name-text"
+									draggable="true"
 									role="textbox"
 									tabindex="-1"
+									ondragstart={startParameterLabelDrag}
 									ondblclick={() => {
 										renamingState.renameDraft = liveNode.meta.label;
 										renamingState.isRenaming = true;
@@ -576,7 +586,9 @@
 								</span>
 							{/if}
 						{:else}
-							<span class="parameter-label">{liveNode.meta.label}</span>
+							<span class="parameter-label" draggable="true" role="button" tabindex="-1" ondragstart={startParameterLabelDrag}>
+								{liveNode.meta.label}
+							</span>
 						{/if}
 						<NodeWarningBadge {warnings} />
 						{#if !readOnly && enabled && isValueOverridden}
@@ -838,6 +850,16 @@
 		justify-content: right;
 		flex: 1;
 		max-width: 15rem;
+	}
+
+	.custom-prop-name-text,
+	.parameter-label {
+		cursor: grab;
+	}
+
+	.custom-prop-name-text:active,
+	.parameter-label:active {
+		cursor: grabbing;
 	}
 
 	.full-width .parameter-wrapper {

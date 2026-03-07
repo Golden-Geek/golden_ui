@@ -41,6 +41,7 @@
 	import InspectorPanel from '../panels/inspector/InspectorPanel.svelte';
 	import LoggerPanel from '../panels/logger/LoggerPanel.svelte';
 	import WarningsPanel from '../panels/warnings/WarningsPanel.svelte';
+	import DashboardPanel from '../panels/dashboard/DashboardPanel.svelte';
 	import GroupPanelAddAction from './GroupPanelAddAction.svelte';
 
 	let { userPanels, initialPanels, nodeIcons } = $props<{
@@ -70,6 +71,12 @@
 			panelType: 'outliner',
 			title: 'Outliner',
 			component: Outliner,
+			origin: 'golden'
+		},
+		dashboard: {
+			panelType: 'dashboard',
+			title: 'Dashboard',
+			component: DashboardPanel,
 			origin: 'golden'
 		},
 		logger: {
@@ -495,13 +502,21 @@
 				maximumWidth: remToPx(30)
 			},
 			{
+				panelId: 'dashboard',
+				panelType: 'dashboard',
+				position: {
+					referencePanelId: 'outliner',
+					direction: 'right'
+				}
+			},
+			{
 				panelId: 'logger',
 				panelType: 'logger',
 				initialHeight: remToPx(20),
 				minimumHeight: remToPx(8),
 				position: {
-					referencePanelId: 'outliner',
-					direction: 'right'
+					referencePanelId: 'dashboard',
+					direction: 'below'
 				}
 			},
 			{
@@ -519,7 +534,7 @@
 				initialWidth: remToPx(35),
 				minimumWidth: remToPx(22),
 				position: {
-					referencePanelId: 'logger',
+					referencePanelId: 'dashboard',
 					direction: 'right'
 				}
 			},
