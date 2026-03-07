@@ -97,6 +97,8 @@
 		key_hover: string;
 		key_stroke: string;
 		key_guide: string;
+		draw_path_stroke: string;
+		draw_path_point: string;
 		crosshair: string;
 		selection_fill: string;
 		selection_stroke: string;
@@ -117,10 +119,15 @@
 		alignment_state: BezierHandleAlignmentState;
 	}
 
-	interface BezierHandleRef {
-		key_id: NodeId;
-		kind: BezierHandleKind;
-	}
+interface BezierHandleRef {
+	key_id: NodeId;
+	kind: BezierHandleKind;
+}
+
+interface CurveDrawPathPoint {
+	position: number;
+	value: number;
+}
 
 	const CURVE_EPSILON = 1e-12;
 	const GRID_MANTISSAS = [1, 2, 5] as const;
@@ -166,6 +173,7 @@
 		activeBezierHandle = null,
 		hoverBezierHandle = null,
 		hoverCurvePosition,
+		drawPathPoints = [],
 		selectionRect = null,
 		activeCurveRangeConstraint = null,
 		fixedViewBounds = $bindable<CurveViewBounds | null>(null),
@@ -198,6 +206,7 @@
 		activeBezierHandle?: BezierHandleRef | null;
 		hoverBezierHandle?: BezierHandleRef | null;
 		hoverCurvePosition: { position: number; value: number } | null;
+		drawPathPoints?: CurveDrawPathPoint[];
 		selectionRect?: CanvasSelectionRect | null;
 		activeCurveRangeConstraint?: CurveRangeConstraint | null;
 		fixedViewBounds?: CurveViewBounds | null;
@@ -258,6 +267,8 @@
 		key_hover: 'rgba(255, 182, 96, 0.95)',
 		key_stroke: 'rgba(8, 12, 18, 0.9)',
 		key_guide: 'rgba(255, 226, 117, 0.35)',
+		draw_path_stroke: 'rgba(255, 140, 98, 0.96)',
+		draw_path_point: 'rgba(255, 198, 122, 0.98)',
 		crosshair: 'rgba(217, 231, 255, 0)',
 		selection_fill: 'rgba(114, 210, 255, 0.14)',
 		selection_stroke: 'rgba(158, 228, 255, 0.9)',
@@ -1317,6 +1328,55 @@
 			}
 		}
 
+		if (drawPathPoints.length > 0) {
+			context.save();
+			context.strokeStyle = curve_canvas_theme.draw_path_stroke;
+			context.lineWidth = 1.45;
+			context.lineJoin = 'round';
+			context.lineCap = 'round';
+			context.beginPath();
+			let has_draw_path = false;
+			let last_x = 0;
+			let last_y = 0;
+			for (const point of drawPathPoints) {
+				const x = to_screen_x(point.position);
+				const y = to_screen_y(point.value);
+				if (!Number.isFinite(x) || !Number.isFinite(y)) {
+					continue;
+				}
+				if (!has_draw_path) {
+					context.moveTo(x, y);
+					has_draw_path = true;
+					last_x = x;
+					last_y = y;
+					continue;
+				}
+				if (
+					Math.abs(x - last_x) < CURVE_DRAW_MIN_DELTA_PX &&
+					Math.abs(y - last_y) < CURVE_DRAW_MIN_DELTA_PX
+				) {
+					continue;
+				}
+				context.lineTo(x, y);
+				last_x = x;
+				last_y = y;
+			}
+			if (has_draw_path) {
+				context.stroke();
+				const first = drawPathPoints[0];
+				const last = drawPathPoints[drawPathPoints.length - 1];
+				for (const point of [first, last]) {
+					const x = to_screen_x(point.position);
+					const y = to_screen_y(point.value);
+					context.fillStyle = curve_canvas_theme.draw_path_point;
+					context.beginPath();
+					context.arc(x, y, Math.max(2, rem_base_px * 0.12), 0, Math.PI * 2);
+					context.fill();
+				}
+			}
+			context.restore();
+		}
+
 		const drawn_handle_anchor_keys = new Set<NodeId>();
 		for (const handle of bezierHandles) {
 			const anchor_x = to_screen_x(handle.anchor_position);
@@ -1683,6 +1743,16 @@
 					'--gc-color-curve-key-guide',
 					'rgba(255, 226, 117, 0.35)'
 				),
+				draw_path_stroke: css_var_or(
+					styles,
+					'--gc-color-curve-draw-path-stroke',
+					'rgba(255, 140, 98, 0.96)'
+				),
+				draw_path_point: css_var_or(
+					styles,
+					'--gc-color-curve-draw-path-point',
+					'rgba(255, 198, 122, 0.98)'
+				),
 				crosshair: css_var_or(
 					styles,
 					'--gc-color-curve-crosshair',
@@ -1781,6 +1851,7 @@
 		activeBezierHandle;
 		hoverBezierHandle;
 		hoverCurvePosition;
+		drawPathPoints;
 		selectionRect;
 		rem_base_px;
 		curve_canvas_theme;

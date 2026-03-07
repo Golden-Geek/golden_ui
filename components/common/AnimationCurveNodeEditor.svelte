@@ -3,6 +3,7 @@
 	import {
 		createUiEditSession,
 		sendCreateUserItemIntent,
+		sendFitAnimationCurvePathIntent,
 		sendRemoveNodesIntent,
 		sendSetParamIntent,
 		type UiEditSession
@@ -324,6 +325,18 @@ interface ActiveCurveDrag {
 		start_bounds: CurveViewBounds;
 	}
 
+	interface RecordedCurveDrawPoint {
+		bucket: number;
+		position: number;
+		value: number;
+	}
+
+	interface ActiveCurveDraw {
+		pointer_id: number;
+		points: RecordedCurveDrawPoint[];
+		path_buckets: number[];
+	}
+
 	type SelectionMode = 'replace' | 'add' | 'toggle';
 
 	interface ActiveBoxSelection {
@@ -361,8 +374,6 @@ interface ActiveCurveDrag {
 		selected_key_id = $bindable<NodeId | null>(null),
 		selected_key_ids = $bindable<NodeId[]>([]),
 		selected_curve_owner_key_ids = $bindable<NodeId[]>([]),
-		showToolbar = true,
-		showHints = true,
 		showGrid = true,
 		showNumbers = true,
 		showBounds = true,
@@ -373,8 +384,6 @@ interface ActiveCurveDrag {
 		selected_key_id?: NodeId | null;
 		selected_key_ids?: NodeId[];
 		selected_curve_owner_key_ids?: NodeId[];
-		showToolbar?: boolean;
-		showHints?: boolean;
 		showGrid?: boolean;
 		showNumbers?: boolean;
 		showBounds?: boolean;
@@ -419,7 +428,9 @@ interface ActiveCurveDrag {
 	const MIN_VIEW_SPAN = 1e-6;
 	const MAX_VIEW_SPAN = 1e9;
 	const CURVE_SCULPT_SHIFT_FULL_STRENGTH_PX = 8;
-	const KEY_HIT_RADIUS_REM = 0.86;
+	const CURVE_DRAW_FIT_MAX_ERROR_PX = 4.5;
+	const CURVE_DRAW_FIT_MAX_KEYS = 12;
+	const KEY_HIT_RADIUS_REM = 0.7;
 	const CURVE_HIT_RADIUS_REM = 0.7;
 	const BEZIER_HANDLE_HIT_RADIUS_REM = 0.64;
 
@@ -442,6 +453,7 @@ interface ActiveCurveDrag {
 	let active_curve_drag = $state<ActiveCurveDrag | null>(null);
 	let active_box_selection = $state<ActiveBoxSelection | null>(null);
 	let active_canvas_pan = $state<ActiveCanvasPan | null>(null);
+	let active_curve_draw = $state<ActiveCurveDraw | null>(null);
 	let drag_edit_session = $state<UiEditSession | null>(null);
 	let drag_edit_session_begin_promise: Promise<void> | null = null;
 	let hover_curve_position = $state<{ position: number; value: number } | null>(null);
@@ -453,6 +465,12 @@ interface ActiveCurveDrag {
 	let drag_commit_raf_id = 0;
 	let pending_param_write_promises: Set<Promise<void>> = new Set();
 	const float_bits_view = new DataView(new ArrayBuffer(8));
+	let active_curve_draw_points = $derived.by(() =>
+		active_curve_draw?.points.map((point) => ({
+			position: point.position,
+			value: point.value
+		})) ?? []
+	);
 
 	const clamp = (value: number, min: number, max: number): number =>
 		Math.min(max, Math.max(min, value));
@@ -2665,6 +2683,97 @@ interface ActiveCurveDrag {
 		return Number.isFinite(y_min) && Number.isFinite(y_max) ? { min: y_min, max: y_max } : null;
 	};
 
+	const curve_draw_bucket = (screen_x: number): number | null => {
+		if (!interaction_transform) {
+			return null;
+		}
+		return Math.round(
+			clamp(
+				screen_x - interaction_transform.plot_left,
+				0,
+				interaction_transform.plot_width
+			)
+		);
+	};
+
+	const record_curve_draw_point = (
+		active: ActiveCurveDraw,
+		screen_x: number,
+		curve_point: { position: number; value: number }
+	): ActiveCurveDraw => {
+		const bucket = curve_draw_bucket(screen_x);
+		if (bucket === null) {
+			return active;
+		}
+		const existing_index = active.path_buckets.lastIndexOf(bucket);
+		const next_path_buckets =
+			existing_index >= 0
+				? active.path_buckets.slice(0, existing_index + 1)
+				: [...active.path_buckets, bucket];
+		const retained_buckets = new Set(next_path_buckets);
+		const next_points = active.points.filter(
+			(point) => retained_buckets.has(point.bucket) && point.bucket !== bucket
+		);
+		next_points.push({
+			bucket,
+			position: curve_point.position,
+			value: curve_point.value
+		});
+		next_points.sort((left, right) => left.position - right.position);
+		return {
+			...active,
+			points: next_points,
+			path_buckets: next_path_buckets
+		};
+	};
+
+	const curve_draw_fit_value_error = (): number => {
+		if (interaction_transform) {
+			const value_span = interaction_transform.y_max - interaction_transform.y_min;
+			if (Number.isFinite(value_span) && value_span > CURVE_EPSILON) {
+				return Math.max(
+					MIN_VIEW_SPAN,
+					(value_span / Math.max(1, interaction_transform.plot_height)) * CURVE_DRAW_FIT_MAX_ERROR_PX
+				);
+			}
+		}
+		const active_range = active_curve_range_constraint;
+		if (active_range) {
+			return Math.max(
+				MIN_VIEW_SPAN,
+				(active_range.y_max - active_range.y_min) * 0.01
+			);
+		}
+		const current = current_view_bounds();
+		if (current) {
+			return Math.max(MIN_VIEW_SPAN, (current.y_max - current.y_min) * 0.01);
+		}
+		return 0.01;
+	};
+
+	const commit_curve_draw = async (points: RecordedCurveDrawPoint[]): Promise<void> => {
+		if (points.length < 2) {
+			return;
+		}
+		const edit_session = createUiEditSession('Draw Curve', 'curve-draw');
+		await edit_session.begin();
+		try {
+			await sendFitAnimationCurvePathIntent(
+				liveNode.node_id,
+				points.map((point) => ({
+					position: point.position,
+					value: point.value
+				})),
+				{
+					max_value_error: curve_draw_fit_value_error(),
+					max_keys: CURVE_DRAW_FIT_MAX_KEYS
+				}
+			);
+		} finally {
+			await edit_session.end();
+		}
+	};
+
 	const sanitize_view_bounds = (bounds: CurveViewBounds): CurveViewBounds | null => {
 		if (
 			!Number.isFinite(bounds.x_min) ||
@@ -3864,6 +3973,25 @@ interface ActiveCurveDrag {
 		active_canvas_pan = null;
 	};
 
+	const finish_curve_draw = (pointer_id?: number, commit = true): boolean => {
+		if (!active_curve_draw) {
+			return false;
+		}
+		if (pointer_id !== undefined && active_curve_draw.pointer_id !== pointer_id) {
+			return false;
+		}
+		const release_pointer_id = pointer_id ?? active_curve_draw.pointer_id;
+		if (canvas_element && canvas_element.hasPointerCapture(release_pointer_id)) {
+			canvas_element.releasePointerCapture(release_pointer_id);
+		}
+		const points = active_curve_draw.points;
+		active_curve_draw = null;
+		if (commit) {
+			void commit_curve_draw(points);
+		}
+		return true;
+	};
+
 	const update_bezier_handle_drag_preview = (
 		drag: ActiveBezierHandleDrag,
 		curve_point: { position: number; value: number },
@@ -3951,6 +4079,29 @@ interface ActiveCurveDrag {
 			return;
 		}
 		if (event.button !== 0) {
+			return;
+		}
+
+		if (event.ctrlKey && event.shiftKey) {
+			const curve_point = screen_to_curve_point(point.x, point.y);
+			if (!curve_point) {
+				return;
+			}
+			active_curve_draw = record_curve_draw_point(
+				{
+					pointer_id: event.pointerId,
+					points: [],
+					path_buckets: []
+				},
+				point.x,
+				curve_point
+			);
+			hover_key_id = null;
+			hover_curve_owner_key_id = null;
+			hover_bezier_handle = null;
+			active_box_selection = null;
+			canvas_element.setPointerCapture(event.pointerId);
+			event.preventDefault();
 			return;
 		}
 
@@ -4165,6 +4316,18 @@ interface ActiveCurveDrag {
 		}
 		hover_curve_position = screen_to_curve_point(point.x, point.y);
 
+		if (active_curve_draw && active_curve_draw.pointer_id === event.pointerId) {
+			const curve_point = hover_curve_position;
+			if (!curve_point) {
+				return;
+			}
+			active_curve_draw = record_curve_draw_point(active_curve_draw, point.x, curve_point);
+			hover_key_id = null;
+			hover_curve_owner_key_id = null;
+			hover_bezier_handle = null;
+			return;
+		}
+
 		if (
 			active_canvas_pan &&
 			active_canvas_pan.pointer_id === event.pointerId &&
@@ -4333,11 +4496,17 @@ interface ActiveCurveDrag {
 	};
 
 	const on_canvas_pointer_up = (event: PointerEvent): void => {
+		if (finish_curve_draw(event.pointerId, true)) {
+			return;
+		}
 		finish_drag(event.pointerId);
 		finish_canvas_pan(event.pointerId);
 		finish_box_selection(event.pointerId);
 	};
 	const on_canvas_pointer_cancel = (event: PointerEvent): void => {
+		if (finish_curve_draw(event.pointerId, false)) {
+			return;
+		}
 		finish_drag(event.pointerId);
 		finish_canvas_pan(event.pointerId);
 		finish_box_selection(event.pointerId);
@@ -4789,6 +4958,7 @@ interface ActiveCurveDrag {
 			}
 			finish_drag();
 			finish_canvas_pan();
+			finish_curve_draw(undefined, false);
 			finish_box_selection();
 			const pending = pending_create_target;
 			pending_create_target = null;
@@ -4801,60 +4971,6 @@ interface ActiveCurveDrag {
 
 {#if liveNode.node_type === CURVE_NODE_TYPE}
 	<div class="animation-curve-node-editor">
-		{#if showToolbar}
-			<section class="curve-top-toolbar">
-				<button
-					type="button"
-					class="toolbar-button"
-					disabled={!key_creatable_item || adding_key}
-					onclick={() => {
-						const midpoint = axis_midpoint();
-						void add_key_at(midpoint.position, midpoint.value);
-					}}>
-					{adding_key ? 'Adding...' : 'Add Key'}
-				</button>
-				<button
-					type="button"
-					class="toolbar-button destructive"
-					disabled={!selected_key}
-					onclick={() => {
-						void remove_selected_key();
-					}}>
-					Delete Key
-				</button>
-				<button
-					type="button"
-					class="toolbar-button"
-					disabled={selected_frame_key_ids().length === 0}
-					onclick={() => {
-						frame_selected_view();
-					}}>
-					Frame Selected
-				</button>
-				<button
-					type="button"
-					class="toolbar-button"
-					onclick={() => {
-						home_view();
-					}}>
-					Home
-				</button>
-				<div class="curve-stats">
-					<div><strong>{parsed_keys.length}</strong> keys</div>
-					<div><strong>{compiled_curve.segments.length}</strong> segments</div>
-				</div>
-			</section>
-		{/if}
-		{#if showHints}
-			<div class="curve-nav-hint">
-				F: frame selection | H: home | Wheel: zoom | Shift + wheel: horizontal pan | Alt +
-				wheel: vertical pan | Middle drag: pan | Shift + click: add key | Ctrl/Cmd + click:
-				toggle key | Drag selected keys: move | Drag bezier handles: ease | Drag curve: sculpt |
-				Alt + drag curve: absolute sculpt | Shift + drag curve: ease/slowmo sculpt | Drag on
-				empty canvas: box select
-			</div>
-		{/if}
-
 		<div class="curve-canvas-shell" style:height={canvasHeight}>
 			<AnimationCurveCanvas
 				compiledCurve={compiled_curve}
@@ -4868,6 +4984,7 @@ interface ActiveCurveDrag {
 				activeBezierHandle={active_bezier_handle_drag ? active_bezier_handle_drag.ref : null}
 				hoverBezierHandle={hover_bezier_handle}
 				hoverCurvePosition={hover_curve_position}
+				drawPathPoints={active_curve_draw_points}
 				selectionRect={active_box_selection_rect}
 				activeCurveRangeConstraint={active_curve_range_constraint}
 				bind:fixedViewBounds={fixed_view_bounds}
@@ -4898,47 +5015,6 @@ interface ActiveCurveDrag {
 		flex-direction: column;
 		gap: 0.45rem;
 		min-height: 0;
-	}
-
-	.curve-top-toolbar {
-		display: flex;
-		align-items: center;
-		flex-wrap: wrap;
-		gap: 0.33rem;
-	}
-
-	.toolbar-button {
-		height: 1.45rem;
-		padding: 0 0.55rem;
-		border-radius: 0.28rem;
-		border: solid 0.06rem var(--gc-color-curve-toolbar-button-border);
-		background: var(--gc-color-curve-toolbar-button-bg);
-		color: var(--text-color);
-		font-size: 0.66rem;
-	}
-
-	.toolbar-button.destructive {
-		border-color: var(--gc-color-curve-toolbar-button-danger-border);
-		background: var(--gc-color-curve-toolbar-button-danger-bg);
-	}
-
-	.toolbar-button:disabled {
-		opacity: 0.45;
-	}
-
-	.curve-stats {
-		margin-left: auto;
-		display: inline-flex;
-		gap: 0.45rem;
-		font-size: 0.63rem;
-		opacity: 0.8;
-	}
-
-	.curve-nav-hint {
-		font-size: 0.59rem;
-		opacity: 0.64;
-		padding: 0 0.12rem;
-		letter-spacing: 0.01em;
 	}
 
 	.curve-canvas-shell {

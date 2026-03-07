@@ -136,8 +136,6 @@
 				bind:selected_key_id
 				bind:selected_key_ids
 				bind:selected_curve_owner_key_ids
-				showToolbar={true}
-				showHints={true}
 				showGrid={true}
 				showNumbers={true}
 				showBounds={true}

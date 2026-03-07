@@ -394,6 +394,16 @@ export interface UiEventBatch {
 	events: UiEventDto[];
 }
 
+export interface UiAnimationCurveFitPoint {
+	position: number;
+	value: number;
+}
+
+export interface UiAnimationCurveBezierFitOptions {
+	max_value_error: number;
+	max_keys: number;
+}
+
 export type UiEditIntent =
 	| { kind: 'beginEdit'; client_edit_id: string; label?: string }
 	| { kind: 'endEdit'; client_edit_id: string }
@@ -403,6 +413,12 @@ export type UiEditIntent =
 	| { kind: 'removeNode'; node: NodeId }
 	| { kind: 'removeNodes'; nodes: NodeId[] }
 	| { kind: 'createUserItem'; parent: NodeId; node_type: string; label?: string }
+	| {
+			kind: 'fitAnimationCurvePath';
+			curve: NodeId;
+			points: UiAnimationCurveFitPoint[];
+			options: UiAnimationCurveBezierFitOptions;
+	  }
 	| { kind: 'patchMeta'; node: NodeId; patch: Partial<UiNodeMetaDto> }
 	| { kind: 'reevaluateGraph' }
 	| { kind: 'clearLogs' }

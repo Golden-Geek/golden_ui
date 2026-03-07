@@ -1,5 +1,7 @@
 import type {
 	UiCreatableUserItem,
+	UiAnimationCurveBezierFitOptions,
+	UiAnimationCurveFitPoint,
 	NodeId,
 	ParamEventBehaviour,
 	ParamValue,
@@ -110,6 +112,22 @@ export const sendCreateUserItemIntent = async (
 		parent,
 		node_type: item.node_type,
 		label: item.label
+	});
+};
+
+export const sendFitAnimationCurvePathIntent = async (
+	curve: NodeId,
+	points: UiAnimationCurveFitPoint[],
+	options: UiAnimationCurveBezierFitOptions
+): Promise<boolean> => {
+	if (points.length < 2) {
+		return false;
+	}
+	return sendUiIntent({
+		kind: 'fitAnimationCurvePath',
+		curve,
+		points,
+		options
 	});
 };
 
