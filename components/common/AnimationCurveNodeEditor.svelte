@@ -152,6 +152,7 @@
 	}
 
 	type BezierHandleKind = 'out' | 'in';
+	type BezierHandleAlignmentState = 'single' | 'aligned' | 'unlocked';
 
 	interface BezierHandleRef {
 		key_id: NodeId;
@@ -198,6 +199,7 @@
 		anchor_value: number;
 		handle_position: number;
 		handle_value: number;
+		alignment_state: BezierHandleAlignmentState;
 	}
 
 	interface BezierEasingPreview {
@@ -213,6 +215,10 @@
 		value: number;
 		split_easing: PendingSplitEasing | null;
 		easing_values: Record<string, ParamValue> | null;
+		existing_easing_updates: Array<{
+			key_id: NodeId;
+			values: Record<string, ParamValue>;
+		}>;
 		edit_session: UiEditSession | null;
 	}
 
@@ -221,12 +227,20 @@
 		source_end_key_id: NodeId;
 		left_param_values: Record<string, ParamValue>;
 		right_param_values: Record<string, ParamValue>;
+		preserved_aligned_handle_updates?: Array<{
+			key_id: NodeId;
+			values: Record<string, ParamValue>;
+		}>;
 	}
 
 	interface AddKeyOptions {
 		preserve_curve_shape?: boolean;
 		preferred_owner_key_id?: NodeId | null;
 		easing_values?: Record<string, ParamValue> | null;
+		existing_easing_updates?: Array<{
+			key_id: NodeId;
+			values: Record<string, ParamValue>;
+		}>;
 	}
 
 	interface ActiveKeyDrag {
@@ -400,6 +414,9 @@ interface ActiveCurveDrag {
 	const MIN_VIEW_SPAN = 1e-6;
 	const MAX_VIEW_SPAN = 1e9;
 	const CURVE_SCULPT_SHIFT_FULL_STRENGTH_PX = 8;
+	const KEY_HIT_RADIUS_REM = 0.86;
+	const CURVE_HIT_RADIUS_REM = 0.7;
+	const BEZIER_HANDLE_HIT_RADIUS_REM = 0.64;
 
 	let session = $derived(appState.session);
 	let graphNodesById = $derived(session?.graph.state.nodesById ?? null);
@@ -1073,12 +1090,36 @@ interface ActiveCurveDrag {
 
 	const has_selected_key = (key_id: NodeId): boolean => selected_key_ids.includes(key_id);
 
+	const clear_selected_keys = (): void => {
+		if (selected_key_id !== null) {
+			selected_key_id = null;
+		}
+		if (selected_key_ids.length > 0) {
+			selected_key_ids = [];
+		}
+	};
+
+	const clear_selected_curve_owner_keys = (): void => {
+		if (selected_curve_owner_key_ids.length > 0) {
+			selected_curve_owner_key_ids = [];
+		}
+	};
+
+	const key_hit_threshold_px = (): number => Math.max(8, rem_base_px * KEY_HIT_RADIUS_REM);
+	const curve_hit_threshold_px = (): number => Math.max(7, rem_base_px * CURVE_HIT_RADIUS_REM);
+	const bezier_handle_hit_threshold_px = (): number =>
+		Math.max(8, rem_base_px * BEZIER_HANDLE_HIT_RADIUS_REM);
+
 	const set_single_selected_key = (key_id: NodeId | null): void => {
+		if (key_id !== null) {
+			clear_selected_curve_owner_keys();
+		}
 		selected_key_id = key_id;
 		selected_key_ids = key_id === null ? [] : [key_id];
 	};
 
 	const add_selected_key = (key_id: NodeId): void => {
+		clear_selected_curve_owner_keys();
 		if (has_selected_key(key_id)) {
 			if (selected_key_id === null) {
 				selected_key_id = key_id;
@@ -1108,10 +1149,14 @@ interface ActiveCurveDrag {
 		selected_curve_owner_key_ids.includes(key_id);
 
 	const set_single_selected_curve_owner_key = (key_id: NodeId | null): void => {
+		if (key_id !== null) {
+			clear_selected_keys();
+		}
 		selected_curve_owner_key_ids = key_id === null ? [] : [key_id];
 	};
 
 	const add_selected_curve_owner_key = (key_id: NodeId): void => {
+		clear_selected_keys();
 		if (has_selected_curve_owner_key(key_id)) {
 			return;
 		}
@@ -1602,17 +1647,21 @@ interface ActiveCurveDrag {
 	});
 
 	let bezier_handle_owner_key_ids = $derived.by((): NodeId[] => {
-		if (selected_curve_owner_key_ids.length > 0) {
-			return selected_curve_owner_key_ids;
-		}
 		if (selected_key_ids.length > 0) {
 			return selected_key_ids;
 		}
 		if (selected_key_id !== null) {
 			return [selected_key_id];
 		}
+		if (selected_curve_owner_key_ids.length > 0) {
+			return selected_curve_owner_key_ids;
+		}
 		return [];
 	});
+
+	let all_bezier_handle_segments = $derived.by((): BezierHandleSegment[] =>
+		[...bezier_segment_by_owner_key_id.values()]
+	);
 
 	let bezier_visible_anchor_key_ids = $derived.by((): NodeId[] => {
 		if (bezier_handle_owner_key_ids.length === 0) {
@@ -1639,13 +1688,7 @@ interface ActiveCurveDrag {
 		}
 
 		const segments: BezierHandleSegment[] = [];
-		for (let index = 0; index + 1 < parsed_keys.length; index += 1) {
-			const start = parsed_keys[index];
-			const end = parsed_keys[index + 1];
-			const segment = resolve_bezier_handle_segment(start, end);
-			if (!segment) {
-				continue;
-			}
+		for (const segment of all_bezier_handle_segments) {
 			if (
 				!visible_anchor_set.has(segment.start_key_id) &&
 				!visible_anchor_set.has(segment.end_key_id)
@@ -1659,59 +1702,90 @@ interface ActiveCurveDrag {
 
 	const bezier_handle_control_id = (ref: BezierHandleRef): string => `${ref.key_id}:${ref.kind}`;
 
-	let bezier_handle_controls = $derived.by((): BezierHandleControl[] => {
-		const visible_anchor_set = new Set(bezier_visible_anchor_key_ids);
+	let all_bezier_handle_controls = $derived.by((): BezierHandleControl[] => {
 		const controls: BezierHandleControl[] = [];
-		for (const segment of bezier_handle_segments) {
-			if (visible_anchor_set.has(segment.start_key_id)) {
-				controls.push({
-					ref: { key_id: segment.key_id, kind: 'out' },
-					anchor_key_id: segment.start_key_id,
-					anchor_position: segment.start_position,
-					anchor_value: segment.start_value,
-					handle_position: segment.out_curve_position,
-					handle_value: segment.out_curve_value,
-					segment_start_position: segment.start_position,
-					segment_end_position: segment.end_position,
-					span: segment.span,
-					params: segment.params
-				});
-			}
-			if (visible_anchor_set.has(segment.end_key_id)) {
-				controls.push({
-					ref: { key_id: segment.key_id, kind: 'in' },
-					anchor_key_id: segment.end_key_id,
-					anchor_position: segment.end_position,
-					anchor_value: segment.end_value,
-					handle_position: segment.in_curve_position,
-					handle_value: segment.in_curve_value,
-					segment_start_position: segment.start_position,
-					segment_end_position: segment.end_position,
-					span: segment.span,
-					params: segment.params
-				});
-			}
+		for (const segment of all_bezier_handle_segments) {
+			controls.push({
+				ref: { key_id: segment.key_id, kind: 'out' },
+				anchor_key_id: segment.start_key_id,
+				anchor_position: segment.start_position,
+				anchor_value: segment.start_value,
+				handle_position: segment.out_curve_position,
+				handle_value: segment.out_curve_value,
+				segment_start_position: segment.start_position,
+				segment_end_position: segment.end_position,
+				span: segment.span,
+				params: segment.params
+			});
+			controls.push({
+				ref: { key_id: segment.key_id, kind: 'in' },
+				anchor_key_id: segment.end_key_id,
+				anchor_position: segment.end_position,
+				anchor_value: segment.end_value,
+				handle_position: segment.in_curve_position,
+				handle_value: segment.in_curve_value,
+				segment_start_position: segment.start_position,
+				segment_end_position: segment.end_position,
+				span: segment.span,
+				params: segment.params
+			});
 		}
 		return controls;
 	});
 
-	let bezier_handle_control_by_id = $derived.by((): Map<string, BezierHandleControl> => {
+	let bezier_handle_controls = $derived.by((): BezierHandleControl[] => {
+		const visible_anchor_set = new Set(bezier_visible_anchor_key_ids);
+		if (visible_anchor_set.size === 0) {
+			return [];
+		}
+		return all_bezier_handle_controls.filter((control) =>
+			visible_anchor_set.has(control.anchor_key_id)
+		);
+	});
+
+	let all_bezier_handle_control_by_id = $derived.by((): Map<string, BezierHandleControl> => {
 		const controls = new Map<string, BezierHandleControl>();
-		for (const control of bezier_handle_controls) {
+		for (const control of all_bezier_handle_controls) {
 			controls.set(bezier_handle_control_id(control.ref), control);
 		}
 		return controls;
 	});
 
-	let bezier_handle_refs_by_anchor_key_id = $derived.by((): Map<NodeId, BezierHandleRef[]> => {
+	let all_bezier_handle_refs_by_anchor_key_id = $derived.by((): Map<NodeId, BezierHandleRef[]> => {
 		const mapping = new Map<NodeId, BezierHandleRef[]>();
-		for (const control of bezier_handle_controls) {
+		for (const control of all_bezier_handle_controls) {
 			const existing = mapping.get(control.anchor_key_id) ?? [];
 			existing.push(control.ref);
 			mapping.set(control.anchor_key_id, existing);
 		}
 		return mapping;
 	});
+
+	let bezier_handle_alignment_by_anchor_key_id = $derived.by(
+		(): Map<NodeId, BezierHandleAlignmentState> => {
+			const mapping = new Map<NodeId, BezierHandleAlignmentState>();
+			for (const [anchor_key_id, refs] of all_bezier_handle_refs_by_anchor_key_id.entries()) {
+				if (refs.length < 2) {
+					mapping.set(anchor_key_id, 'single');
+					continue;
+				}
+				const first_control = all_bezier_handle_control_by_id.get(bezier_handle_control_id(refs[0]));
+				const second_control = all_bezier_handle_control_by_id.get(bezier_handle_control_id(refs[1]));
+				if (!first_control || !second_control) {
+					mapping.set(anchor_key_id, 'single');
+					continue;
+				}
+				const aligned = vectors_are_aligned_and_opposite(
+					first_control.handle_position - first_control.anchor_position,
+					first_control.handle_value - first_control.anchor_value,
+					second_control.handle_position - second_control.anchor_position,
+					second_control.handle_value - second_control.anchor_value
+				);
+				mapping.set(anchor_key_id, aligned ? 'aligned' : 'unlocked');
+			}
+			return mapping;
+		}
+	);
 
 	let bezier_handle_visuals = $derived.by((): BezierHandleVisual[] =>
 		bezier_handle_controls.map((control) => ({
@@ -1720,7 +1794,9 @@ interface ActiveCurveDrag {
 			anchor_position: control.anchor_position,
 			anchor_value: control.anchor_value,
 			handle_position: control.handle_position,
-			handle_value: control.handle_value
+			handle_value: control.handle_value,
+			alignment_state:
+				bezier_handle_alignment_by_anchor_key_id.get(control.anchor_key_id) ?? 'single'
 		}))
 	);
 	let editable_curve_range_node = $derived.by((): UiNodeDto | null => {
@@ -1833,6 +1909,14 @@ interface ActiveCurveDrag {
 	const enum_param_value = (value: string): ParamValue => ({ kind: 'enum', value });
 	const float_param_value = (value: number): ParamValue => ({ kind: 'float', value });
 	const str_param_value = (value: string): ParamValue => ({ kind: 'str', value });
+	const bezier_preview_param_values = (
+		preview: BezierEasingPreview
+	): Record<string, ParamValue> => ({
+		[DECL_OUT_POSITION]: float_param_value(preview.out_position),
+		[DECL_OUT_VALUE]: float_param_value(preview.out_value),
+		[DECL_IN_POSITION]: float_param_value(preview.in_position),
+		[DECL_IN_VALUE]: float_param_value(preview.in_value)
+	});
 	const set_split_numeric_param = (
 		target: Record<string, ParamValue>,
 		decl_id: string,
@@ -1942,11 +2026,47 @@ interface ActiveCurveDrag {
 			set_split_numeric_param(right_param_values, DECL_OUT_VALUE, point_e_y - split_value);
 			set_split_numeric_param(right_param_values, DECL_IN_POSITION, right_in_position);
 			set_split_numeric_param(right_param_values, DECL_IN_VALUE, point_c_y - end.value);
+
+			const preserved_aligned_handles = new Map<NodeId, BezierEasingPreview>();
+			const start_alignment = resolve_curve_drag_opposite_alignment(start.node_id, {
+				key_id: start.node_id,
+				kind: 'out'
+			});
+			if (start_alignment) {
+				apply_curve_drag_opposite_alignment(
+					preserved_aligned_handles,
+					start_alignment,
+					point_a_x,
+					point_a_y,
+					start.position,
+					start.value
+				);
+			}
+			const end_alignment = resolve_curve_drag_opposite_alignment(end.node_id, {
+				key_id: start.node_id,
+				kind: 'in'
+			});
+			if (end_alignment) {
+				apply_curve_drag_opposite_alignment(
+					preserved_aligned_handles,
+					end_alignment,
+					point_c_x,
+					point_c_y,
+					end.position,
+					end.value
+				);
+			}
 			return {
 				source_start_key_id: start.node_id,
 				source_end_key_id: end.node_id,
 				left_param_values,
-				right_param_values
+				right_param_values,
+				preserved_aligned_handle_updates: [...preserved_aligned_handles.entries()].map(
+					([key_id, preview]) => ({
+						key_id,
+						values: bezier_preview_param_values(preview)
+					})
+				)
 			};
 		}
 
@@ -2308,8 +2428,14 @@ interface ActiveCurveDrag {
 							pending.split_easing.left_param_values
 						);
 						await apply_easing_param_values(key, pending.split_easing.right_param_values);
+						for (const update of pending.split_easing.preserved_aligned_handle_updates ?? []) {
+							await apply_easing_param_values(parsed_key_by_id.get(update.key_id), update.values);
+						}
 					} else if (pending.easing_values) {
 						await apply_easing_param_values(key, pending.easing_values);
+					}
+					for (const update of pending.existing_easing_updates) {
+						await apply_easing_param_values(parsed_key_by_id.get(update.key_id), update.values);
 					}
 				} finally {
 					clear_drag_preview(key.node_id);
@@ -2880,9 +3006,17 @@ interface ActiveCurveDrag {
 				: selected_key_id === null
 					? []
 					: [selected_key_id];
-		const next_key_selection = apply_selection_mode(current_key_selection, key_hits, active.mode);
-		selected_key_ids = next_key_selection;
-		selected_key_id = next_key_selection[0] ?? null;
+		if (key_hits.length > 0) {
+			const next_key_selection = apply_selection_mode(current_key_selection, key_hits, active.mode);
+			selected_key_ids = next_key_selection;
+			selected_key_id = next_key_selection[0] ?? null;
+			clear_selected_curve_owner_keys();
+			active_box_selection = null;
+			return;
+		}
+		if (active.mode === 'replace' || curve_hits.length > 0) {
+			clear_selected_keys();
+		}
 		selected_curve_owner_key_ids = apply_selection_mode(
 			selected_curve_owner_key_ids,
 			curve_hits,
@@ -2972,10 +3106,10 @@ interface ActiveCurveDrag {
 			return existing;
 		}
 
-		const out_control = bezier_handle_control_by_id.get(
+		const out_control = all_bezier_handle_control_by_id.get(
 			bezier_handle_control_id({ key_id, kind: 'out' })
 		);
-		const in_control = bezier_handle_control_by_id.get(
+		const in_control = all_bezier_handle_control_by_id.get(
 			bezier_handle_control_id({ key_id, kind: 'in' })
 		);
 		let preview: BezierEasingPreview | null = null;
@@ -3023,11 +3157,11 @@ interface ActiveCurveDrag {
 		anchor_key_id: NodeId,
 		primary_ref: BezierHandleRef
 	): CurveOppositeAlignment | null => {
-		const primary = bezier_handle_control_by_id.get(bezier_handle_control_id(primary_ref));
+		const primary = all_bezier_handle_control_by_id.get(bezier_handle_control_id(primary_ref));
 		if (!primary) {
 			return null;
 		}
-		const opposite_candidates = bezier_handle_refs_by_anchor_key_id.get(anchor_key_id) ?? [];
+		const opposite_candidates = all_bezier_handle_refs_by_anchor_key_id.get(anchor_key_id) ?? [];
 		let opposite_ref: BezierHandleRef | null = null;
 		for (const candidate of opposite_candidates) {
 			if (bezier_handle_control_id(candidate) === bezier_handle_control_id(primary_ref)) {
@@ -3039,7 +3173,7 @@ interface ActiveCurveDrag {
 		if (!opposite_ref) {
 			return null;
 		}
-		const opposite = bezier_handle_control_by_id.get(bezier_handle_control_id(opposite_ref));
+		const opposite = all_bezier_handle_control_by_id.get(bezier_handle_control_id(opposite_ref));
 		if (!opposite) {
 			return null;
 		}
@@ -3076,7 +3210,7 @@ interface ActiveCurveDrag {
 		anchor_position: number,
 		anchor_value: number
 	): void => {
-		const opposite_control = bezier_handle_control_by_id.get(
+		const opposite_control = all_bezier_handle_control_by_id.get(
 			bezier_handle_control_id(alignment.opposite_ref)
 		);
 		if (!opposite_control || !(alignment.opposite_length > CURVE_EPSILON)) {
@@ -3385,6 +3519,170 @@ interface ActiveCurveDrag {
 		return null;
 	};
 
+	const bezier_control_for_anchor_kind = (
+		anchor_key_id: NodeId,
+		kind: BezierHandleKind
+	): BezierHandleControl | null => {
+		const refs = all_bezier_handle_refs_by_anchor_key_id.get(anchor_key_id) ?? [];
+		for (const ref of refs) {
+			if (ref.kind !== kind) {
+				continue;
+			}
+			const control = all_bezier_handle_control_by_id.get(bezier_handle_control_id(ref));
+			if (control) {
+				return control;
+			}
+		}
+		return null;
+	};
+
+	const slope_from_bezier_control = (control: BezierHandleControl | null): number | null => {
+		if (!control) {
+			return null;
+		}
+		const delta_x = control.handle_position - control.anchor_position;
+		if (Math.abs(delta_x) <= CURVE_EPSILON) {
+			return null;
+		}
+		const slope = (control.handle_value - control.anchor_value) / delta_x;
+		return Number.isFinite(slope) ? slope : null;
+	};
+
+	const build_bezier_segment_param_values = (
+		start_position: number,
+		start_value: number,
+		end_position: number,
+		end_value: number,
+		start_slope: number | null,
+		end_slope: number | null
+	): Record<string, ParamValue> | null => {
+		const span = end_position - start_position;
+		if (!(span > CURVE_EPSILON)) {
+			return null;
+		}
+		const secant_slope = (end_value - start_value) / span;
+		const safe_start_slope = Number.isFinite(start_slope ?? Number.NaN)
+			? (start_slope as number)
+			: secant_slope;
+		const safe_end_slope = Number.isFinite(end_slope ?? Number.NaN)
+			? (end_slope as number)
+			: secant_slope;
+		const handle_delta_position = span / 3;
+		return {
+			[DECL_KIND]: enum_param_value('bezier'),
+			[DECL_OUT_POSITION]: float_param_value(1 / 3),
+			[DECL_OUT_VALUE]: float_param_value(safe_start_slope * handle_delta_position),
+			[DECL_IN_POSITION]: float_param_value(-1 / 3),
+			[DECL_IN_VALUE]: float_param_value(-safe_end_slope * handle_delta_position)
+		};
+	};
+
+	const build_middle_insert_easing = (
+		start: ParsedCurveKey,
+		end: ParsedCurveKey,
+		position: number,
+		value: number
+	): PendingSplitEasing | null => {
+		const left_span = position - start.position;
+		const right_span = end.position - position;
+		if (!(left_span > CURVE_EPSILON) || !(right_span > CURVE_EPSILON)) {
+			return null;
+		}
+		const left_secant_slope = (value - start.value) / left_span;
+		const right_secant_slope = (end.value - value) / right_span;
+		const center_slope = Number.isFinite(left_secant_slope) && Number.isFinite(right_secant_slope)
+			? (left_secant_slope + right_secant_slope) * 0.5
+			: (end.value - start.value) / Math.max(CURVE_EPSILON, end.position - start.position);
+		const start_slope =
+			slope_from_bezier_control(bezier_control_for_anchor_kind(start.node_id, 'out')) ??
+			left_secant_slope;
+		const end_slope =
+			slope_from_bezier_control(bezier_control_for_anchor_kind(end.node_id, 'in')) ??
+			right_secant_slope;
+		const left_param_values = build_bezier_segment_param_values(
+			start.position,
+			start.value,
+			position,
+			value,
+			start_slope,
+			center_slope
+		);
+		const right_param_values = build_bezier_segment_param_values(
+			position,
+			value,
+			end.position,
+			end.value,
+			center_slope,
+			end_slope
+		);
+		if (!left_param_values || !right_param_values) {
+			return null;
+		}
+		return {
+			source_start_key_id: start.node_id,
+			source_end_key_id: end.node_id,
+			left_param_values,
+			right_param_values
+		};
+	};
+
+	const build_endpoint_extension_easing = (
+		position: number,
+		value: number
+	): {
+		new_key_easing_values: Record<string, ParamValue> | null;
+		existing_easing_updates: Array<{ key_id: NodeId; values: Record<string, ParamValue> }>;
+	} => {
+		if (parsed_keys.length === 0) {
+			return {
+				new_key_easing_values: null,
+				existing_easing_updates: []
+			};
+		}
+		const first_key = parsed_keys[0];
+		if (position < first_key.position - CURVE_EPSILON) {
+			const secant_slope = (first_key.value - value) / Math.max(CURVE_EPSILON, first_key.position - position);
+			const end_slope =
+				slope_from_bezier_control(bezier_control_for_anchor_kind(first_key.node_id, 'out')) ??
+				secant_slope;
+			return {
+				new_key_easing_values: build_bezier_segment_param_values(
+					position,
+					value,
+					first_key.position,
+					first_key.value,
+					secant_slope,
+					end_slope
+				),
+				existing_easing_updates: []
+			};
+		}
+		const last_key = parsed_keys[parsed_keys.length - 1];
+		if (position > last_key.position + CURVE_EPSILON) {
+			const secant_slope = (value - last_key.value) / Math.max(CURVE_EPSILON, position - last_key.position);
+			const start_slope =
+				slope_from_bezier_control(bezier_control_for_anchor_kind(last_key.node_id, 'in')) ??
+				secant_slope;
+			const update_values = build_bezier_segment_param_values(
+				last_key.position,
+				last_key.value,
+				position,
+				value,
+				start_slope,
+				secant_slope
+			);
+			return {
+				new_key_easing_values: null,
+				existing_easing_updates:
+					update_values === null ? [] : [{ key_id: last_key.node_id, values: update_values }]
+			};
+		}
+		return {
+			new_key_easing_values: null,
+			existing_easing_updates: []
+		};
+	};
+
 	const flush_queued_bezier_handle = (): void => {
 		if (!queued_bezier_handle_targets || queued_bezier_handle_targets.size === 0) {
 			return;
@@ -3548,7 +3846,7 @@ interface ActiveCurveDrag {
 		individual_mode: boolean
 	): Map<NodeId, BezierEasingPreview> => {
 		const targets = new Map<NodeId, BezierEasingPreview>();
-		const control = bezier_handle_control_by_id.get(bezier_handle_control_id(drag.ref));
+		const control = all_bezier_handle_control_by_id.get(bezier_handle_control_id(drag.ref));
 		if (!control) {
 			return targets;
 		}
@@ -3568,7 +3866,7 @@ interface ActiveCurveDrag {
 			return targets;
 		}
 
-		const opposite = bezier_handle_control_by_id.get(bezier_handle_control_id(drag.opposite_ref));
+		const opposite = all_bezier_handle_control_by_id.get(bezier_handle_control_id(drag.opposite_ref));
 		if (!opposite) {
 			return targets;
 		}
@@ -3634,7 +3932,7 @@ interface ActiveCurveDrag {
 
 		const toggle_selection = event.ctrlKey || event.metaKey;
 		const additive_selection = event.shiftKey;
-		const selection = nearest_key(point.x, point.y, Math.max(6, rem_base_px * 0.62));
+		const selection = nearest_key(point.x, point.y, key_hit_threshold_px());
 		if (selection !== null) {
 			if (toggle_selection) {
 				toggle_selected_key(selection);
@@ -3696,9 +3994,9 @@ interface ActiveCurveDrag {
 			return;
 		}
 
-		const bezier_handle = nearest_bezier_handle(point.x, point.y, Math.max(7, rem_base_px * 0.58));
+		const bezier_handle = nearest_bezier_handle(point.x, point.y, bezier_handle_hit_threshold_px());
 		if (bezier_handle) {
-			const control = bezier_handle_control_by_id.get(bezier_handle_control_id(bezier_handle));
+			const control = all_bezier_handle_control_by_id.get(bezier_handle_control_id(bezier_handle));
 			if (!control) {
 				return;
 			}
@@ -3706,7 +4004,8 @@ interface ActiveCurveDrag {
 			hover_key_id = control.anchor_key_id;
 			hover_curve_owner_key_id = null;
 
-			const opposite_candidates = bezier_handle_refs_by_anchor_key_id.get(control.anchor_key_id) ?? [];
+			const opposite_candidates =
+				all_bezier_handle_refs_by_anchor_key_id.get(control.anchor_key_id) ?? [];
 			let opposite_ref: BezierHandleRef | null = null;
 			for (const candidate of opposite_candidates) {
 				if (bezier_handle_control_id(candidate) === bezier_handle_control_id(bezier_handle)) {
@@ -3718,7 +4017,7 @@ interface ActiveCurveDrag {
 
 			let opposite_length = 0;
 			if (opposite_ref) {
-				const opposite_control = bezier_handle_control_by_id.get(
+				const opposite_control = all_bezier_handle_control_by_id.get(
 					bezier_handle_control_id(opposite_ref)
 				);
 				if (opposite_control) {
@@ -3744,7 +4043,7 @@ interface ActiveCurveDrag {
 		const curve_hit = nearest_curve_hit(
 			point.x,
 			point.y,
-			Math.max(4, rem_base_px * 0.45)
+			curve_hit_threshold_px()
 		);
 		if (curve_hit) {
 			const curve_selection = curve_hit.owner_key_id;
@@ -3897,7 +4196,7 @@ interface ActiveCurveDrag {
 			}
 			queue_bezier_handle_commit(preview_updates);
 			hover_bezier_handle = active_bezier_handle_drag.ref;
-			const active_control = bezier_handle_control_by_id.get(
+			const active_control = all_bezier_handle_control_by_id.get(
 				bezier_handle_control_id(active_bezier_handle_drag.ref)
 			);
 			if (active_control) {
@@ -3983,7 +4282,7 @@ interface ActiveCurveDrag {
 			return;
 		}
 
-		const hovered_key = nearest_key(point.x, point.y, Math.max(6, rem_base_px * 0.56));
+		const hovered_key = nearest_key(point.x, point.y, key_hit_threshold_px());
 		if (hovered_key !== null) {
 			hover_key_id = hovered_key;
 			hover_curve_owner_key_id = null;
@@ -3994,11 +4293,11 @@ interface ActiveCurveDrag {
 		const hovered_bezier_handle = nearest_bezier_handle(
 			point.x,
 			point.y,
-			Math.max(7, rem_base_px * 0.5)
+			bezier_handle_hit_threshold_px()
 		);
 		hover_bezier_handle = hovered_bezier_handle;
 		if (hovered_bezier_handle) {
-			const hovered_control = bezier_handle_control_by_id.get(
+			const hovered_control = all_bezier_handle_control_by_id.get(
 				bezier_handle_control_id(hovered_bezier_handle)
 			);
 			hover_key_id = hovered_control?.anchor_key_id ?? hovered_bezier_handle.key_id;
@@ -4006,7 +4305,7 @@ interface ActiveCurveDrag {
 			return;
 		}
 		hover_key_id = null;
-		hover_curve_owner_key_id = nearest_curve_owner_key(point.x, point.y, Math.max(4, rem_base_px * 0.42));
+		hover_curve_owner_key_id = nearest_curve_owner_key(point.x, point.y, curve_hit_threshold_px());
 	};
 
 	const on_canvas_pointer_up = (event: PointerEvent): void => {
@@ -4080,6 +4379,8 @@ interface ActiveCurveDrag {
 		const clamped = clamp_curve_point_to_active_range(position, value);
 		let target_value = clamped.value;
 		let split_easing: PendingSplitEasing | null = null;
+		let easing_values = options.easing_values ?? null;
+		let existing_easing_updates = options.existing_easing_updates ?? [];
 		if (options.preserve_curve_shape) {
 			const split_source = find_split_source_segment(
 				clamped.position,
@@ -4097,6 +4398,27 @@ interface ActiveCurveDrag {
 					target_value
 				);
 			}
+		} else {
+			const split_source = find_split_source_segment(
+				clamped.position,
+				options.preferred_owner_key_id ?? null
+			);
+			if (split_source) {
+				split_easing = build_middle_insert_easing(
+					split_source.start,
+					split_source.end,
+					clamped.position,
+					target_value
+				);
+			} else {
+				const extension = build_endpoint_extension_easing(clamped.position, target_value);
+				if (extension.new_key_easing_values) {
+					easing_values = extension.new_key_easing_values;
+				}
+				if (extension.existing_easing_updates.length > 0) {
+					existing_easing_updates = extension.existing_easing_updates;
+				}
+			}
 		}
 		const edit_session = createUiEditSession('Add Curve Key', 'curve-key-add');
 		await edit_session.begin();
@@ -4106,7 +4428,8 @@ interface ActiveCurveDrag {
 			position: clamped.position,
 			value: target_value,
 			split_easing,
-			easing_values: options.easing_values ?? null,
+			easing_values,
+			existing_easing_updates,
 			edit_session
 		};
 		const created = await sendCreateUserItemIntent(liveNode.node_id, key_creatable_item);
@@ -4126,8 +4449,9 @@ interface ActiveCurveDrag {
 		if (!curve_point) {
 			return;
 		}
-		const curve_owner = nearest_curve_owner_key(point.x, point.y, Math.max(4, rem_base_px * 0.45));
-		const add_on_curve = curve_owner !== null;
+		const curve_hit = nearest_curve_hit(point.x, point.y, curve_hit_threshold_px());
+		const curve_owner = curve_hit?.owner_key_id ?? null;
+		const add_on_curve = curve_hit !== null;
 		void add_key_at(curve_point.position, curve_point.value, {
 			preserve_curve_shape: add_on_curve,
 			preferred_owner_key_id: curve_owner
@@ -4563,15 +4887,15 @@ interface ActiveCurveDrag {
 		height: 1.45rem;
 		padding: 0 0.55rem;
 		border-radius: 0.28rem;
-		border: solid 0.06rem rgba(207, 228, 255, 0.22);
-		background: rgba(194, 220, 255, 0.08);
+		border: solid 0.06rem var(--gc-color-curve-toolbar-button-border);
+		background: var(--gc-color-curve-toolbar-button-bg);
 		color: var(--text-color);
 		font-size: 0.66rem;
 	}
 
 	.toolbar-button.destructive {
-		border-color: rgba(255, 127, 127, 0.35);
-		background: rgba(255, 97, 97, 0.12);
+		border-color: var(--gc-color-curve-toolbar-button-danger-border);
+		background: var(--gc-color-curve-toolbar-button-danger-bg);
 	}
 
 	.toolbar-button:disabled {

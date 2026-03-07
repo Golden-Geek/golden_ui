@@ -10,7 +10,9 @@
 
 	const CURVE_NODE_TYPE = 'animation_curve';
 	const KEY_NODE_TYPE = 'animation_curve_key';
+	const EASING_NODE_TYPE = 'animation_curve_easing';
 	const RANGE_NODE_TYPE = 'animation_curve_range';
+	const DECL_EASING = 'easing';
 	const DECL_RANGE = 'range';
 
 	let session = $derived(appState.session);
@@ -19,6 +21,7 @@
 
 	let selected_key_id = $state<NodeId | null>(null);
 	let selected_key_ids = $state<NodeId[]>([]);
+	let selected_curve_owner_key_ids = $state<NodeId[]>([]);
 
 	const same_node_id_array = (left: NodeId[], right: NodeId[]): boolean => {
 		if (left.length !== right.length) {
@@ -67,6 +70,26 @@
 		return graphNodesById?.get(selected_key_id) ?? null;
 	});
 
+	let selected_curve_easing_node = $derived.by((): UiNodeDto | null => {
+		if (!graphNodesById) {
+			return null;
+		}
+		for (const owner_key_id of selected_curve_owner_key_ids) {
+			const key_node = graphNodesById.get(owner_key_id);
+			if (!key_node || key_node.node_type !== KEY_NODE_TYPE) {
+				continue;
+			}
+			for (const child_id of key_node.children) {
+				const child = graphNodesById.get(child_id);
+				if (!child || child.decl_id !== DECL_EASING || child.node_type !== EASING_NODE_TYPE) {
+					continue;
+				}
+				return child;
+			}
+		}
+		return null;
+	});
+
 	$effect(() => {
 		if (!graphNodesById || liveNode.node_type !== CURVE_NODE_TYPE) {
 			selected_key_id = null;
@@ -112,6 +135,7 @@
 				curveNode={liveNode}
 				bind:selected_key_id
 				bind:selected_key_ids
+				bind:selected_curve_owner_key_ids
 				showToolbar={true}
 				showHints={true}
 				showGrid={true}
@@ -120,18 +144,20 @@
 				canvasHeight="min(24rem, 36vh)" />
 		</div>
 		<div class="curve-params-editor">
-			{#if editable_curve_range_node}
-				<div class="range-node-inspector">
-					<NodeInspector nodes={[editable_curve_range_node]} level={level + 1} order="solo" />
-				</div>
-			{/if}
-
 			{#if selected_key_node}
 				<div class="selected-key-node-inspector">
 					<NodeInspector nodes={[selected_key_node]} level={level + 1} order="solo" />
 				</div>
+			{:else if selected_curve_easing_node}
+				<div class="selected-curve-node-inspector">
+					<NodeInspector nodes={[selected_curve_easing_node]} level={level + 1} order="solo" />
+				</div>
+			{:else if editable_curve_range_node}
+				<div class="range-node-inspector">
+					<NodeInspector nodes={[editable_curve_range_node]} level={level + 1} order="solo" />
+				</div>
 			{:else}
-				<div class="empty-state">Select one key on the curve to edit it.</div>
+				<div class="empty-state">Select a key or a curve segment to edit it.</div>
 			{/if}
 		</div>
 	</div>
@@ -162,6 +188,11 @@
 	.selected-key-node-inspector {
 		overflow: auto;
 		height:100%;
+	}
+
+	.selected-curve-node-inspector {
+		overflow: auto;
+		height: 100%;
 	}
 
 	.empty-state {

@@ -66,6 +66,8 @@
 
 	interface CurveCanvasTheme {
 		canvas_bg: string;
+		canvas_wrap_bg: string;
+		canvas_wrap_border: string;
 		line_idle: string;
 		point_idle: string;
 		fill_rgb: string;
@@ -73,6 +75,28 @@
 		grid_label_rgb: string;
 		border_unbounded: string;
 		border_bounded: string;
+		empty_text: string;
+		plot_fill: string;
+		plot_shadow: string;
+		plot_shadow_fill: string;
+		hover_segment_underlay: string;
+		hover_segment: string;
+		selected_segment_underlay: string;
+		selected_segment: string;
+		handle_line: string;
+		handle_active: string;
+		handle_hover: string;
+		handle_out: string;
+		handle_in: string;
+		handle_stroke: string;
+		key_selected: string;
+		key_hover: string;
+		key_stroke: string;
+		key_guide: string;
+		crosshair: string;
+		selection_fill: string;
+		selection_stroke: string;
+		bounds_readout: string;
 	}
 
 	type BezierHandleKind = 'out' | 'in';
@@ -196,13 +220,37 @@
 	let bounds_label = $state('Bounds : X [min: -, max: -] | Y [min: -, max: -]');
 	let curve_canvas_theme = $state<CurveCanvasTheme>({
 		canvas_bg: '#000000',
+		canvas_wrap_bg: 'transparent',
+		canvas_wrap_border: 'transparent',
 		line_idle: '#9aa1ac',
 		point_idle: '#b1bac9',
 		fill_rgb: '80, 162, 255',
 		grid_line_rgb: '164, 174, 191',
 		grid_label_rgb: '186, 195, 210',
 		border_unbounded: 'rgba(138, 147, 161, 0.46)',
-		border_bounded: 'rgba(185, 199, 219, 0.82)'
+		border_bounded: 'rgba(185, 199, 219, 0.82)',
+		empty_text: 'rgba(192, 206, 232, 0.64)',
+		plot_fill: 'rgba(0, 0, 0, 0.2)',
+		plot_shadow: 'rgba(0, 0, 0, 0.5)',
+		plot_shadow_fill: '#000000',
+		hover_segment_underlay: 'rgba(92, 186, 255, 0.24)',
+		hover_segment: 'rgba(146, 214, 255, 0.74)',
+		selected_segment_underlay: 'rgba(92, 241, 170, 0.34)',
+		selected_segment: 'rgba(150, 255, 203, 0.96)',
+		handle_line: 'rgba(222, 232, 251, 0.32)',
+		handle_active: 'rgba(255, 224, 130, 0.98)',
+		handle_hover: 'rgba(255, 199, 138, 0.95)',
+		handle_out: 'rgba(172, 235, 220, 0.9)',
+		handle_in: 'rgba(164, 205, 245, 0.9)',
+		handle_stroke: 'rgba(10, 16, 24, 0.95)',
+		key_selected: 'rgba(255, 229, 112, 0.98)',
+		key_hover: 'rgba(255, 182, 96, 0.95)',
+		key_stroke: 'rgba(8, 12, 18, 0.9)',
+		key_guide: 'rgba(255, 226, 117, 0.35)',
+		crosshair: 'rgba(217, 231, 255, 0)',
+		selection_fill: 'rgba(114, 210, 255, 0.14)',
+		selection_stroke: 'rgba(158, 228, 255, 0.9)',
+		bounds_readout: 'rgba(198, 208, 224, 0.86)'
 	});
 
 	const is_step_multiple = (value: number, step: number): boolean => {
@@ -768,7 +816,7 @@
 
 		const keys = compiledCurve.keys;
 		if (keys.length === 0) {
-			context.fillStyle = 'rgba(192, 206, 232, 0.64)';
+			context.fillStyle = curve_canvas_theme.empty_text;
 			context.font = `${Math.max(9, Math.round(height * 0.065))}px sans-serif`;
 			context.fillText('No keys in this curve', width * 0.04, height * 0.18);
 			if (fixedViewBounds !== null) {
@@ -953,18 +1001,18 @@
 		context.save();
 		context.beginPath();
 		context.roundRect(plot_left, plot_top, plot_width, plot_height, border_radius);
-		context.fillStyle = 'rgba(0,0,0,.2)'; // A nice blue color
+		context.fillStyle = curve_canvas_theme.plot_fill;
 		context.fill();
 		context.clip();
 
 		context.beginPath();
 		context.rect(plot_left - 10, plot_top - 10, plot_width + 20, plot_height + 20);
 		context.rect(plot_left, plot_top, plot_width, plot_height);
-		context.shadowColor = 'rgba(0, 0, 0, .5)'; // Dark, semi-transparent shadow
+		context.shadowColor = curve_canvas_theme.plot_shadow;
 		context.shadowBlur = 30; // How soft the shadow is
 		context.shadowOffsetX = 0; // Shift shadow X (0 makes it even on all sides)
 		context.shadowOffsetY = 0; // Shift shadow Y
-		context.fillStyle = 'black';
+		context.fillStyle = curve_canvas_theme.plot_shadow_fill;
 		context.fill('evenodd');
 
 		const target_major_spacing_px = Math.max(34, rem_base_px * 5.8);
@@ -1078,35 +1126,109 @@
 		}
 
 		context.strokeStyle = curve_canvas_theme.line_idle;
-		context.lineWidth = 1.35;
+		context.lineWidth = 0.5;
 		context.lineJoin = 'round';
 		context.lineCap = 'round';
-		context.beginPath();
-		let has_curve_path = false;
-		let last_curve_x = 0;
-		let last_curve_y = 0;
-		for (let index = 0; index < sample_count; index += 1) {
-			const x = sample_screen_x[index];
-			const y = sample_screen_y[index];
-			if (!has_curve_path) {
-				context.moveTo(x, y);
-				has_curve_path = true;
-				last_curve_x = x;
-				last_curve_y = y;
-				continue;
+
+		const stroke_sample_range = (
+			start_index: number,
+			end_index: number,
+			stroke_style: string,
+			line_width: number,
+			line_dash: number[] = [],
+			alpha = 1
+		): boolean => {
+			if (end_index <= start_index) {
+				return false;
 			}
-			if (
-				Math.abs(x - last_curve_x) < CURVE_DRAW_MIN_DELTA_PX &&
-				Math.abs(y - last_curve_y) < CURVE_DRAW_MIN_DELTA_PX
-			) {
-				continue;
+			context.save();
+			context.strokeStyle = stroke_style;
+			context.lineWidth = line_width;
+			context.globalAlpha = alpha;
+			context.setLineDash(line_dash);
+			context.beginPath();
+			let has_path = false;
+			let last_x = 0;
+			let last_y = 0;
+			for (let index = start_index; index <= end_index; index += 1) {
+				const x = sample_screen_x[index];
+				const y = sample_screen_y[index];
+				if (!has_path) {
+					context.moveTo(x, y);
+					has_path = true;
+					last_x = x;
+					last_y = y;
+					continue;
+				}
+				if (
+					Math.abs(x - last_x) < CURVE_DRAW_MIN_DELTA_PX &&
+					Math.abs(y - last_y) < CURVE_DRAW_MIN_DELTA_PX
+				) {
+					continue;
+				}
+				context.lineTo(x, y);
+				last_x = x;
+				last_y = y;
 			}
-			context.lineTo(x, y);
-			last_curve_x = x;
-			last_curve_y = y;
+			if (has_path) {
+				context.stroke();
+			}
+			context.restore();
+			return has_path;
+		};
+
+		const first_key_position = keys[0]?.position ?? sample_positions[0] ?? 0;
+		const last_key_position = keys[keys.length - 1]?.position ?? first_key_position;
+		let first_main_sample_index = 0;
+		while (
+			first_main_sample_index < sample_count &&
+			sample_positions[first_main_sample_index] < first_key_position - CURVE_EPSILON
+		) {
+			first_main_sample_index += 1;
 		}
-		if (has_curve_path) {
-			context.stroke();
+		let last_main_sample_index = sample_count - 1;
+		while (
+			last_main_sample_index >= 0 &&
+			sample_positions[last_main_sample_index] > last_key_position + CURVE_EPSILON
+		) {
+			last_main_sample_index -= 1;
+		}
+		const max_sample_index = Math.max(0, sample_count - 1);
+		const clamped_first_main_sample_index = clamp(first_main_sample_index, 0, max_sample_index);
+		const clamped_last_main_sample_index = clamp(last_main_sample_index, 0, max_sample_index);
+		const has_main_curve_range =
+			first_main_sample_index < sample_count &&
+			last_main_sample_index >= 0 &&
+			clamped_first_main_sample_index <= clamped_last_main_sample_index;
+		const dashed_line_pattern = [Math.max(3, rem_base_px * 0.18), Math.max(2, rem_base_px * 0.14)];
+
+		if (first_main_sample_index > 0) {
+			stroke_sample_range(
+				0,
+				clamped_first_main_sample_index,
+				curve_canvas_theme.line_idle,
+				0.5,
+				dashed_line_pattern,
+				0.8
+			);
+		}
+		if (has_main_curve_range) {
+			stroke_sample_range(
+				clamped_first_main_sample_index,
+				clamped_last_main_sample_index,
+				curve_canvas_theme.line_idle,
+				0.5
+			);
+		}
+		if (last_main_sample_index + 1 < sample_count) {
+			stroke_sample_range(
+				clamped_last_main_sample_index,
+				sample_count - 1,
+				curve_canvas_theme.line_idle,
+				0.5,
+				dashed_line_pattern,
+				0.8
+			);
 		}
 
 		const stroke_owned_segment = (
@@ -1161,14 +1283,26 @@
 		const selected_curve_owner_key_set = new Set<NodeId>(selectedCurveOwnerKeyIds);
 
 		if (hoverCurveOwnerKeyId !== null && !selected_curve_owner_key_set.has(hoverCurveOwnerKeyId)) {
-			if (stroke_owned_segment(hoverCurveOwnerKeyId, 'rgba(117, 205, 255, 0.26)', 2.65)) {
-				stroke_owned_segment(hoverCurveOwnerKeyId, 'rgba(163, 223, 255, 0.86)', 1.38);
+			if (
+				stroke_owned_segment(
+					hoverCurveOwnerKeyId,
+					curve_canvas_theme.hover_segment_underlay,
+					2.55
+				)
+			) {
+				stroke_owned_segment(hoverCurveOwnerKeyId, curve_canvas_theme.hover_segment, 1.34);
 			}
 		}
 
 		for (const curve_owner_key_id of selectedCurveOwnerKeyIds) {
-			if (stroke_owned_segment(curve_owner_key_id, 'rgba(122, 238, 201, 0.32)', 3.1)) {
-				stroke_owned_segment(curve_owner_key_id, 'rgba(182, 249, 226, 0.95)', 1.76);
+			if (
+				stroke_owned_segment(
+					curve_owner_key_id,
+					curve_canvas_theme.selected_segment_underlay,
+					3.1
+				)
+			) {
+				stroke_owned_segment(curve_owner_key_id, curve_canvas_theme.selected_segment, 1.76);
 			}
 		}
 
@@ -1178,7 +1312,7 @@
 			const handle_x = to_screen_x(handle.handle_position);
 			const handle_y = to_screen_y(handle.handle_value);
 
-			context.strokeStyle = 'rgba(222, 232, 251, 0.32)';
+			context.strokeStyle = curve_canvas_theme.handle_line;
 			context.lineWidth = 0.9;
 			context.beginPath();
 			context.moveTo(anchor_x, anchor_y);
@@ -1195,13 +1329,13 @@
 				hoverBezierHandle.kind === handle.kind;
 			const radius = active ? Math.max(2.4, rem_base_px * 0.2) : Math.max(2.1, rem_base_px * 0.17);
 			context.fillStyle = active
-				? 'rgba(255, 224, 130, 0.98)'
+				? curve_canvas_theme.handle_active
 				: hovered
-					? 'rgba(255, 199, 138, 0.95)'
+					? curve_canvas_theme.handle_hover
 					: handle.kind === 'out'
-						? 'rgba(172, 235, 220, 0.9)'
-						: 'rgba(164, 205, 245, 0.9)';
-			context.strokeStyle = 'rgba(10, 16, 24, 0.95)';
+						? curve_canvas_theme.handle_out
+						: curve_canvas_theme.handle_in;
+			context.strokeStyle = curve_canvas_theme.handle_stroke;
 			context.lineWidth = active ? 1.2 : 1;
 			context.beginPath();
 			context.arc(handle_x, handle_y, radius, 0, Math.PI * 2);
@@ -1231,11 +1365,11 @@
 
 			const radius = selected ? Math.max(2, rem_base_px * 0.27) : Math.max(1.5, rem_base_px * 0.2);
 			context.fillStyle = selected
-				? 'rgba(255, 229, 112, 0.98)'
+				? curve_canvas_theme.key_selected
 				: hovered
-					? 'rgba(255, 182, 96, 0.95)'
+					? curve_canvas_theme.key_hover
 					: curve_canvas_theme.point_idle;
-			context.strokeStyle = 'rgba(8, 12, 18, 0.9)';
+			context.strokeStyle = curve_canvas_theme.key_stroke;
 			context.lineWidth = selected ? 1.25 : 1;
 			context.beginPath();
 			context.arc(x, y, radius, 0, Math.PI * 2);
@@ -1246,7 +1380,7 @@
 		for (const selected_key_id of selected_key_id_list) {
 			const selected_point = key_screen_points.get(selected_key_id);
 			if (selected_point) {
-				context.strokeStyle = 'rgba(255, 226, 117, 0.35)';
+				context.strokeStyle = curve_canvas_theme.key_guide;
 				context.lineWidth = 1;
 				context.beginPath();
 				context.moveTo(selected_point.x, plot_top);
@@ -1265,7 +1399,7 @@
 				cross_y <= plot_top + plot_height
 			) {
 				context.setLineDash([Math.max(2, rem_base_px * 0.12), Math.max(2, rem_base_px * 0.16)]);
-				context.strokeStyle = 'rgba(217, 231, 255, 0)';
+				context.strokeStyle = curve_canvas_theme.crosshair;
 				context.lineWidth = 0.9;
 				context.beginPath();
 				context.moveTo(cross_x, plot_top);
@@ -1287,8 +1421,8 @@
 			const box_width = Math.max(0, box_right - box_left);
 			const box_height = Math.max(0, box_bottom - box_top);
 			if (box_width > 0 && box_height > 0) {
-				context.fillStyle = 'rgba(114, 210, 255, 0.14)';
-				context.strokeStyle = 'rgba(158, 228, 255, 0.9)';
+				context.fillStyle = curve_canvas_theme.selection_fill;
+				context.strokeStyle = curve_canvas_theme.selection_stroke;
 				context.lineWidth = 1.05;
 				context.setLineDash([Math.max(2, rem_base_px * 0.11), Math.max(2, rem_base_px * 0.14)]);
 				context.fillRect(box_left, box_top, box_width, box_height);
@@ -1388,6 +1522,12 @@
 			const styles = window.getComputedStyle(document.documentElement);
 			curve_canvas_theme = {
 				canvas_bg: css_var_or(styles, '--gc-color-curve-canvas-bg', '#171b20'),
+				canvas_wrap_bg: css_var_or(styles, '--gc-color-curve-canvas-wrap-bg', 'transparent'),
+				canvas_wrap_border: css_var_or(
+					styles,
+					'--gc-color-curve-canvas-wrap-border',
+					'transparent'
+				),
 				line_idle: css_var_or(styles, '--gc-color-curve-line-idle', '#9aa1ac'),
 				point_idle: css_var_or(styles, '--gc-color-curve-point-idle', '#b1bac9'),
 				fill_rgb: css_var_or(styles, '--gc-color-curve-fill-rgb', '80, 162, 255'),
@@ -1402,6 +1542,108 @@
 					styles,
 					'--gc-color-curve-border-bounded',
 					'rgba(185, 199, 219, 0.82)'
+				),
+				empty_text: css_var_or(
+					styles,
+					'--gc-color-curve-empty-text',
+					'rgba(192, 206, 232, 0.64)'
+				),
+				plot_fill: css_var_or(styles, '--gc-color-curve-plot-fill', 'rgba(0, 0, 0, 0.2)'),
+				plot_shadow: css_var_or(
+					styles,
+					'--gc-color-curve-plot-shadow',
+					'rgba(0, 0, 0, 0.5)'
+				),
+				plot_shadow_fill: css_var_or(styles, '--gc-color-curve-plot-shadow-fill', '#000000'),
+				hover_segment_underlay: css_var_or(
+					styles,
+					'--gc-color-curve-hover-segment-underlay',
+					'rgba(92, 186, 255, 0.24)'
+				),
+				hover_segment: css_var_or(
+					styles,
+					'--gc-color-curve-hover-segment',
+					'rgba(146, 214, 255, 0.74)'
+				),
+				selected_segment_underlay: css_var_or(
+					styles,
+					'--gc-color-curve-selected-segment-underlay',
+					'rgba(92, 241, 170, 0.34)'
+				),
+				selected_segment: css_var_or(
+					styles,
+					'--gc-color-curve-selected-segment',
+					'rgba(150, 255, 203, 0.96)'
+				),
+				handle_line: css_var_or(
+					styles,
+					'--gc-color-curve-handle-line',
+					'rgba(222, 232, 251, 0.32)'
+				),
+				handle_active: css_var_or(
+					styles,
+					'--gc-color-curve-handle-active',
+					'rgba(255, 224, 130, 0.98)'
+				),
+				handle_hover: css_var_or(
+					styles,
+					'--gc-color-curve-handle-hover',
+					'rgba(255, 199, 138, 0.95)'
+				),
+				handle_out: css_var_or(
+					styles,
+					'--gc-color-curve-handle-out',
+					'rgba(172, 235, 220, 0.9)'
+				),
+				handle_in: css_var_or(
+					styles,
+					'--gc-color-curve-handle-in',
+					'rgba(164, 205, 245, 0.9)'
+				),
+				handle_stroke: css_var_or(
+					styles,
+					'--gc-color-curve-handle-stroke',
+					'rgba(10, 16, 24, 0.95)'
+				),
+				key_selected: css_var_or(
+					styles,
+					'--gc-color-curve-key-selected',
+					'rgba(255, 229, 112, 0.98)'
+				),
+				key_hover: css_var_or(
+					styles,
+					'--gc-color-curve-key-hover',
+					'rgba(255, 182, 96, 0.95)'
+				),
+				key_stroke: css_var_or(
+					styles,
+					'--gc-color-curve-key-stroke',
+					'rgba(8, 12, 18, 0.9)'
+				),
+				key_guide: css_var_or(
+					styles,
+					'--gc-color-curve-key-guide',
+					'rgba(255, 226, 117, 0.35)'
+				),
+				crosshair: css_var_or(
+					styles,
+					'--gc-color-curve-crosshair',
+					'rgba(217, 231, 255, 0)'
+				),
+				selection_fill: css_var_or(
+					styles,
+					'--gc-color-curve-selection-fill',
+					'rgba(114, 210, 255, 0.14)'
+				),
+				selection_stroke: css_var_or(
+					styles,
+					'--gc-color-curve-selection-stroke',
+					'rgba(158, 228, 255, 0.9)'
+				),
+				bounds_readout: css_var_or(
+					styles,
+					'--gc-color-curve-bounds-readout',
+					'rgba(198, 208, 224, 0.86)'
 				)
 			};
 		};
@@ -1527,6 +1769,9 @@
 		flex: 1 1 auto;
 		min-height: 0;
 		overflow: hidden;
+		background: var(--gc-color-curve-canvas-wrap-bg);
+		border: solid 0.06rem var(--gc-color-curve-canvas-wrap-border);
+		border-radius: 0.3rem;
 	}
 
 	.curve-canvas {
@@ -1534,6 +1779,7 @@
 		width: 100%;
 		height: 100%;
 		cursor: crosshair;
+		background: var(--gc-color-curve-canvas-bg);
 	}
 
 	.curve-canvas-wrap:focus,
@@ -1551,7 +1797,7 @@
 		font-size: 0.57rem;
 		line-height: 1.25;
 		padding: 0 0.16rem 0.1rem;
-		color: rgba(198, 208, 224, 0.86);
+		color: var(--gc-color-curve-bounds-readout);
 		opacity: 0.92;
 		white-space: nowrap;
 		overflow: hidden;

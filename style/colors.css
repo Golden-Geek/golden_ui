@@ -61,6 +61,32 @@
 	--gc-color-curve-grid-label-rgb: 100, 100, 100;
 	--gc-color-curve-border-unbounded: rgba(138, 147, 161, 0.1);
 	--gc-color-curve-border-bounded: rgba(185, 199, 219, 0.1);
+	--gc-color-curve-empty-text: rgba(192, 206, 232, 0.64);
+	--gc-color-curve-plot-fill: rgba(0, 0, 0, 0.2);
+	--gc-color-curve-plot-shadow: rgba(0, 0, 0, 0.5);
+	--gc-color-curve-plot-shadow-fill: #000000;
+	--gc-color-curve-hover-segment-underlay: rgba(92, 186, 255, 0.24);
+	--gc-color-curve-hover-segment: rgba(146, 214, 255, 0.74);
+	--gc-color-curve-selected-segment-underlay: rgba(92, 241, 170, 0.34);
+	--gc-color-curve-selected-segment: rgba(150, 255, 203, 0.96);
+	--gc-color-curve-handle-line: rgba(222, 232, 251, 0.32);
+	--gc-color-curve-handle-active: rgba(255, 224, 130, 0.98);
+	--gc-color-curve-handle-hover: rgba(255, 199, 138, 0.95);
+	--gc-color-curve-handle-out: rgba(172, 235, 220, 0.9);
+	--gc-color-curve-handle-in: rgba(164, 205, 245, 0.9);
+	--gc-color-curve-handle-stroke: rgba(10, 16, 24, 0.95);
+	--gc-color-curve-key-selected: rgba(255, 229, 112, 0.98);
+	--gc-color-curve-key-hover: rgba(255, 182, 96, 0.95);
+	--gc-color-curve-key-stroke: rgba(8, 12, 18, 0.9);
+	--gc-color-curve-key-guide: rgba(255, 226, 117, 0.35);
+	--gc-color-curve-crosshair: rgba(217, 231, 255, 0);
+	--gc-color-curve-selection-fill: rgba(114, 210, 255, 0.14);
+	--gc-color-curve-selection-stroke: rgba(158, 228, 255, 0.9);
+	--gc-color-curve-bounds-readout: rgba(198, 208, 224, 0.86);
+	--gc-color-curve-toolbar-button-border: rgba(207, 228, 255, 0.22);
+	--gc-color-curve-toolbar-button-bg: rgba(194, 220, 255, 0.08);
+	--gc-color-curve-toolbar-button-danger-border: rgba(255, 127, 127, 0.35);
+	--gc-color-curve-toolbar-button-danger-bg: rgba(255, 97, 97, 0.12);
 
 
 	/* DOCKVIEW COLORS */
