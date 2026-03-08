@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { appState } from '$lib/golden_ui/store/workbench.svelte';
-	import { sendSetParamIntent } from '$lib/golden_ui/store/ui-intents';
+	import { createUiEditSession, sendSetParamIntent } from '$lib/golden_ui/store/ui-intents';
 	import type { UiNodeDto } from '$lib/golden_ui/types';
 
 	let { node } = $props<{
@@ -16,21 +16,27 @@
 	let options = $derived(param?.constraints.enum_options ?? []);
 
 	let draftValue = $state('');
+	let editSession = createUiEditSession('Select option', 'param-enum');
 
 	$effect(() => {
 		draftValue = value;
 	});
 
-	const updateValue = (nextValue: string): void => {
+	const updateValue = async (nextValue: string): Promise<void> => {
 		if (!param || param.value.kind !== 'enum' || readOnly || !enabled) {
 			return;
 		}
 		draftValue = nextValue;
-		void sendSetParamIntent(
-			liveNode.node_id,
-			{ kind: 'enum', value: nextValue },
-			param.event_behaviour
-		);
+		await editSession.begin();
+		try {
+			await sendSetParamIntent(
+				liveNode.node_id,
+				{ kind: 'enum', value: nextValue },
+				param.event_behaviour
+			);
+		} finally {
+			await editSession.end();
+		}
 	};
 </script>
 
@@ -40,7 +46,7 @@
 	disabled={!enabled}
 	class:readonly={readOnly}
 	onchange={(event) => {
-		updateValue((event.target as HTMLSelectElement).value);
+		void updateValue((event.target as HTMLSelectElement).value);
 	}}>
 	{#each options as { variant_id, label }}
 		<option value={variant_id}>{label}</option>

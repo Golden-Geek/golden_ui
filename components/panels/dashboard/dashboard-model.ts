@@ -23,6 +23,17 @@ export interface DashboardGap {
 	y: CssValueData;
 }
 
+export interface DashboardPageSize {
+	enabled: boolean;
+	width: CssValueData;
+	height: CssValueData;
+}
+
+export interface DashboardSnapGrid {
+	enabled: boolean;
+	step: number;
+}
+
 export const getLiveNode = (graph: GraphState | null, node: UiNodeDto): UiNodeDto => {
 	return graph?.nodesById.get(node.node_id) ?? node;
 };
@@ -129,6 +140,43 @@ export const getGap = (
 	return {
 		x: cssValueFromParamValue(getDirectParam(graph, node, 'gap_x')?.value, fallback.x),
 		y: cssValueFromParamValue(getDirectParam(graph, node, 'gap_y')?.value, fallback.y)
+	};
+};
+
+export const getDashboardPageSize = (
+	graph: GraphState | null,
+	node: UiNodeDto | null,
+	fallback: { width: CssValueData; height: CssValueData } = {
+		width: { value: 1920, unit: 'px' },
+		height: { value: 1080, unit: 'px' }
+	}
+): DashboardPageSize => {
+	const widthNode = getDirectParamNode(graph, node, 'page_width');
+	const heightNode = getDirectParamNode(graph, node, 'page_height');
+	return {
+		enabled: (widthNode?.meta.enabled ?? false) || (heightNode?.meta.enabled ?? false),
+		width:
+			widthNode?.data.kind === 'parameter'
+				? cssValueFromParamValue(widthNode.data.param.value, fallback.width)
+				: fallback.width,
+		height:
+			heightNode?.data.kind === 'parameter'
+				? cssValueFromParamValue(heightNode.data.param.value, fallback.height)
+				: fallback.height
+	};
+};
+
+export const getDashboardSnapGrid = (
+	graph: GraphState | null,
+	node: UiNodeDto | null,
+	fallback = 1
+): DashboardSnapGrid => {
+	const paramNode = getDirectParamNode(graph, node, 'snap_grid');
+	const step =
+		paramNode?.data.kind === 'parameter' ? asNumber(paramNode.data.param.value, fallback) : fallback;
+	return {
+		enabled: (paramNode?.meta.enabled ?? false) && step > 0,
+		step: Math.max(0, step)
 	};
 };
 

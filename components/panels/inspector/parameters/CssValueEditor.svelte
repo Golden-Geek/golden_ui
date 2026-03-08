@@ -1,6 +1,8 @@
 <script lang="ts">
+	import { onDestroy } from 'svelte';
+	import Slider from '../../../common/Slider.svelte';
 	import { appState } from '$lib/golden_ui/store/workbench.svelte';
-	import { sendSetParamIntent } from '$lib/golden_ui/store/ui-intents';
+	import { createUiEditSession, sendSetParamIntent } from '$lib/golden_ui/store/ui-intents';
 	import { CSS_UNIT_OPTIONS } from '$lib/golden_ui/css-value';
 	import type { CssUnit, UiNodeDto } from '$lib/golden_ui/types';
 
@@ -19,10 +21,26 @@
 
 	let draftValue = $state(0);
 	let draftUnit = $state<CssUnit>('rem');
+	let numberInput = $state(null as HTMLInputElement | null);
+	let isEditing = $state(false);
+	let editSession = createUiEditSession('Edit css value', 'param-css-value');
+	const NUMERIC_EPSILON = 1e-9;
+
+	let min = $derived(constraints?.range?.kind === 'uniform' ? constraints.range.min : undefined);
+	let max = $derived(constraints?.range?.kind === 'uniform' ? constraints.range.max : undefined);
+	let step = $derived(constraints?.step);
+	let stepBase = $derived(constraints?.step_base);
 
 	$effect(() => {
+		if (isEditing) {
+			return;
+		}
 		draftValue = value;
 		draftUnit = unit;
+	});
+
+	onDestroy(() => {
+		void editSession.end();
 	});
 
 	const normalizeValue = (candidate: number): number | null => {
@@ -83,7 +101,7 @@
 		}
 		draftValue = normalized;
 		draftUnit = nextUnit;
-		if (normalized === value && nextUnit === unit) {
+		if (Math.abs(normalized - value) <= NUMERIC_EPSILON && nextUnit === unit) {
 			return;
 		}
 		await sendSetParamIntent(
@@ -92,28 +110,71 @@
 			param.event_behaviour
 		);
 	};
+
+	const startEdit = (): void => {
+		if (readOnly || !enabled) {
+			return;
+		}
+		isEditing = true;
+		void editSession.begin();
+	};
+
+	const endEdit = (): void => {
+		if (!isEditing) {
+			return;
+		}
+		isEditing = false;
+		void editSession.end();
+	};
+
+	const setValueFromField = (): void => {
+		if (!numberInput) {
+			return;
+		}
+		const parsedValue = Number(numberInput.value);
+		if (Number.isFinite(parsedValue)) {
+			void commitValue(parsedValue, draftUnit);
+			return;
+		}
+		numberInput.value = draftValue.toFixed(3);
+	};
 </script>
 
 <div class="css-value-editor">
+	<div class="slider-wrapper">
+		<Slider
+			bind:value={draftValue}
+			{min}
+			{max}
+			{step}
+			{stepBase}
+			{readOnly}
+			disabled={!enabled}
+			onValueChange={(nextValue: number) => {
+				void commitValue(nextValue, draftUnit);
+			}}
+			onStartEdit={startEdit}
+			onEndEdit={endEdit} />
+	</div>
 	<input
+		bind:this={numberInput}
 		type="number"
 		class="css-value-number"
 		step={constraints?.step ?? 0.01}
-		value={draftValue}
+		value={draftValue.toFixed(3)}
 		disabled={!enabled}
 		class:readonly={readOnly}
-		onblur={(event) => {
-			void commitValue(Number((event.target as HTMLInputElement).value), draftUnit);
-		}}
+		onblur={setValueFromField}
 		onkeydown={(event) => {
 			if (event.key === 'Enter') {
-				const target = event.target as HTMLInputElement;
-				void commitValue(Number(target.value), draftUnit);
-				target.blur();
+				numberInput?.blur();
 			}
 			if (event.key === 'Escape') {
 				draftValue = value;
-				(event.target as HTMLInputElement).blur();
+				if (numberInput) {
+					numberInput.value = value.toFixed(3);
+					numberInput.blur();
+				}
 			}
 		}} />
 	<select
@@ -139,8 +200,16 @@
 		height: 1.2rem;
 	}
 
+	.slider-wrapper {
+		display: flex;
+		flex: 1 1 auto;
+		align-items: center;
+		min-inline-size: 0;
+		height: 70%;
+	}
+
 	.css-value-number {
-		flex: 1;
+		flex: 0 0 4.25rem;
 		height: 100%;
 		box-sizing: border-box;
 		font-size: 0.75rem;
@@ -148,7 +217,17 @@
 
 	.css-value-unit {
 		height: 100%;
-		min-inline-size: 4.5rem;
-		font-size: 0.75rem;
+		min-inline-size: 3.25rem;
+		max-inline-size: 4rem;
+		padding-inline: 0.25rem;
+		font-size: 0.68rem;
+		line-height: 1;
+		text-overflow: ellipsis;
+	}
+
+	input::-webkit-outer-spin-button,
+	input::-webkit-inner-spin-button {
+		-webkit-appearance: none;
+		margin: 0;
 	}
 </style>

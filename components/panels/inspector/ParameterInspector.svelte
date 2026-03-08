@@ -42,12 +42,14 @@
 		level,
 		order,
 		defaultChildren,
-		controlNodeType = ''
+		controlNodeType = '',
+		layoutMode = 'default'
 	} = $props<{
 		node: UiNodeDto;
 		level: number;
 		order: 'first' | 'last' | 'solo' | '';
 		controlNodeType?: String;
+		layoutMode?: 'default' | 'dashboard';
 		defaultChildren?: Snippet<[String?]>;
 	}>();
 
@@ -548,6 +550,7 @@
 		class="parameter-inspector {order} {'level-' + level} {controlNodeType}
 		{readOnly ? 'readonly' : ''} {currentControlMode !== 'manual' ? 'controlled' : ''}"
 		class:control-menu-open={controlMenuOpen}
+		class:layout-dashboard={layoutMode === 'dashboard'}
 		style="--gc-parameter-accent: {controlAccentColor};"
 		data-node-id={liveNode.node_id}>
 		{#if param}
@@ -619,7 +622,7 @@
 				{/if}
 
 				{#if EditorComponent}
-					<div class="parameter-controls" class:full-width={isControlNode}>
+					<div class="parameter-controls" class:full-width={isControlNode || layoutMode === 'dashboard'}>
 						<div class="parameter-wrapper {readOnly ? 'readonly' : ''} {enabled ? '' : 'disabled'}">
 							<EditorComponent node={liveNode} />
 						</div>
@@ -854,6 +857,7 @@
 		align-items: center;
 		justify-content: right;
 		flex: 1;
+		min-width: 0;
 		max-width: 15rem;
 	}
 
@@ -888,6 +892,37 @@
 		align-items: center;
 		min-width: max-content;
 		gap: 0.25rem;
+	}
+
+	.parameter-inspector.layout-dashboard {
+		min-width: 0;
+		overflow: hidden;
+	}
+
+	.parameter-inspector.layout-dashboard .firstline,
+	.parameter-inspector.layout-dashboard .parameter-controls,
+	.parameter-inspector.layout-dashboard .parameter-wrapper,
+	.parameter-inspector.layout-dashboard .parameter-info {
+		min-width: 0;
+	}
+
+	.parameter-inspector.layout-dashboard .parameter-info {
+		flex: 1 1 auto;
+		overflow: hidden;
+	}
+
+	.parameter-inspector.layout-dashboard .parameter-wrapper {
+		max-width: none;
+	}
+
+	.parameter-inspector.layout-dashboard .parameter-label,
+	.parameter-inspector.layout-dashboard .custom-prop-name-text {
+		display: inline-block;
+		min-width: 0;
+		max-width: 100%;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
 	}
 
 	.custom-prop-name-text {

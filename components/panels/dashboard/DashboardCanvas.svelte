@@ -1,6 +1,8 @@
 <script lang="ts">
+	import { onDestroy } from 'svelte';
+	import { registerCommandHandler } from '$lib/golden_ui/store/commands.svelte';
 	import { appState } from '$lib/golden_ui/store/workbench.svelte';
-	import { sendSetParamIntent } from '$lib/golden_ui/store/ui-intents';
+	import { createUiEditSession, sendSetParamIntent } from '$lib/golden_ui/store/ui-intents';
 	import type { NodeId, ParamValue, UiNodeDto } from '$lib/golden_ui/types';
 	import {
 		cssValueToPx,
@@ -10,22 +12,22 @@
 		type CssUnitConversionContext,
 		type CssValueData
 	} from '$lib/golden_ui/css-value';
-	import NodeAddButton from '$lib/golden_ui/components/common/NodeAddButton.svelte';
-	import NodeInspector from '$lib/golden_ui/components/panels/inspector/NodeInspector.svelte';
 	import DashboardCanvasSelf from './DashboardCanvas.svelte';
+	import { resolveDashboardNodeWidgetDisplayMode } from './dashboard-node-widget-registry';
 
 	import {
 		bindDashboardGenericWidgetTarget,
 		bindDashboardNodeWidgetTarget,
 		createDashboardGenericWidget,
-		createDashboardNodeWidget,
-		moveDashboardWidgetByDelta
+		createDashboardNodeWidget
 	} from './dashboard-actions';
 	import { readDashboardDragPayload, type DashboardDragPayload } from './dashboard-drag';
 	import {
 		formatParamValue,
 		getDashboardLayoutKind,
+		getDashboardPageSize,
 		getDashboardPlacement,
+		getDashboardSnapGrid,
 		getDirectItemChildren,
 		getDirectParam,
 		getDirectParamNode,
@@ -66,7 +68,9 @@
 	let openAccordionNodeIds = $state<NodeId[]>([]);
 	let surfaceDragDepth = $state(0);
 	let bindingDragDepth = $state(0);
-	let interactionBusy = $state(false);
+	let isPageViewportFocused = $state(false);
+	let pageViewportElement = $state<HTMLDivElement | null>(null);
+	let pageViewportSize = $state({ width: 0, height: 0 });
 
 	type FreeLayoutInteractionMode = 'move' | 'resize';
 	type FreeLayoutResizeEdges = {
@@ -89,8 +93,23 @@
 		rootRemPx: number;
 		surfaceWidthPx: number;
 		surfaceHeightPx: number;
+		surfaceScaleX: number;
+		surfaceScaleY: number;
 		viewportWidthPx: number;
 		viewportHeightPx: number;
+	};
+	type SurfaceMetrics = {
+		width: number;
+		height: number;
+		scaleX: number;
+		scaleY: number;
+	};
+	type DashboardPageViewState = {
+		pointerId: number | null;
+		lastClient: [number, number] | null;
+		panX: number;
+		panY: number;
+		zoom: number;
 	};
 	type FreeLayoutResizeZone = {
 		name: string;
@@ -99,6 +118,13 @@
 
 	let freeLayoutInteraction = $state<FreeLayoutInteraction | null>(null);
 	let freeLayoutPreview = $state<FreeLayoutPreview | null>(null);
+	let pageView = $state<DashboardPageViewState>({
+		pointerId: null,
+		lastClient: null,
+		panX: 0,
+		panY: 0,
+		zoom: 1
+	});
 
 	const minFreeWidgetWidthRem = 6.5;
 	const minFreeWidgetHeightRem = 2.8;
@@ -112,6 +138,14 @@
 		{ name: 'south-west', edges: { left: true, right: false, top: false, bottom: true } },
 		{ name: 'west', edges: { left: true, right: false, top: false, bottom: false } }
 	];
+	const minPageZoom = 0.25;
+	const maxPageZoom = 4;
+
+	let freeLayoutCommitFrame: number | null = null;
+	let freeLayoutCommitInFlight = false;
+	let pendingFreeLayoutCommit: FreeLayoutPreview | null = null;
+	let lastCommittedFreeLayoutPreview: FreeLayoutPreview | null = null;
+	let freeLayoutEditSession: ReturnType<typeof createUiEditSession> | null = null;
 
 	const getGraph = () => appState.session?.graph.state ?? null;
 
@@ -132,19 +166,70 @@
 	const getClosestSurfaceMetrics = (
 		target: EventTarget | null,
 		rootRemPx: number
-	): { width: number; height: number } => {
+	): SurfaceMetrics => {
 		if (!(target instanceof Element)) {
-			return { width: getViewportWidthPx(), height: 20 * rootRemPx };
+			return { width: getViewportWidthPx(), height: 20 * rootRemPx, scaleX: 1, scaleY: 1 };
 		}
 		const surface = target.closest('.dashboard-surface');
 		if (!surface) {
-			return { width: getViewportWidthPx(), height: 20 * rootRemPx };
+			return { width: getViewportWidthPx(), height: 20 * rootRemPx, scaleX: 1, scaleY: 1 };
 		}
 		const rect = surface.getBoundingClientRect();
+		const layoutWidth = surface instanceof HTMLElement ? Math.max(surface.clientWidth, 1) : Math.max(rect.width, 1);
+		const layoutHeight = surface instanceof HTMLElement ? Math.max(surface.clientHeight, 1) : Math.max(rect.height, 1);
 		return {
-			width: Math.max(rect.width, rootRemPx),
-			height: Math.max(rect.height, rootRemPx)
+			width: Math.max(layoutWidth, rootRemPx),
+			height: Math.max(layoutHeight, rootRemPx),
+			scaleX: Math.max(rect.width, 1) / layoutWidth,
+			scaleY: Math.max(rect.height, 1) / layoutHeight
 		};
+	};
+
+	const canScrollAxis = (element: HTMLElement, axis: 'x' | 'y', delta: number): boolean => {
+		if (delta === 0) {
+			return false;
+		}
+		const style = window.getComputedStyle(element);
+		const overflowValue = axis === 'x' ? style.overflowX : style.overflowY;
+		if (!['auto', 'scroll', 'overlay'].includes(overflowValue)) {
+			return false;
+		}
+		const scrollOffset = axis === 'x' ? element.scrollLeft : element.scrollTop;
+		const scrollExtent =
+			axis === 'x'
+				? element.scrollWidth - element.clientWidth
+				: element.scrollHeight - element.clientHeight;
+		if (scrollExtent <= 1) {
+			return false;
+		}
+		return delta < 0 ? scrollOffset > 1 : scrollOffset < scrollExtent - 1;
+	};
+
+	const wheelTargetsScrollableContent = (event: WheelEvent): boolean => {
+		if (!(event.target instanceof Element) || !pageViewportElement) {
+			return false;
+		}
+		let current: Element | null = event.target;
+		while (current && current !== pageViewportElement) {
+			if (
+				current instanceof HTMLElement &&
+				(canScrollAxis(current, 'y', event.deltaY) || canScrollAxis(current, 'x', event.deltaX))
+			) {
+				return true;
+			}
+			current = current.parentElement;
+		}
+		return false;
+	};
+
+	const normalizeWheelDeltaY = (event: WheelEvent): number => {
+		if (event.deltaMode === WheelEvent.DOM_DELTA_LINE) {
+			return event.deltaY * getRootRemPixels();
+		}
+		if (event.deltaMode === WheelEvent.DOM_DELTA_PAGE) {
+			return event.deltaY * pageViewportHeightPx;
+		}
+		return event.deltaY;
 	};
 
 	const createCssUnitContext = (
@@ -170,6 +255,62 @@
 			}
 		}
 		return true;
+	};
+
+	const cloneFreeLayoutPreview = (preview: FreeLayoutPreview): FreeLayoutPreview => ({
+		position: {
+			x: { ...preview.position.x },
+			y: { ...preview.position.y }
+		},
+		size: {
+			width: { ...preview.size.width },
+			height: { ...preview.size.height }
+		}
+	});
+
+	const currentPlacementPreview = (): FreeLayoutPreview => ({
+		position: {
+			x: { ...placement.position.x },
+			y: { ...placement.position.y }
+		},
+		size: {
+			width: { ...placement.size.width },
+			height: { ...placement.size.height }
+		}
+	});
+
+	const sameCssValue = (left: CssValueData, right: CssValueData): boolean =>
+		left.value === right.value && left.unit === right.unit;
+
+	const isSameFreeLayoutPreview = (left: FreeLayoutPreview | null, right: FreeLayoutPreview | null): boolean => {
+		if (!left || !right) {
+			return left === right;
+		}
+		return (
+			sameCssValue(left.position.x, right.position.x) &&
+			sameCssValue(left.position.y, right.position.y) &&
+			sameCssValue(left.size.width, right.size.width) &&
+			sameCssValue(left.size.height, right.size.height)
+		);
+	};
+
+	const snapToGridPx = (valuePx: number, snapPx: number): number => {
+		if (!(snapPx > 0)) {
+			return valuePx;
+		}
+		return Math.round(valuePx / snapPx) * snapPx;
+	};
+
+	const clampPageZoom = (zoom: number): number => Math.min(maxPageZoom, Math.max(minPageZoom, zoom));
+
+	const homePageView = (): void => {
+		pageView = {
+			pointerId: null,
+			lastClient: null,
+			panX: 0,
+			panY: 0,
+			zoom: 1
+		};
 	};
 
 	$effect(() => {
@@ -199,6 +340,31 @@
 			return;
 		}
 		openAccordionNodeIds = nextOpenAccordionNodeIds;
+	});
+
+	$effect(() => {
+		void liveNode.node_id;
+		homePageView();
+	});
+
+	$effect(() => {
+		if (!pageViewportElement || typeof ResizeObserver === 'undefined') {
+			return;
+		}
+		const observer = new ResizeObserver((entries) => {
+			const entry = entries[0];
+			if (!entry) {
+				return;
+			}
+			pageViewportSize = {
+				width: Math.max(entry.contentRect.width, 1),
+				height: Math.max(entry.contentRect.height, 1)
+			};
+		});
+		observer.observe(pageViewportElement);
+		return () => {
+			observer.disconnect();
+		};
 	});
 
 	const selectWidgetNode = (): void => {
@@ -376,6 +542,74 @@
 		event.stopPropagation();
 	};
 
+	const finishFreeLayoutEditSession = async (): Promise<void> => {
+		const sessionToEnd = freeLayoutEditSession;
+		freeLayoutEditSession = null;
+		await sessionToEnd?.end();
+	};
+
+	const sendFreeLayoutPreview = async (preview: FreeLayoutPreview): Promise<void> => {
+		const compareTo = lastCommittedFreeLayoutPreview ?? currentPlacementPreview();
+		const operations: Promise<void>[] = [];
+		if (!sameCssValue(preview.position.x, compareTo.position.x)) {
+			operations.push(setCssParamValue('position_x', preview.position.x));
+		}
+		if (!sameCssValue(preview.position.y, compareTo.position.y)) {
+			operations.push(setCssParamValue('position_y', preview.position.y));
+		}
+		if (!sameCssValue(preview.size.width, compareTo.size.width)) {
+			operations.push(setCssParamValue('width', preview.size.width));
+		}
+		if (!sameCssValue(preview.size.height, compareTo.size.height)) {
+			operations.push(setCssParamValue('height', preview.size.height));
+		}
+		if (operations.length === 0) {
+			lastCommittedFreeLayoutPreview = cloneFreeLayoutPreview(preview);
+			return;
+		}
+		await Promise.all(operations);
+		lastCommittedFreeLayoutPreview = cloneFreeLayoutPreview(preview);
+	};
+
+	const flushFreeLayoutCommitQueue = async (): Promise<void> => {
+		if (freeLayoutCommitInFlight) {
+			return;
+		}
+		freeLayoutCommitInFlight = true;
+		try {
+			while (pendingFreeLayoutCommit) {
+				const nextPreview = cloneFreeLayoutPreview(pendingFreeLayoutCommit);
+				pendingFreeLayoutCommit = null;
+				await sendFreeLayoutPreview(nextPreview);
+			}
+		} finally {
+			freeLayoutCommitInFlight = false;
+		}
+	};
+
+	const scheduleFreeLayoutCommit = (preview: FreeLayoutPreview): void => {
+		pendingFreeLayoutCommit = cloneFreeLayoutPreview(preview);
+		if (typeof window === 'undefined') {
+			void flushFreeLayoutCommitQueue();
+			return;
+		}
+		if (freeLayoutCommitFrame !== null) {
+			return;
+		}
+		freeLayoutCommitFrame = window.requestAnimationFrame(() => {
+			freeLayoutCommitFrame = null;
+			void flushFreeLayoutCommitQueue();
+		});
+	};
+
+	const finalizeFreeLayoutInteraction = async (preview: FreeLayoutPreview | null): Promise<void> => {
+		if (preview) {
+			scheduleFreeLayoutCommit(preview);
+			await flushFreeLayoutCommitQueue();
+		}
+		await finishFreeLayoutEditSession();
+	};
+
 	const beginFreeLayoutMove = (event: PointerEvent): void => {
 		if (!editMode || !supportsFreePlacement) {
 			return;
@@ -383,8 +617,12 @@
 		event.preventDefault();
 		event.stopPropagation();
 		selectWidgetNode();
+		freeLayoutEditSession = createUiEditSession('Move dashboard widget', 'dashboard-free-layout');
+		void freeLayoutEditSession.begin();
 		const rootRemPx = getRootRemPixels();
 		const surfaceMetrics = getClosestSurfaceMetrics(event.currentTarget, rootRemPx);
+		lastCommittedFreeLayoutPreview = currentPlacementPreview();
+		pendingFreeLayoutCommit = null;
 		freeLayoutInteraction = {
 			pointerId: event.pointerId,
 			mode: 'move',
@@ -401,6 +639,8 @@
 			rootRemPx,
 			surfaceWidthPx: surfaceMetrics.width,
 			surfaceHeightPx: surfaceMetrics.height,
+			surfaceScaleX: surfaceMetrics.scaleX,
+			surfaceScaleY: surfaceMetrics.scaleY,
 			viewportWidthPx: getViewportWidthPx(),
 			viewportHeightPx: getViewportHeightPx()
 		};
@@ -426,8 +666,12 @@
 		event.preventDefault();
 		event.stopPropagation();
 		selectWidgetNode();
+		freeLayoutEditSession = createUiEditSession('Resize dashboard widget', 'dashboard-free-layout');
+		void freeLayoutEditSession.begin();
 		const rootRemPx = getRootRemPixels();
 		const surfaceMetrics = getClosestSurfaceMetrics(event.currentTarget, rootRemPx);
+		lastCommittedFreeLayoutPreview = currentPlacementPreview();
+		pendingFreeLayoutCommit = null;
 		freeLayoutInteraction = {
 			pointerId: event.pointerId,
 			mode: 'resize',
@@ -444,6 +688,8 @@
 			rootRemPx,
 			surfaceWidthPx: surfaceMetrics.width,
 			surfaceHeightPx: surfaceMetrics.height,
+			surfaceScaleX: surfaceMetrics.scaleX,
+			surfaceScaleY: surfaceMetrics.scaleY,
 			viewportWidthPx: getViewportWidthPx(),
 			viewportHeightPx: getViewportHeightPx()
 		};
@@ -471,129 +717,6 @@
 		selectWidgetNode();
 	};
 
-	const commitFreeLayoutPreview = async (preview: FreeLayoutPreview): Promise<void> => {
-		interactionBusy = true;
-		try {
-			const operations: Promise<void>[] = [];
-			if (
-				preview.position.x.value !== placement.position.x.value ||
-				preview.position.x.unit !== placement.position.x.unit
-			) {
-				operations.push(setCssParamValue('position_x', preview.position.x));
-			}
-			if (
-				preview.position.y.value !== placement.position.y.value ||
-				preview.position.y.unit !== placement.position.y.unit
-			) {
-				operations.push(setCssParamValue('position_y', preview.position.y));
-			}
-			if (
-				preview.size.width.value !== placement.size.width.value ||
-				preview.size.width.unit !== placement.size.width.unit
-			) {
-				operations.push(setCssParamValue('width', preview.size.width));
-			}
-			if (
-				preview.size.height.value !== placement.size.height.value ||
-				preview.size.height.unit !== placement.size.height.unit
-			) {
-				operations.push(setCssParamValue('height', preview.size.height));
-			}
-			await Promise.all(operations);
-		} finally {
-			interactionBusy = false;
-		}
-	};
-
-	const withWidgetMutation = async (event: Event, operation: () => Promise<void>): Promise<void> => {
-		event.preventDefault();
-		event.stopPropagation();
-		if (interactionBusy) {
-			return;
-		}
-		interactionBusy = true;
-		try {
-			await operation();
-		} finally {
-			interactionBusy = false;
-		}
-	};
-
-	const updateCssParam = async (
-		declId: string,
-		fallback: CssValueData,
-		mutate: (current: CssValueData) => CssValueData
-	): Promise<void> => {
-		const paramNode = getDirectParamNode(graph, liveNode, declId);
-		if (!paramNode || paramNode.data.kind !== 'parameter') {
-			return;
-		}
-		const currentValue =
-			paramNode.data.param.value.kind === 'css_value'
-				? { value: paramNode.data.param.value.value, unit: paramNode.data.param.value.unit }
-				: fallback;
-		const nextValue = mutate(currentValue);
-		await sendSetParamIntent(
-			paramNode.node_id,
-			{ kind: 'css_value', value: nextValue.value, unit: nextValue.unit },
-			paramNode.data.param.event_behaviour
-		);
-	};
-
-	const updateNumberParam = async (
-		declId: string,
-		fallback: number,
-		mutate: (current: number) => number
-	): Promise<void> => {
-		const paramNode = getDirectParamNode(graph, liveNode, declId);
-		if (!paramNode || paramNode.data.kind !== 'parameter') {
-			return;
-		}
-		const currentValue =
-			paramNode.data.param.value.kind === 'int' || paramNode.data.param.value.kind === 'float'
-				? Number(paramNode.data.param.value.value)
-				: fallback;
-		const nextValue = mutate(currentValue);
-		const nextParamValue =
-			paramNode.data.param.value.kind === 'float'
-				? ({ kind: 'float', value: nextValue } as ParamValue)
-				: ({ kind: 'int', value: Math.round(nextValue) } as ParamValue);
-		await sendSetParamIntent(paramNode.node_id, nextParamValue, paramNode.data.param.event_behaviour);
-	};
-
-	const resizePrimaryAxis = async (delta: number): Promise<void> => {
-		const rootRemPx = getRootRemPixels();
-		const interactionLike = {
-			rootRemPx,
-			surfaceWidthPx: getViewportWidthPx(),
-			surfaceHeightPx: getViewportHeightPx(),
-			viewportWidthPx: getViewportWidthPx(),
-			viewportHeightPx: getViewportHeightPx()
-		};
-		const deltaPx = delta * rootRemPx;
-		if (parentLayoutKind === 'vertical') {
-			await updateCssParam('height', { value: 4, unit: 'rem' }, (current) => {
-				const context = createCssUnitContext(interactionLike, 'y');
-				const nextPx = Math.max(2.4 * rootRemPx, cssValueToPx(current, 'y', context) + deltaPx);
-				return pxToCssValue(nextPx, current, 'y', context);
-			});
-			return;
-		}
-		await updateCssParam('width', { value: 8, unit: 'rem' }, (current) => {
-			const context = createCssUnitContext(interactionLike, 'x');
-			const nextPx = Math.max(3.5 * rootRemPx, cssValueToPx(current, 'x', context) + deltaPx);
-			return pxToCssValue(nextPx, current, 'x', context);
-		});
-	};
-
-	const changeGridSpan = async (declId: 'column_span' | 'row_span', delta: number): Promise<void> => {
-		await updateNumberParam(declId, 1, (value) => Math.max(1, Math.round(value + delta)));
-	};
-
-	const changeWidgetOrder = async (delta: number): Promise<void> => {
-		await moveDashboardWidgetByDelta(getGraph, liveNode.node_id, delta);
-	};
-
 	$effect(() => {
 		if (!freeLayoutInteraction) {
 			return;
@@ -604,15 +727,26 @@
 				return;
 			}
 			event.preventDefault();
-			const deltaXPx = event.clientX - freeLayoutInteraction.startClient[0];
-			const deltaYPx = event.clientY - freeLayoutInteraction.startClient[1];
+			const deltaXPx =
+				(event.clientX - freeLayoutInteraction.startClient[0]) /
+				Math.max(freeLayoutInteraction.surfaceScaleX, 1e-6);
+			const deltaYPx =
+				(event.clientY - freeLayoutInteraction.startClient[1]) /
+				Math.max(freeLayoutInteraction.surfaceScaleY, 1e-6);
 			const xContext = createCssUnitContext(freeLayoutInteraction, 'x');
 			const yContext = createCssUnitContext(freeLayoutInteraction, 'y');
 			const minWidthPx = minFreeWidgetWidthRem * freeLayoutInteraction.rootRemPx;
 			const minHeightPx = minFreeWidgetHeightRem * freeLayoutInteraction.rootRemPx;
+			const snapPx = parentSnapGrid.enabled ? parentSnapGrid.step * freeLayoutInteraction.rootRemPx : 0;
 			if (freeLayoutInteraction.mode === 'move') {
-				const nextX = Math.max(0, cssValueToPx(freeLayoutInteraction.startPosition.x, 'x', xContext) + deltaXPx);
-				const nextY = Math.max(0, cssValueToPx(freeLayoutInteraction.startPosition.y, 'y', yContext) + deltaYPx);
+				const nextX = snapToGridPx(
+					cssValueToPx(freeLayoutInteraction.startPosition.x, 'x', xContext) + deltaXPx,
+					snapPx
+				);
+				const nextY = snapToGridPx(
+					cssValueToPx(freeLayoutInteraction.startPosition.y, 'y', yContext) + deltaYPx,
+					snapPx
+				);
 				freeLayoutPreview = {
 					position: {
 						x: pxToCssValue(nextX, freeLayoutInteraction.startPosition.x, 'x', xContext),
@@ -623,6 +757,7 @@
 						height: { ...freeLayoutInteraction.startSize.height }
 					}
 				};
+				scheduleFreeLayoutCommit(freeLayoutPreview);
 				return;
 			}
 			const resizeEdges = freeLayoutInteraction.resizeEdges;
@@ -656,6 +791,12 @@
 			if (resizeEdges.bottom) {
 				nextHeightPx = Math.max(minHeightPx, nextHeightPx + deltaYPx);
 			}
+			if (snapPx > 0) {
+				nextPositionPxX = snapToGridPx(nextPositionPxX, snapPx);
+				nextPositionPxY = snapToGridPx(nextPositionPxY, snapPx);
+				nextWidthPx = Math.max(minWidthPx, snapToGridPx(nextWidthPx, snapPx));
+				nextHeightPx = Math.max(minHeightPx, snapToGridPx(nextHeightPx, snapPx));
+			}
 			freeLayoutPreview = {
 				position: {
 					x: pxToCssValue(nextPositionPxX, freeLayoutInteraction.startPosition.x, 'x', xContext),
@@ -666,6 +807,7 @@
 					height: pxToCssValue(nextHeightPx, freeLayoutInteraction.startSize.height, 'y', yContext)
 				}
 			};
+			scheduleFreeLayoutCommit(freeLayoutPreview);
 		};
 
 		const finishInteraction = (event: PointerEvent): void => {
@@ -675,10 +817,7 @@
 			const preview = freeLayoutPreview;
 			freeLayoutInteraction = null;
 			freeLayoutPreview = null;
-			if (!preview) {
-				return;
-			}
-			void commitFreeLayoutPreview(preview);
+			void finalizeFreeLayoutInteraction(preview);
 		};
 
 		window.addEventListener('pointermove', handlePointerMove);
@@ -712,10 +851,59 @@
 		};
 	});
 
+	onDestroy(() => {
+		if (typeof window !== 'undefined' && freeLayoutCommitFrame !== null) {
+			window.cancelAnimationFrame(freeLayoutCommitFrame);
+		}
+		void finishFreeLayoutEditSession();
+	});
+
+	$effect(() => {
+		if (pageView.pointerId === null) {
+			return;
+		}
+
+		const handlePointerMove = (event: PointerEvent): void => {
+			if (pageView.pointerId !== event.pointerId || !pageView.lastClient) {
+				return;
+			}
+			event.preventDefault();
+			pageView = {
+				...pageView,
+				lastClient: [event.clientX, event.clientY],
+				panX: pageView.panX + (event.clientX - pageView.lastClient[0]),
+				panY: pageView.panY + (event.clientY - pageView.lastClient[1])
+			};
+		};
+
+		const finishPan = (event: PointerEvent): void => {
+			if (pageView.pointerId !== event.pointerId) {
+				return;
+			}
+			pageView = {
+				...pageView,
+				pointerId: null,
+				lastClient: null
+			};
+		};
+
+		window.addEventListener('pointermove', handlePointerMove);
+		window.addEventListener('pointerup', finishPan);
+		window.addEventListener('pointercancel', finishPan);
+
+		return () => {
+			window.removeEventListener('pointermove', handlePointerMove);
+			window.removeEventListener('pointerup', finishPan);
+			window.removeEventListener('pointercancel', finishPan);
+		};
+	});
+
 	let supportsFreePlacement = $derived(editMode && parentLayoutKind === 'free');
 	let supportsGridPlacement = $derived(editMode && parentLayoutKind === 'grid');
 	let supportsStackSizing = $derived(editMode && (parentLayoutKind === 'horizontal' || parentLayoutKind === 'vertical'));
 	let supportsOrdering = $derived(editMode && (parentLayoutKind === 'grid' || parentLayoutKind === 'horizontal' || parentLayoutKind === 'vertical'));
+	let pageSize = $derived(getDashboardPageSize(graph, liveNode));
+	let parentSnapGrid = $derived(getDashboardSnapGrid(graph, parentNode));
 	let widgetShellStyle = $derived.by(() => {
 		if (!editMode || !supportsFreePlacement || !freeLayoutPreview) {
 			return '';
@@ -733,11 +921,11 @@
 		const deltaY =
 			cssValueToPx(freeLayoutPreview.position.y, 'y', createCssUnitContext(context, 'y')) -
 			cssValueToPx(placement.position.y, 'y', createCssUnitContext(context, 'y'));
-		return `transform: translate(${deltaX}px, ${deltaY}px); inline-size: max(${formatCssValue(freeLayoutPreview.size.width)}, 6.5rem); min-block-size: max(${formatCssValue(freeLayoutPreview.size.height)}, 2.8rem); z-index: 4;`;
+		return `transform: translate(${deltaX}px, ${deltaY}px); inline-size: max(${formatCssValue(freeLayoutPreview.size.width)}, 6.5rem); block-size: max(${formatCssValue(freeLayoutPreview.size.height)}, 2.8rem); z-index: 4;`;
 	});
 
 	const freeSurfaceHeightPx = $derived.by(() => {
-		if (layoutKind !== 'free') {
+		if (layoutKind !== 'free' || isPage) {
 			return 20 * getRootRemPixels();
 		}
 		const rootRemPx = getRootRemPixels();
@@ -765,6 +953,9 @@
 	const surfaceStyle = $derived.by((): string => {
 		const gapStyle = `--dashboard-gap-x: ${formatCssValue(gap.x)}; --dashboard-gap-y: ${formatCssValue(gap.y)};`;
 		if (layoutKind === 'free') {
+			if (isPage) {
+				return `${gapStyle} inline-size: 100%; block-size: 100%; min-block-size: 0;`;
+			}
 			return `${gapStyle} min-block-size: ${freeSurfaceHeightPx}px;`;
 		}
 		if (layoutKind === 'grid') {
@@ -773,10 +964,40 @@
 		return gapStyle;
 	});
 
+	const pageViewportWidthPx = $derived(Math.max(pageViewportSize.width, 1));
+	const pageViewportHeightPx = $derived(Math.max(pageViewportSize.height, 1));
+	const pageSizeContext = $derived.by((): Pick<
+		FreeLayoutInteraction,
+		'rootRemPx' | 'surfaceWidthPx' | 'surfaceHeightPx' | 'viewportWidthPx' | 'viewportHeightPx'
+	> => ({
+		rootRemPx: getRootRemPixels(),
+		surfaceWidthPx: pageViewportWidthPx,
+		surfaceHeightPx: pageViewportHeightPx,
+		viewportWidthPx: getViewportWidthPx(),
+		viewportHeightPx: getViewportHeightPx()
+	}));
+	const pageLogicalWidthPx = $derived.by(() =>
+		Math.max(1, cssValueToPx(pageSize.width, 'x', createCssUnitContext(pageSizeContext, 'x')))
+	);
+	const pageLogicalHeightPx = $derived.by(() =>
+		Math.max(1, cssValueToPx(pageSize.height, 'y', createCssUnitContext(pageSizeContext, 'y')))
+	);
+	const pageFitScale = $derived.by(() => {
+		if (!pageSize.enabled) {
+			return 1;
+		}
+		return Math.min(pageViewportWidthPx / pageLogicalWidthPx, pageViewportHeightPx / pageLogicalHeightPx);
+	});
+	const pageFrameStyle = $derived.by(() => {
+		const baseWidth = pageSize.enabled ? pageLogicalWidthPx * pageFitScale : pageViewportWidthPx;
+		const baseHeight = pageSize.enabled ? pageLogicalHeightPx * pageFitScale : pageViewportHeightPx;
+		return `inline-size: ${baseWidth}px; block-size: ${baseHeight}px; transform: translate(${pageView.panX}px, ${pageView.panY}px) scale(${pageView.zoom});`;
+	});
+
 	const slotStyle = (child: UiNodeDto): string => {
 		const childPlacement = getDashboardPlacement(graph, child);
 		if (layoutKind === 'free') {
-			return `left: ${formatCssValue(childPlacement.position.x)}; top: ${formatCssValue(childPlacement.position.y)}; inline-size: max(${formatCssValue(childPlacement.size.width)}, 6.5rem); min-block-size: max(${formatCssValue(childPlacement.size.height)}, 2.8rem);`;
+			return `left: ${formatCssValue(childPlacement.position.x)}; top: ${formatCssValue(childPlacement.position.y)}; inline-size: max(${formatCssValue(childPlacement.size.width)}, 6.5rem); block-size: max(${formatCssValue(childPlacement.size.height)}, 2.8rem);`;
 		}
 		if (layoutKind === 'grid') {
 			return `grid-column: span ${childPlacement.columnSpan}; grid-row: span ${childPlacement.rowSpan}; min-block-size: max(${formatCssValue(childPlacement.size.height)}, 3.25rem);`;
@@ -815,8 +1036,17 @@
 	const sliderStep = $derived(stepParam?.value.kind === 'float' ? stepParam.value.value : 0.01);
 	const multiline = $derived(multilineParam?.value.kind === 'bool' ? multilineParam.value.value : false);
 	const defaultChecked = $derived(defaultCheckedParam?.value.kind === 'bool' ? defaultCheckedParam.value.value : false);
-	const displayMode = $derived(displayModeParam?.value.kind === 'enum' ? displayModeParam.value.value : 'inspector');
+	const requestedDisplayMode = $derived.by(() => {
+		if (displayModeParam?.value.kind === 'enum' || displayModeParam?.value.kind === 'str') {
+			return displayModeParam.value.value;
+		}
+		return 'auto';
+	});
 	const includeChildren = $derived(includeChildrenParam?.value.kind === 'bool' ? includeChildrenParam.value.value : true);
+	const resolvedNodeWidgetDisplayMode = $derived.by(() =>
+		boundNode ? resolveDashboardNodeWidgetDisplayMode(boundNode, requestedDisplayMode) : null
+	);
+	const NodeWidgetDisplayComponent = $derived(resolvedNodeWidgetDisplayMode?.component ?? null);
 
 	const genericDisplayValue = $derived.by(() => {
 		if (widgetKind === 'text' && boundParam) {
@@ -886,79 +1116,236 @@
 		}
 		openAccordionNodeIds = [...openAccordionNodeIds, nodeId];
 	};
+
+	const widgetNodeIdWithinPage = (candidateNodeId: NodeId | null | undefined): NodeId | null => {
+		if (!graph || candidateNodeId === null || candidateNodeId === undefined) {
+			return null;
+		}
+		let currentNodeId: NodeId | undefined = candidateNodeId;
+		while (currentNodeId !== undefined) {
+			const parentId = graph.parentById.get(currentNodeId);
+			if (parentId === liveNode.node_id) {
+				return currentNodeId;
+			}
+			currentNodeId = parentId;
+		}
+		return null;
+	};
+
+	const zoomPageAtClientPoint = (clientX: number, clientY: number, factor: number): void => {
+		if (!pageViewportElement) {
+			return;
+		}
+		const rect = pageViewportElement.getBoundingClientRect();
+		const nextZoom = clampPageZoom(pageView.zoom * factor);
+		if (Math.abs(nextZoom - pageView.zoom) <= 1e-9) {
+			return;
+		}
+		const pointX = clientX - rect.left - rect.width * 0.5;
+		const pointY = clientY - rect.top - rect.height * 0.5;
+		pageView = {
+			...pageView,
+			zoom: nextZoom,
+			panX: pointX - ((pointX - pageView.panX) / pageView.zoom) * nextZoom,
+			panY: pointY - ((pointY - pageView.panY) / pageView.zoom) * nextZoom
+		};
+	};
+
+	const frameSelectedWidgets = (): boolean => {
+		if (!pageViewportElement) {
+			return false;
+		}
+		const selectedWidgetNodeId = widgetNodeIdWithinPage(session?.selectedNodeId);
+		if (selectedWidgetNodeId === null) {
+			homePageView();
+			return true;
+		}
+		const widgetElement = pageViewportElement.querySelector<HTMLElement>(`[data-node-id="${selectedWidgetNodeId}"]`);
+		if (!widgetElement) {
+			homePageView();
+			return true;
+		}
+		const viewportRect = pageViewportElement.getBoundingClientRect();
+		const widgetRect = widgetElement.getBoundingClientRect();
+		const localLeft =
+			(widgetRect.left - viewportRect.left - viewportRect.width * 0.5 - pageView.panX) / pageView.zoom;
+		const localRight =
+			(widgetRect.right - viewportRect.left - viewportRect.width * 0.5 - pageView.panX) / pageView.zoom;
+		const localTop =
+			(widgetRect.top - viewportRect.top - viewportRect.height * 0.5 - pageView.panY) / pageView.zoom;
+		const localBottom =
+			(widgetRect.bottom - viewportRect.top - viewportRect.height * 0.5 - pageView.panY) / pageView.zoom;
+		const localWidth = Math.max(1, localRight - localLeft);
+		const localHeight = Math.max(1, localBottom - localTop);
+		const nextZoom = clampPageZoom(
+			Math.min((viewportRect.width * 0.78) / localWidth, (viewportRect.height * 0.78) / localHeight)
+		);
+		const localCenterX = (localLeft + localRight) * 0.5;
+		const localCenterY = (localTop + localBottom) * 0.5;
+		pageView = {
+			pointerId: null,
+			lastClient: null,
+			zoom: nextZoom,
+			panX: -localCenterX * nextZoom,
+			panY: -localCenterY * nextZoom
+		};
+		return true;
+	};
+
+	const handlePageViewportPointerDown = (event: PointerEvent): void => {
+		pageViewportElement?.focus();
+		if (event.button !== 1) {
+			return;
+		}
+		event.preventDefault();
+		event.stopPropagation();
+		pageView = {
+			...pageView,
+			pointerId: event.pointerId,
+			lastClient: [event.clientX, event.clientY]
+		};
+	};
+
+	const handlePageViewportWheel = (event: WheelEvent): void => {
+		if (wheelTargetsScrollableContent(event)) {
+			return;
+		}
+		event.preventDefault();
+		const normalizedDelta = Math.max(-480, Math.min(480, normalizeWheelDeltaY(event)));
+		const factor = Math.exp(-normalizedDelta / 1800);
+		zoomPageAtClientPoint(event.clientX, event.clientY, factor);
+	};
+
+	$effect(() => {
+		if (!isPage) {
+			return;
+		}
+		const unregisterHandlers = [
+			registerCommandHandler(
+				'view.frame',
+				() => {
+					if (!isPageViewportFocused) {
+						return false;
+					}
+					return frameSelectedWidgets();
+				},
+				{ priority: 200 }
+			),
+			registerCommandHandler(
+				'view.home',
+				() => {
+					if (!isPageViewportFocused) {
+						return false;
+					}
+					homePageView();
+					return true;
+				},
+				{ priority: 200 }
+			)
+		];
+
+		return () => {
+			for (const unregister of unregisterHandlers) {
+				unregister();
+			}
+		};
+	});
 </script>
 
 {#if isPage}
 	<div
-		class="dashboard-surface dashboard-page {layoutKind}"
-		class:surface-target-active={surfaceDragDepth > 0}
+		class="dashboard-page-viewport"
+		bind:this={pageViewportElement}
+		tabindex="-1"
 		role="region"
-		aria-label="Dashboard page surface"
-		style={surfaceStyle}
-		ondragenter={handleSurfaceDragEnter}
-		ondragover={handleSurfaceDragOver}
-		ondragleave={handleSurfaceDragLeave}
-		ondrop={(event) => {
-			void handleSurfaceDrop(event);
-		}}>
-		{#if layoutKind === 'tabs'}
-			<div class="dashboard-tab-strip">
-				{#each childWidgets as child}
-					<button
-						type="button"
-						class:selected={activeTabNodeId === child.node_id}
-						onpointerdown={withStoppedPropagation}
-						onclick={() => {
-							activeTabNodeId = child.node_id;
-						}}>{child.meta.label}</button>
-				{/each}
-			</div>
-			<div class="dashboard-tab-body">
-				{#if activeTabNodeId !== null}
-					{@const activeChild = childWidgets.find((candidate) => candidate.node_id === activeTabNodeId) ?? null}
-					{#if activeChild}
-						<div class="dashboard-slot"><DashboardCanvasSelf node={activeChild} {editMode} /></div>
+		aria-label="Dashboard page viewer"
+		onfocusin={() => {
+			isPageViewportFocused = true;
+		}}
+		onfocusout={() => {
+			isPageViewportFocused = false;
+		}}
+		onwheel={handlePageViewportWheel}
+		onpointerdown={handlePageViewportPointerDown}>
+		<div class="dashboard-page-scene">
+			<div class="dashboard-page-frame" style={pageFrameStyle}>
+				<div
+					class="dashboard-surface dashboard-page {layoutKind}"
+					class:surface-target-active={surfaceDragDepth > 0}
+					class:edit-bleed-visible={editMode && pageSize.enabled}
+					role="region"
+					aria-label="Dashboard page surface"
+					style={surfaceStyle}
+					ondragenter={handleSurfaceDragEnter}
+					ondragover={handleSurfaceDragOver}
+					ondragleave={handleSurfaceDragLeave}
+					ondrop={(event) => {
+						void handleSurfaceDrop(event);
+					}}>
+					{#if layoutKind === 'tabs'}
+						<div class="dashboard-tab-strip">
+							{#each childWidgets as child}
+								<button
+									type="button"
+									class:selected={activeTabNodeId === child.node_id}
+									onpointerdown={withStoppedPropagation}
+									onclick={() => {
+										activeTabNodeId = child.node_id;
+									}}>{child.meta.label}</button>
+							{/each}
+						</div>
+						<div class="dashboard-tab-body">
+							{#if activeTabNodeId !== null}
+								{@const activeChild = childWidgets.find((candidate) => candidate.node_id === activeTabNodeId) ?? null}
+								{#if activeChild}
+									<div class="dashboard-slot"><div class="dashboard-slot-fill"><DashboardCanvasSelf node={activeChild} {editMode} /></div></div>
+								{/if}
+							{/if}
+						</div>
+					{:else if layoutKind === 'accordion'}
+						<div class="dashboard-accordion">
+							{#each childWidgets as child}
+								<section class="dashboard-accordion-item">
+									<button
+										type="button"
+										class:selected={openAccordionNodeIds.includes(child.node_id)}
+										onpointerdown={withStoppedPropagation}
+										onclick={() => {
+											toggleAccordionNode(child.node_id);
+										}}>{child.meta.label}</button>
+									{#if openAccordionNodeIds.includes(child.node_id)}
+										<div class="dashboard-slot accordion-slot"><div class="dashboard-slot-fill"><DashboardCanvasSelf node={child} {editMode} /></div></div>
+									{/if}
+								</section>
+							{/each}
+						</div>
+					{:else}
+						<div class="dashboard-layout">
+							{#each childWidgets as child}
+								<div class="dashboard-slot" style={slotStyle(child)}>
+									<div class="dashboard-slot-fill"><DashboardCanvasSelf node={child} {editMode} /></div>
+								</div>
+							{/each}
+						</div>
 					{/if}
-				{/if}
-			</div>
-		{:else if layoutKind === 'accordion'}
-			<div class="dashboard-accordion">
-				{#each childWidgets as child}
-					<section class="dashboard-accordion-item">
-						<button
-							type="button"
-							class:selected={openAccordionNodeIds.includes(child.node_id)}
-							onpointerdown={withStoppedPropagation}
-							onclick={() => {
-								toggleAccordionNode(child.node_id);
-							}}>{child.meta.label}</button>
-						{#if openAccordionNodeIds.includes(child.node_id)}
-							<div class="dashboard-slot accordion-slot"><DashboardCanvasSelf node={child} {editMode} /></div>
-						{/if}
-					</section>
-				{/each}
-			</div>
-		{:else}
-			<div class="dashboard-layout">
-				{#each childWidgets as child}
-					<div class="dashboard-slot" style={slotStyle(child)}>
-						<DashboardCanvasSelf node={child} {editMode} />
-					</div>
-				{/each}
-			</div>
-		{/if}
 
-		{#if childWidgets.length === 0}
-			<div class="dashboard-empty-state">
-				<span class="eyebrow">Dashboard Page</span>
-				<h3>Drop a node or parameter here</h3>
-				<p>Outliner drags create node widgets. Inspector parameter-label drags create generic widgets.</p>
-			</div>
-		{/if}
+					{#if childWidgets.length === 0}
+						<div class="dashboard-empty-state">
+							<span class="eyebrow">Dashboard Page</span>
+							<h3>Drop a node or parameter here</h3>
+							<p>Outliner drags create node widgets. Inspector parameter-label drags create generic widgets.</p>
+						</div>
+					{/if}
 
-		{#if surfaceDragDepth > 0}
-			<div class="dashboard-drop-indicator">Drop to create a widget</div>
-		{/if}
+					{#if surfaceDragDepth > 0}
+						<div class="dashboard-drop-indicator">Drop to create a widget</div>
+					{/if}
+				</div>
+			</div>
+			{#if editMode && pageSize.enabled}
+				<div class="dashboard-page-visibility-overlay" style={pageFrameStyle} aria-hidden="true"></div>
+			{/if}
+		</div>
 	</div>
 	{:else if isContainerWidget}
 	<section
@@ -973,37 +1360,6 @@
 		onpointerdown={handleWidgetPointerDown}
 		onclick={selectWidgetNode}
 		onkeydown={selectWidgetNodeFromKeyboard}>
-		{#if editMode && isSelected}
-			<div
-				class="dashboard-widget-toolbar"
-				role="toolbar"
-				aria-label="Container widget toolbar"
-				tabindex="-1"
-				onpointerdown={withStoppedPropagation}>
-				{#if placement.titleVisible}
-					<span class="dashboard-widget-label">{liveNode.meta.label}</span>
-				{/if}
-				<div class="dashboard-widget-actions">
-					<div class="dashboard-widget-manipulators" role="group" aria-label="Container widget actions">
-						{#if supportsGridPlacement}
-							<button type="button" title="Narrower" onclick={(event) => { void withWidgetMutation(event, () => changeGridSpan('column_span', -1)); }} onmousedown={withStoppedPropagation}>W−</button>
-							<button type="button" title="Wider" onclick={(event) => { void withWidgetMutation(event, () => changeGridSpan('column_span', 1)); }} onmousedown={withStoppedPropagation}>W+</button>
-							<button type="button" title="Shorter" onclick={(event) => { void withWidgetMutation(event, () => changeGridSpan('row_span', -1)); }} onmousedown={withStoppedPropagation}>H−</button>
-							<button type="button" title="Taller" onclick={(event) => { void withWidgetMutation(event, () => changeGridSpan('row_span', 1)); }} onmousedown={withStoppedPropagation}>H+</button>
-						{/if}
-						{#if supportsStackSizing}
-							<button type="button" title="Shrink" onclick={(event) => { void withWidgetMutation(event, () => resizePrimaryAxis(-0.5)); }} onmousedown={withStoppedPropagation}>−</button>
-							<button type="button" title="Grow" onclick={(event) => { void withWidgetMutation(event, () => resizePrimaryAxis(0.5)); }} onmousedown={withStoppedPropagation}>+</button>
-						{/if}
-						{#if supportsOrdering}
-							<button type="button" title="Send backward" onclick={(event) => { void withWidgetMutation(event, () => changeWidgetOrder(-1)); }} onmousedown={withStoppedPropagation}>◀</button>
-							<button type="button" title="Bring forward" onclick={(event) => { void withWidgetMutation(event, () => changeWidgetOrder(1)); }} onmousedown={withStoppedPropagation}>▶</button>
-						{/if}
-					</div>
-					<NodeAddButton node={liveNode} />
-				</div>
-			</div>
-		{/if}
 		{#if editMode && supportsFreePlacement}
 			{#each freeLayoutResizeZones as resizeZone}
 				<div
@@ -1042,7 +1398,7 @@
 					{#if activeTabNodeId !== null}
 						{@const activeChild = childWidgets.find((candidate) => candidate.node_id === activeTabNodeId) ?? null}
 						{#if activeChild}
-							<div class="dashboard-slot"><DashboardCanvasSelf node={activeChild} {editMode} /></div>
+							<div class="dashboard-slot"><div class="dashboard-slot-fill"><DashboardCanvasSelf node={activeChild} {editMode} /></div></div>
 						{/if}
 					{/if}
 				</div>
@@ -1058,7 +1414,7 @@
 									toggleAccordionNode(child.node_id);
 								}}>{child.meta.label}</button>
 							{#if openAccordionNodeIds.includes(child.node_id)}
-								<div class="dashboard-slot accordion-slot"><DashboardCanvasSelf node={child} {editMode} /></div>
+								<div class="dashboard-slot accordion-slot"><div class="dashboard-slot-fill"><DashboardCanvasSelf node={child} {editMode} /></div></div>
 							{/if}
 						</section>
 					{/each}
@@ -1067,7 +1423,7 @@
 				<div class="dashboard-layout">
 					{#each childWidgets as child}
 						<div class="dashboard-slot" style={slotStyle(child)}>
-							<DashboardCanvasSelf node={child} {editMode} />
+							<div class="dashboard-slot-fill"><DashboardCanvasSelf node={child} {editMode} /></div>
 						</div>
 					{/each}
 				</div>
@@ -1093,57 +1449,19 @@
 		style={widgetShellStyle}
 		role="button"
 		tabindex={editMode ? 0 : -1}
+		ondragenter={(event) => {
+			handleBindingDragEnter(event, canBindNodeWidget);
+		}}
+		ondragover={(event) => {
+			handleBindingDragOver(event, canBindNodeWidget);
+		}}
+		ondragleave={handleBindingDragLeave}
+		ondrop={(event) => {
+			void handleNodeWidgetBindingDrop(event);
+		}}
 		onpointerdown={handleWidgetPointerDown}
 		onclick={selectWidgetNode}
 		onkeydown={selectWidgetNodeFromKeyboard}>
-		{#if editMode && isSelected}
-			<div
-				class="dashboard-widget-toolbar"
-				role="toolbar"
-				aria-label="Node widget toolbar"
-				tabindex="-1"
-				onpointerdown={withStoppedPropagation}>
-				{#if placement.titleVisible}
-					<span class="dashboard-widget-label">{liveNode.meta.label}</span>
-				{/if}
-				<div class="dashboard-widget-actions">
-					<div class="dashboard-widget-manipulators" role="group" aria-label="Node widget actions">
-						{#if supportsGridPlacement}
-							<button type="button" title="Narrower" onclick={(event) => { void withWidgetMutation(event, () => changeGridSpan('column_span', -1)); }} onmousedown={withStoppedPropagation}>W−</button>
-							<button type="button" title="Wider" onclick={(event) => { void withWidgetMutation(event, () => changeGridSpan('column_span', 1)); }} onmousedown={withStoppedPropagation}>W+</button>
-							<button type="button" title="Shorter" onclick={(event) => { void withWidgetMutation(event, () => changeGridSpan('row_span', -1)); }} onmousedown={withStoppedPropagation}>H−</button>
-							<button type="button" title="Taller" onclick={(event) => { void withWidgetMutation(event, () => changeGridSpan('row_span', 1)); }} onmousedown={withStoppedPropagation}>H+</button>
-						{/if}
-						{#if supportsStackSizing}
-							<button type="button" title="Shrink" onclick={(event) => { void withWidgetMutation(event, () => resizePrimaryAxis(-0.5)); }} onmousedown={withStoppedPropagation}>−</button>
-							<button type="button" title="Grow" onclick={(event) => { void withWidgetMutation(event, () => resizePrimaryAxis(0.5)); }} onmousedown={withStoppedPropagation}>+</button>
-						{/if}
-						{#if supportsOrdering}
-							<button type="button" title="Send backward" onclick={(event) => { void withWidgetMutation(event, () => changeWidgetOrder(-1)); }} onmousedown={withStoppedPropagation}>◀</button>
-							<button type="button" title="Bring forward" onclick={(event) => { void withWidgetMutation(event, () => changeWidgetOrder(1)); }} onmousedown={withStoppedPropagation}>▶</button>
-						{/if}
-					</div>
-					<div
-				class="dashboard-binding-chip"
-				role="group"
-				aria-label="Node widget binding target"
-				title={boundNode ? `${boundNode.meta.label} · ${displayMode}${includeChildren ? '' : ' / flat'}` : 'Drop a node to bind'}
-				class:drag-active={bindingDragDepth > 0}
-				ondragenter={(event) => {
-					handleBindingDragEnter(event, canBindNodeWidget);
-				}}
-				ondragover={(event) => {
-					handleBindingDragOver(event, canBindNodeWidget);
-				}}
-				ondragleave={handleBindingDragLeave}
-				ondrop={(event) => {
-					void handleNodeWidgetBindingDrop(event);
-				}}>
-				{boundNode ? boundNode.meta.label : 'Drop a node to bind'}
-			</div>
-				</div>
-			</div>
-		{/if}
 		{#if editMode && supportsFreePlacement}
 			{#each freeLayoutResizeZones as resizeZone}
 				<div
@@ -1157,7 +1475,11 @@
 		<div class="dashboard-widget-content inspector-body">
 			{#if boundNode}
 				<div class="dashboard-live-content" class:inert-mode={editMode} inert={editMode}>
-					<NodeInspector nodes={[boundNode]} level={0} />
+					{#if NodeWidgetDisplayComponent}
+						<NodeWidgetDisplayComponent targetNode={boundNode} {includeChildren} {editMode} />
+					{:else}
+						<div class="dashboard-empty-inline">No display mode is available for this node.</div>
+					{/if}
 				</div>
 			{:else}
 				<div class="dashboard-empty-inline">This widget is not bound yet.</div>
@@ -1175,57 +1497,19 @@
 		style={widgetShellStyle}
 		role="button"
 		tabindex={editMode ? 0 : -1}
+		ondragenter={(event) => {
+			handleBindingDragEnter(event, canBindGenericWidget);
+		}}
+		ondragover={(event) => {
+			handleBindingDragOver(event, canBindGenericWidget);
+		}}
+		ondragleave={handleBindingDragLeave}
+		ondrop={(event) => {
+			void handleGenericWidgetBindingDrop(event);
+		}}
 		onpointerdown={handleWidgetPointerDown}
 		onclick={selectWidgetNode}
 		onkeydown={selectWidgetNodeFromKeyboard}>
-		{#if editMode && isSelected}
-			<div
-				class="dashboard-widget-toolbar"
-				role="toolbar"
-				aria-label="Generic widget toolbar"
-				tabindex="-1"
-				onpointerdown={withStoppedPropagation}>
-				{#if placement.titleVisible}
-					<span class="dashboard-widget-label">{liveNode.meta.label}</span>
-				{/if}
-				<div class="dashboard-widget-actions">
-					<div class="dashboard-widget-manipulators" role="group" aria-label="Generic widget actions">
-						{#if supportsGridPlacement}
-							<button type="button" title="Narrower" onclick={(event) => { void withWidgetMutation(event, () => changeGridSpan('column_span', -1)); }} onmousedown={withStoppedPropagation}>W−</button>
-							<button type="button" title="Wider" onclick={(event) => { void withWidgetMutation(event, () => changeGridSpan('column_span', 1)); }} onmousedown={withStoppedPropagation}>W+</button>
-							<button type="button" title="Shorter" onclick={(event) => { void withWidgetMutation(event, () => changeGridSpan('row_span', -1)); }} onmousedown={withStoppedPropagation}>H−</button>
-							<button type="button" title="Taller" onclick={(event) => { void withWidgetMutation(event, () => changeGridSpan('row_span', 1)); }} onmousedown={withStoppedPropagation}>H+</button>
-						{/if}
-						{#if supportsStackSizing}
-							<button type="button" title="Shrink" onclick={(event) => { void withWidgetMutation(event, () => resizePrimaryAxis(-0.5)); }} onmousedown={withStoppedPropagation}>−</button>
-							<button type="button" title="Grow" onclick={(event) => { void withWidgetMutation(event, () => resizePrimaryAxis(0.5)); }} onmousedown={withStoppedPropagation}>+</button>
-						{/if}
-						{#if supportsOrdering}
-							<button type="button" title="Send backward" onclick={(event) => { void withWidgetMutation(event, () => changeWidgetOrder(-1)); }} onmousedown={withStoppedPropagation}>◀</button>
-							<button type="button" title="Bring forward" onclick={(event) => { void withWidgetMutation(event, () => changeWidgetOrder(1)); }} onmousedown={withStoppedPropagation}>▶</button>
-						{/if}
-					</div>
-					<div
-				class="dashboard-binding-chip"
-				role="group"
-				aria-label="Generic widget binding target"
-				title={boundParamNode ? `${boundParamNode.meta.label} · ${widgetKind}` : 'Drop a parameter to bind'}
-				class:drag-active={bindingDragDepth > 0}
-				ondragenter={(event) => {
-					handleBindingDragEnter(event, canBindGenericWidget);
-				}}
-				ondragover={(event) => {
-					handleBindingDragOver(event, canBindGenericWidget);
-				}}
-				ondragleave={handleBindingDragLeave}
-				ondrop={(event) => {
-					void handleGenericWidgetBindingDrop(event);
-				}}>
-				{boundParamNode ? boundParamNode.meta.label : 'Drop a parameter to bind'}
-			</div>
-				</div>
-			</div>
-		{/if}
 		{#if editMode && supportsFreePlacement}
 			{#each freeLayoutResizeZones as resizeZone}
 				<div
@@ -1324,9 +1608,55 @@
 		overflow: hidden;
 	}
 
+	.dashboard-page.edit-bleed-visible,
+	.dashboard-page.edit-bleed-visible .dashboard-layout {
+		overflow: visible;
+	}
+
 	.dashboard-page {
 		min-block-size: 100%;
 		padding: 0.55rem;
+	}
+
+	.dashboard-page-viewport {
+		position: relative;
+		display: flex;
+		flex-direction: column;
+		inline-size: 100%;
+		block-size: 100%;
+		min-block-size: 0;
+		overflow: hidden;
+	}
+
+	.dashboard-page-scene {
+		position: relative;
+		display: grid;
+		place-items: center;
+		inline-size: 100%;
+		block-size: 100%;
+		min-block-size: 0;
+		overflow: hidden;
+		padding: 0.2rem;
+	}
+
+	.dashboard-page-frame {
+		position: relative;
+		grid-area: 1 / 1;
+		flex: 0 0 auto;
+		overflow: visible;
+		transform-origin: center center;
+		transition: box-shadow 120ms ease;
+	}
+
+	.dashboard-page-visibility-overlay {
+		grid-area: 1 / 1;
+		position: relative;
+		pointer-events: none;
+		border-radius: 0.9rem;
+		box-shadow: 0 0 0 100vmax rgb(from var(--gc-color-background) r g b / 0.42);
+		border: solid 0.06rem rgb(from var(--gc-color-selection) r g b / 0.26);
+		transform-origin: center center;
+		z-index: 2;
 	}
 
 	.dashboard-page.surface-target-active,
@@ -1337,11 +1667,15 @@
 
 	.dashboard-surface.free .dashboard-layout {
 		position: relative;
+		inline-size: 100%;
+		block-size: 100%;
 		min-block-size: inherit;
 	}
 
 	.dashboard-surface.free .dashboard-slot {
 		position: absolute;
+		min-inline-size: 0;
+		min-block-size: 0;
 	}
 
 	.dashboard-surface.grid .dashboard-layout {
@@ -1419,16 +1753,43 @@
 	.dashboard-slot {
 		display: flex;
 		min-inline-size: 0;
+		min-block-size: 0;
+	}
+
+	.dashboard-slot-fill {
+		display: flex;
+		flex: 1 1 auto;
+		inline-size: 100%;
+		block-size: 100%;
+		min-inline-size: 0;
+		min-block-size: 0;
 	}
 
 	.dashboard-slot.accordion-slot {
 		padding-inline-start: 0.1rem;
 	}
 
+	.dashboard-surface.horizontal .dashboard-slot,
+	.dashboard-tab-body .dashboard-slot,
+	.dashboard-tab-body.compact .dashboard-slot {
+		block-size: 100%;
+	}
+
+	.dashboard-surface.vertical .dashboard-slot,
+	.dashboard-surface.grid .dashboard-slot,
+	.dashboard-accordion .dashboard-slot {
+		inline-size: 100%;
+	}
+
 	.dashboard-widget-shell {
 		position: relative;
 		display: flex;
+		flex: 1 1 auto;
 		flex-direction: column;
+		inline-size: 100%;
+		block-size: 100%;
+		align-self: stretch;
+		min-inline-size: 0;
 		min-block-size: 0;
 		border-radius: 0.8rem;
 		background:
@@ -1470,69 +1831,6 @@
 		box-shadow:
 			0 0 0 0.08rem rgb(from var(--gc-color-focus) r g b / 0.34),
 			0 0.75rem 1.5rem rgb(from var(--gc-color-background) r g b / 0.28);
-	}
-
-	.dashboard-widget-toolbar {
-		position: absolute;
-		inset: 0.35rem 0.35rem auto 0.35rem;
-		display: flex;
-		justify-content: space-between;
-		gap: 0.35rem;
-		align-items: center;
-		pointer-events: none;
-		z-index: 2;
-		opacity: 1;
-		transition: opacity 120ms ease;
-	}
-
-	.dashboard-widget-label {
-		max-inline-size: 14rem;
-		padding: 0.18rem 0.42rem;
-		border-radius: 999rem;
-		background: rgb(from var(--gc-color-background) r g b / 0.68);
-		border: solid 0.06rem rgb(from var(--gc-color-panel-outline) r g b / 0.45);
-		font-size: 0.63rem;
-		line-height: 1;
-		white-space: nowrap;
-		overflow: hidden;
-		text-overflow: ellipsis;
-		pointer-events: auto;
-	}
-
-	.dashboard-widget-actions {
-		display: inline-flex;
-		align-items: center;
-		justify-content: flex-end;
-		gap: 0.3rem;
-		margin-inline-start: auto;
-		pointer-events: auto;
-	}
-
-	.dashboard-widget-manipulators {
-		display: inline-flex;
-		align-items: center;
-		gap: 0.18rem;
-		padding: 0.14rem;
-		border-radius: 999rem;
-		background: rgb(from var(--gc-color-background) r g b / 0.72);
-		border: solid 0.06rem rgb(from var(--gc-color-panel-outline) r g b / 0.44);
-	}
-
-	.dashboard-widget-manipulators button {
-		min-inline-size: 1.35rem;
-		block-size: 1.25rem;
-		padding: 0 0.28rem;
-		border-radius: 999rem;
-		border: solid 0.06rem transparent;
-		background: rgb(from var(--gc-color-panel) r g b / 0.78);
-		color: var(--gc-color-text);
-		font-size: 0.64rem;
-		line-height: 1;
-	}
-
-	.dashboard-widget-manipulators button:hover {
-		border-color: rgb(from var(--gc-color-selection) r g b / 0.52);
-		background: rgb(from var(--gc-color-selection) r g b / 0.18);
 	}
 
 	.dashboard-resize-zone {
@@ -1614,20 +1912,29 @@
 	}
 
 	.dashboard-widget-content {
-		padding: 0.38rem;
+		display: flex;
+		flex: 1 1 auto;
+		padding: 0;
+		min-inline-size: 0;
 		min-block-size: 0;
 		overflow: hidden;
 	}
 
 	.dashboard-widget-content.inspector-body {
-		padding: 0.25rem;
+		display: flex;
+		flex: 1 1 auto;
 		overflow: auto;
 	}
 
 	.dashboard-live-content {
 		position: relative;
+		display: flex;
+		flex: 1 1 auto;
 		inline-size: 100%;
+		block-size: 100%;
+		min-inline-size: 0;
 		min-block-size: 0;
+		overflow: auto;
 	}
 
 	.dashboard-live-content.inert-mode {
@@ -1642,24 +1949,6 @@
 		background: transparent;
 		box-shadow: none;
 		min-block-size: 4rem;
-	}
-
-	.dashboard-binding-chip {
-		max-inline-size: 12rem;
-		padding: 0.22rem 0.46rem;
-		border-radius: 999rem;
-		background: rgb(from var(--gc-color-background) r g b / 0.72);
-		border: dashed 0.06rem rgb(from var(--gc-color-focus) r g b / 0.34);
-		font-size: 0.64rem;
-		line-height: 1.1;
-		white-space: nowrap;
-		overflow: hidden;
-		text-overflow: ellipsis;
-	}
-
-	.dashboard-binding-chip.drag-active {
-		background: rgb(from var(--gc-color-focus) r g b / 0.18);
-		border-color: rgb(from var(--gc-color-focus) r g b / 0.88);
 	}
 
 	.dashboard-empty-state,
@@ -1716,9 +2005,11 @@
 
 	.generic-body {
 		display: flex;
+		flex: 1 1 auto;
 		align-items: stretch;
 		justify-content: stretch;
-		padding-block-start: 1.2rem;
+		padding: 0;
+		min-block-size: 0;
 	}
 
 	.generic-button,
@@ -1726,11 +2017,16 @@
 	.generic-slider-wrap,
 	.generic-checkbox,
 	.generic-body input[type='text'],
+	.generic-body input[type='range'],
 	.generic-body textarea {
 		inline-size: 100%;
+		block-size: 100%;
 	}
 
 	.generic-button {
+		display: flex;
+		align-items: center;
+		justify-content: center;
 		border-radius: 0.7rem;
 		padding: 0.55rem 0.8rem;
 		background:
@@ -1756,8 +2052,16 @@
 
 	.generic-slider-wrap {
 		display: flex;
+		flex: 1 1 auto;
 		flex-direction: column;
 		gap: 0.5rem;
+	}
+
+	.generic-text-display {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		text-align: center;
 	}
 
 	.generic-readout {
@@ -1767,6 +2071,7 @@
 
 	.generic-checkbox {
 		display: flex;
+		flex: 1 1 auto;
 		gap: 0.6rem;
 		align-items: center;
 	}
@@ -1776,7 +2081,8 @@
 	}
 
 	.generic-body textarea {
-		resize: vertical;
-		min-block-size: 6rem;
+		resize: none;
+		min-block-size: 0;
 	}
+
 </style>

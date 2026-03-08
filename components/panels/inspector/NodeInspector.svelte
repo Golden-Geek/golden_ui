@@ -16,12 +16,16 @@
 		nodes = [],
 		level = 0,
 		order = '',
-		controlNodeType = ''
+		controlNodeType = '',
+		layoutMode = 'default',
+		includeChildren = true
 	} = $props<{
 		nodes: UiNodeDto[];
 		level: number;
 		order?: NodeInspectorOrder;
 		controlNodeType?: String;
+		layoutMode?: 'default' | 'dashboard';
+		includeChildren?: boolean;
 	}>();
 
 	let session = $derived(appState.session);
@@ -43,7 +47,7 @@
 		'rgba(255, 159, 64)'
 	];
 	let color = $derived(levelColors[level % levelColors.length]); // TODO: color by node type
-	let children = $derived(node?.children ?? []);
+	let children = $derived(includeChildren ? (node?.children ?? []) : []);
 	let isParameter = $derived(node?.data.kind === 'parameter');
 	let showAsContainer = $derived(!isParameter);
 	let hasChildren = $derived(children.length > 0);
@@ -124,6 +128,7 @@
 			{isRoot ? 'root' : !isFirstLevel ? 'nested' : ''}
 		{isParameter ? 'parameter' : 'container'}"
 		class:custom-component={!!CustomInspectorComponent}
+		class:layout-dashboard={layoutMode === 'dashboard'}
 		data-node-id={node.node_id}
 		style="--container-color: {color}">
 		{#snippet builtInHeader(headerExtra?: Snippet)}
@@ -247,6 +252,8 @@
 										: index === children.length - 1
 											? 'last'
 											: ''}
+								layoutMode={layoutMode}
+									{includeChildren}
 								{controlNodeType} />
 						{/each}
 					</div>
@@ -255,7 +262,7 @@
 		{/snippet}
 
 		{#if isParameter}
-			<ParameterInspector {node} {level} {order} {controlNodeType}>
+			<ParameterInspector {node} {level} {order} {controlNodeType} {layoutMode}>
 				{#snippet defaultChildren(extraClass: String = '')}
 					{@render builtInChildren(extraClass)}
 				{/snippet}
@@ -265,6 +272,8 @@
 				{node}
 				{level}
 				{order}
+				{includeChildren}
+				{layoutMode}
 				{collapsed}
 				{hasChildren}
 				{toggleCollapsed}
@@ -317,6 +326,49 @@
 
 	.node-inspector.root.custom-component {
 		height: 100%;
+	}
+
+	.node-inspector.layout-dashboard {
+		inline-size: 100%;
+		block-size: 100%;
+		min-inline-size: 0;
+		min-block-size: 0;
+		overflow: hidden;
+	}
+
+	.node-inspector.layout-dashboard.root {
+		padding-top: 0;
+	}
+
+	.node-inspector.layout-dashboard .node-header,
+	.node-inspector.layout-dashboard .node-title,
+	.node-inspector.layout-dashboard .title-text,
+	.node-inspector.layout-dashboard .node-inspector-children,
+	.node-inspector.layout-dashboard .node-inspector-children-wrapper,
+	.node-inspector.layout-dashboard :global(.node-inspector-content) {
+		min-inline-size: 0;
+	}
+
+	.node-inspector.layout-dashboard .node-title {
+		max-inline-size: 100%;
+	}
+
+	.node-inspector.layout-dashboard .title-text {
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+		max-inline-size: 100%;
+	}
+
+	.node-inspector.layout-dashboard .node-title-input {
+		min-width: 0;
+		width: 100%;
+	}
+
+	.node-inspector.layout-dashboard :global(.node-inspector-content) {
+		flex: 1 1 auto;
+		min-block-size: 0;
+		overflow: auto;
 	}
 
 	.node-inspector.nested {

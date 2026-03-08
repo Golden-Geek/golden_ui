@@ -9,6 +9,8 @@ export interface NodeInspectorComponentProps {
 	node: UiNodeDto;
 	level: number;
 	order: NodeInspectorOrder;
+	includeChildren?: boolean;
+	layoutMode?: 'default' | 'dashboard';
 	collapsed?: boolean;
 	hasChildren?: boolean;
 	toggleCollapsed?: () => void;
