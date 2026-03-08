@@ -413,9 +413,9 @@
 			return;
 		}
 		void session.sendIntent({
-			kind: 'createUserItem',
-			parent: parentNode.node_id,
-			node_type: activeNode.node_type,
+			kind: 'duplicateNode',
+			source: activeNode.node_id,
+			new_parent: parentNode.node_id,
 			label: nextDuplicateLabel()
 		});
 	};

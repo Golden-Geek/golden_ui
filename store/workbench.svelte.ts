@@ -813,6 +813,35 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 		return null;
 	};
 
+	const waitForCreatedChildLabel = async (
+		parentId: NodeId,
+		knownChildren: Set<NodeId>,
+		expectedLabel: string
+	): Promise<NodeId | null> => {
+		const deadline = Date.now() + 450;
+		while (Date.now() <= deadline) {
+			const parent = graph.state.nodesById.get(parentId);
+			if (parent) {
+				for (const childId of parent.children) {
+					if (knownChildren.has(childId)) {
+						continue;
+					}
+					const child = graph.state.nodesById.get(childId);
+					if (!child) {
+						continue;
+					}
+					if (child.meta.label.trim() === expectedLabel.trim()) {
+						return childId;
+					}
+				}
+			}
+			await new Promise((resolve) => {
+				setTimeout(resolve, 16);
+			});
+		}
+		return null;
+	};
+
 	const createNodeUnderParent = async (
 		parentId: NodeId,
 		nodeType: string,
@@ -937,12 +966,19 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 					? `${source.meta.label.trim()} Copy`
 					: `${source.node_type} Copy`;
 			const label = nextLabelInParent(parentId, baseLabel);
-			const createdNodeId = await createNodeUnderParent(
-				parentId,
-				source.node_type,
-				label,
-				insertAfterNodeId
-			);
+			const parentBefore = graph.state.nodesById.get(parentId);
+			if (!parentBefore) {
+				continue;
+			}
+			const knownChildren = new Set(parentBefore.children);
+			await sendIntent({
+				kind: 'duplicateNode',
+				source: sourceId,
+				new_parent: parentId,
+				new_prev_sibling: insertAfterNodeId,
+				label
+			});
+			const createdNodeId = await waitForCreatedChildLabel(parentId, knownChildren, label);
 			if (createdNodeId === null) {
 				continue;
 			}
