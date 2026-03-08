@@ -1089,6 +1089,15 @@
 
 	const pageViewportWidthPx = $derived(Math.max(pageViewportSize.width, 1));
 	const pageViewportHeightPx = $derived(Math.max(pageViewportSize.height, 1));
+	const pageEditBleedPx = $derived.by(() => {
+		if (!editMode || !pageSize.enabled) {
+			return 0;
+		}
+		const rootRemPx = getRootRemPixels();
+		const viewportMinExtent = Math.min(pageViewportWidthPx, pageViewportHeightPx);
+		return Math.max(minFreeWidgetWidthRem * rootRemPx, viewportMinExtent * 0.12);
+	});
+	const pageSceneStyle = $derived.by(() => `padding: ${pageEditBleedPx}px;`);
 	const pageSizeContext = $derived.by((): Pick<
 		FreeLayoutInteraction,
 		'rootRemPx' | 'surfaceWidthPx' | 'surfaceHeightPx' | 'viewportWidthPx' | 'viewportHeightPx'
@@ -1109,7 +1118,9 @@
 		if (!pageSize.enabled) {
 			return 1;
 		}
-		return Math.min(pageViewportWidthPx / pageLogicalWidthPx, pageViewportHeightPx / pageLogicalHeightPx);
+		const availableWidthPx = Math.max(1, pageViewportWidthPx - 2 * pageEditBleedPx);
+		const availableHeightPx = Math.max(1, pageViewportHeightPx - 2 * pageEditBleedPx);
+		return Math.min(availableWidthPx / pageLogicalWidthPx, availableHeightPx / pageLogicalHeightPx);
 	});
 	const pageFrameStyle = $derived.by(() => {
 		const baseWidth = pageSize.enabled ? pageLogicalWidthPx * pageFitScale : pageViewportWidthPx;
@@ -1411,7 +1422,7 @@
 		}}
 		onwheel={handlePageViewportWheel}
 		onpointerdown={handlePageViewportPointerDown}>
-		<div class="dashboard-page-scene">
+		<div class="dashboard-page-scene" style={pageSceneStyle}>
 			<div class="dashboard-page-frame" style={pageFrameStyle}>
 				<div
 					class="dashboard-surface dashboard-page {layoutKind}"
@@ -1743,13 +1754,9 @@
 		inline-size: 100%;
 		block-size: auto;
 		min-block-size: 8rem;
-		border-radius: 0.9rem;
-		background:
-			radial-gradient(circle at top right, rgb(from var(--gc-color-selection) r g b / 0.08), transparent 42%),
-			linear-gradient(180deg, rgb(from var(--gc-color-panel-outline) r g b / 0.2), transparent 38%),
-			var(--gc-color-panel);
-		border: solid 0.06rem rgb(from var(--gc-color-panel-outline) r g b / 0.55);
-		overflow: hidden;
+		border-radius: 0.5rem;
+		background: rgb(from var(--gc-color-background) r g b / 0.45);
+		border: dashed 0.06rem rgb(from var(--gc-color-panel-outline) r g b / 0.55);
 	}
 
 	.dashboard-page.edit-bleed-visible,
@@ -1787,7 +1794,7 @@
 		block-size: 100%;
 		min-block-size: 0;
 		overflow: visible;
-		padding: 0.2rem;
+		box-sizing: border-box;
 	}
 
 	.dashboard-page-frame {
@@ -1795,6 +1802,7 @@
 		grid-area: 1 / 1;
 		flex: 0 0 auto;
 		overflow: visible;
+		z-index: 1;
 		transform-origin: center center;
 		transition: box-shadow 120ms ease;
 	}
@@ -1804,8 +1812,10 @@
 		position: relative;
 		pointer-events: none;
 		border-radius: 0.9rem;
-		box-shadow: 0 0 0 100vmax rgb(from var(--gc-color-background) r g b / 0.42);
-		border: solid 0.06rem rgb(from var(--gc-color-selection) r g b / 0.26);
+		box-shadow:
+			0 0 0 100vmax rgb(from var(--gc-color-background) r g b / 0.2),
+			0 0.8rem 2rem rgb(from var(--gc-color-background) r g b / 0.1);
+		border: solid 0.06rem rgb(from var(--gc-color-selection) r g b / 0.2);
 		transform-origin: center center;
 	}
 

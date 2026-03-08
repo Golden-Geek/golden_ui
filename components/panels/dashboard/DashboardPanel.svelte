@@ -159,17 +159,15 @@
 <div class="dashboard-panel">
 	{#if dashboards.length === 0}
 		<div class="dashboard-empty-state">
-			<span class="eyebrow">Dashboard</span>
 			<h3>No dashboard nodes are available</h3>
 			<p>Create a <code>dashboard</code> node in the engine tree to start authoring pages and widgets.</p>
 		</div>
 	{:else}
 		<div class="dashboard-main">
 			<header class="dashboard-strip">
-				<div class="dashboard-strip-meta">
-					<span class="eyebrow">Dashboard</span>
+				<!-- <div class="dashboard-strip-meta">
 					<span class="dashboard-strip-title">{selectedDashboard?.meta.label ?? 'Dashboard'}</span>
-				</div>
+				</div> -->
 				<div class="dashboard-page-tabs" role="tablist" aria-label="Dashboard pages">
 					{#if pages.length > 0}
 						{#each pages as page}
@@ -216,9 +214,6 @@
 
 <style>
 	.dashboard-panel {
-		display: flex;
-		flex-direction: column;
-		gap: 0.55rem;
 		inline-size: 100%;
 		block-size: 100%;
 		min-block-size: 0;
@@ -226,12 +221,9 @@
 
 	.dashboard-main,
 	.dashboard-empty-state {
-		border-radius: 0.95rem;
-		background:
-			radial-gradient(circle at top left, rgb(from var(--gc-color-selection) r g b / 0.07), transparent 36%),
-			linear-gradient(180deg, rgb(from var(--gc-color-panel-outline) r g b / 0.18), transparent 35%),
-			var(--gc-color-panel);
-		border: solid 0.06rem rgb(from var(--gc-color-panel-outline) r g b / 0.55);
+		width:100%;
+		height:100%;
+		box-sizing: border-box;
 	}
 
 	.dashboard-main {
@@ -246,18 +238,11 @@
 		align-items: center;
 		gap: 0.55rem;
 		padding: 0.45rem 0.6rem;
+		margin-bottom:.25rem;
 		border-bottom: solid 0.06rem rgb(from var(--gc-color-panel-outline) r g b / 0.35);
 	}
 
-	.dashboard-strip-meta {
-		display: flex;
-		flex-direction: column;
-		gap: 0.05rem;
-		min-inline-size: 0;
-		flex: 0 0 auto;
-	}
 
-	.dashboard-strip-title,
 	.dashboard-empty-state h3 {
 		margin: 0;
 		font-size: 0.82rem;
@@ -339,7 +324,6 @@
 	.dashboard-main-content {
 		flex: 1 1 auto;
 		min-block-size: 0;
-		padding: 0.55rem;
 	}
 
 	.dashboard-empty-state {
