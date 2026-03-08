@@ -12,11 +12,23 @@ export type DashboardLayoutKind =
 
 export interface DashboardPlacement {
 	titleVisible: boolean;
-	position: { x: CssValueData; y: CssValueData };
+	position: { x: number; y: number };
+	anchor: DashboardAnchor;
 	size: { width: CssValueData; height: CssValueData };
 	columnSpan: number;
 	rowSpan: number;
 }
+
+export type DashboardAnchor =
+	| 'top-left'
+	| 'top-center'
+	| 'top-right'
+	| 'center-left'
+	| 'center'
+	| 'center-right'
+	| 'bottom-left'
+	| 'bottom-center'
+	| 'bottom-right';
 
 export interface DashboardGap {
 	x: CssValueData;
@@ -114,12 +126,30 @@ const asBool = (value: ParamValue | undefined, fallback: boolean): boolean => {
 };
 
 export const getDashboardPlacement = (graph: GraphState | null, node: UiNodeDto | null): DashboardPlacement => {
+	const anchorParam = getDirectParam(graph, node, 'anchor');
+	const anchor =
+		anchorParam?.value.kind === 'enum' &&
+		[
+			'top-left',
+			'top-center',
+			'top-right',
+			'center-left',
+			'center',
+			'center-right',
+			'bottom-left',
+			'bottom-center',
+			'bottom-right'
+		].includes(anchorParam.value.value)
+			? (anchorParam.value.value as DashboardAnchor)
+			: 'top-left';
+	const positionParam = getDirectParam(graph, node, 'position');
 	return {
 		titleVisible: asBool(getDirectParam(graph, node, 'title_visible')?.value, true),
 		position: {
-			x: cssValueFromParamValue(getDirectParam(graph, node, 'position_x')?.value, { value: 0, unit: 'rem' }),
-			y: cssValueFromParamValue(getDirectParam(graph, node, 'position_y')?.value, { value: 0, unit: 'rem' })
+			x: positionParam?.value.kind === 'vec2' ? Number(positionParam.value.value[0] ?? 0) : 0,
+			y: positionParam?.value.kind === 'vec2' ? Number(positionParam.value.value[1] ?? 0) : 0
 		},
+		anchor,
 		size: {
 			width: cssValueFromParamValue(getDirectParam(graph, node, 'width')?.value, { value: 12, unit: 'rem' }),
 			height: cssValueFromParamValue(getDirectParam(graph, node, 'height')?.value, { value: 4, unit: 'rem' })

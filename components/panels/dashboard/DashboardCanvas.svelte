@@ -23,6 +23,7 @@
 	} from './dashboard-actions';
 	import { readDashboardDragPayload, type DashboardDragPayload } from './dashboard-drag';
 	import {
+		type DashboardAnchor,
 		formatParamValue,
 		getDashboardLayoutKind,
 		getDashboardPageSize,
@@ -80,7 +81,7 @@
 		bottom: boolean;
 	};
 	type FreeLayoutPreview = {
-		position: { x: CssValueData; y: CssValueData };
+		position: { x: number; y: number };
 		size: { width: CssValueData; height: CssValueData };
 	};
 	type FreeLayoutInteraction = {
@@ -88,7 +89,7 @@
 		mode: FreeLayoutInteractionMode;
 		resizeEdges: FreeLayoutResizeEdges | null;
 		startClient: [number, number];
-		startPosition: { x: CssValueData; y: CssValueData };
+		startPosition: { x: number; y: number };
 		startSize: { width: CssValueData; height: CssValueData };
 		rootRemPx: number;
 		surfaceWidthPx: number;
@@ -103,6 +104,12 @@
 		height: number;
 		scaleX: number;
 		scaleY: number;
+	};
+	type FreeLayoutRect = {
+		left: number;
+		top: number;
+		width: number;
+		height: number;
 	};
 	type DashboardPageViewState = {
 		pointerId: number | null;
@@ -259,8 +266,8 @@
 
 	const cloneFreeLayoutPreview = (preview: FreeLayoutPreview): FreeLayoutPreview => ({
 		position: {
-			x: { ...preview.position.x },
-			y: { ...preview.position.y }
+			x: preview.position.x,
+			y: preview.position.y
 		},
 		size: {
 			width: { ...preview.size.width },
@@ -270,8 +277,8 @@
 
 	const currentPlacementPreview = (): FreeLayoutPreview => ({
 		position: {
-			x: { ...placement.position.x },
-			y: { ...placement.position.y }
+			x: placement.position.x,
+			y: placement.position.y
 		},
 		size: {
 			width: { ...placement.size.width },
@@ -282,13 +289,17 @@
 	const sameCssValue = (left: CssValueData, right: CssValueData): boolean =>
 		left.value === right.value && left.unit === right.unit;
 
+	const samePosition = (
+		left: { x: number; y: number },
+		right: { x: number; y: number }
+	): boolean => left.x === right.x && left.y === right.y;
+
 	const isSameFreeLayoutPreview = (left: FreeLayoutPreview | null, right: FreeLayoutPreview | null): boolean => {
 		if (!left || !right) {
 			return left === right;
 		}
 		return (
-			sameCssValue(left.position.x, right.position.x) &&
-			sameCssValue(left.position.y, right.position.y) &&
+			samePosition(left.position, right.position) &&
 			sameCssValue(left.size.width, right.size.width) &&
 			sameCssValue(left.size.height, right.size.height)
 		);
@@ -299,6 +310,107 @@
 			return valuePx;
 		}
 		return Math.round(valuePx / snapPx) * snapPx;
+	};
+
+	const anchorXFromAnchor = (anchor: DashboardAnchor): 'left' | 'center' | 'right' => {
+		if (anchor.endsWith('right')) {
+			return 'right';
+		}
+		if (anchor === 'center' || anchor.endsWith('center')) {
+			return 'center';
+		}
+		return 'left';
+	};
+
+	const anchorYFromAnchor = (anchor: DashboardAnchor): 'top' | 'center' | 'bottom' => {
+		if (anchor.startsWith('bottom')) {
+			return 'bottom';
+		}
+		if (anchor === 'center' || anchor.startsWith('center')) {
+			return 'center';
+		}
+		return 'top';
+	};
+
+	const anchorBasePx = (anchor: 'left' | 'center' | 'right' | 'top' | 'center' | 'bottom', axisExtentPx: number): number => {
+		if (anchor === 'center') {
+			return axisExtentPx * 0.5;
+		}
+		if (anchor === 'right' || anchor === 'bottom') {
+			return axisExtentPx;
+		}
+		return 0;
+	};
+
+	const anchorOffsetPx = (anchor: 'left' | 'center' | 'right' | 'top' | 'center' | 'bottom', sizePx: number): number => {
+		if (anchor === 'center') {
+			return sizePx * 0.5;
+		}
+		if (anchor === 'right' || anchor === 'bottom') {
+			return sizePx;
+		}
+		return 0;
+	};
+
+	const anchorBaseExpression = (anchor: 'left' | 'center' | 'right' | 'top' | 'center' | 'bottom'): string => {
+		if (anchor === 'center') {
+			return '50%';
+		}
+		if (anchor === 'right' || anchor === 'bottom') {
+			return '100%';
+		}
+		return '0px';
+	};
+
+	const freeLayoutRectFromPlacement = (
+		placementLike: {
+			position: { x: number; y: number };
+			size: { width: CssValueData; height: CssValueData };
+			anchor: DashboardAnchor;
+		},
+		interaction: Pick<FreeLayoutInteraction, 'surfaceWidthPx' | 'surfaceHeightPx' | 'rootRemPx' | 'viewportWidthPx' | 'viewportHeightPx'>
+	): FreeLayoutRect => {
+		const xContext = createCssUnitContext(interaction, 'x');
+		const yContext = createCssUnitContext(interaction, 'y');
+		const widthPx = Math.max(0, cssValueToPx(placementLike.size.width, 'x', xContext));
+		const heightPx = Math.max(0, cssValueToPx(placementLike.size.height, 'y', yContext));
+		const anchorX = anchorXFromAnchor(placementLike.anchor);
+		const anchorY = anchorYFromAnchor(placementLike.anchor);
+		const anchorPointXPx =
+			anchorBasePx(anchorX, interaction.surfaceWidthPx) + placementLike.position.x;
+		const anchorPointYPx =
+			anchorBasePx(anchorY, interaction.surfaceHeightPx) + placementLike.position.y;
+		return {
+			left: anchorPointXPx - anchorOffsetPx(anchorX, widthPx),
+			top: anchorPointYPx - anchorOffsetPx(anchorY, heightPx),
+			width: widthPx,
+			height: heightPx
+		};
+	};
+
+	const freeLayoutPreviewFromRect = (
+		rect: FreeLayoutRect,
+		anchor: DashboardAnchor,
+		interaction: Pick<FreeLayoutInteraction, 'surfaceWidthPx' | 'surfaceHeightPx' | 'rootRemPx' | 'viewportWidthPx' | 'viewportHeightPx'>,
+		positionTemplate: { x: number; y: number },
+		sizeTemplate: { width: CssValueData; height: CssValueData }
+	): FreeLayoutPreview => {
+		const xContext = createCssUnitContext(interaction, 'x');
+		const yContext = createCssUnitContext(interaction, 'y');
+		const anchorX = anchorXFromAnchor(anchor);
+		const anchorY = anchorYFromAnchor(anchor);
+		const anchorPointXPx = rect.left + anchorOffsetPx(anchorX, rect.width);
+		const anchorPointYPx = rect.top + anchorOffsetPx(anchorY, rect.height);
+		return {
+			position: {
+				x: anchorPointXPx - anchorBasePx(anchorX, interaction.surfaceWidthPx),
+				y: anchorPointYPx - anchorBasePx(anchorY, interaction.surfaceHeightPx)
+			},
+			size: {
+				width: pxToCssValue(rect.width, sizeTemplate.width, 'x', xContext),
+				height: pxToCssValue(rect.height, sizeTemplate.height, 'y', yContext)
+			}
+		};
 	};
 
 	const clampPageZoom = (zoom: number): number => Math.min(maxPageZoom, Math.max(minPageZoom, zoom));
@@ -550,12 +662,18 @@
 
 	const sendFreeLayoutPreview = async (preview: FreeLayoutPreview): Promise<void> => {
 		const compareTo = lastCommittedFreeLayoutPreview ?? currentPlacementPreview();
-		const operations: Promise<void>[] = [];
-		if (!sameCssValue(preview.position.x, compareTo.position.x)) {
-			operations.push(setCssParamValue('position_x', preview.position.x));
-		}
-		if (!sameCssValue(preview.position.y, compareTo.position.y)) {
-			operations.push(setCssParamValue('position_y', preview.position.y));
+		const operations: Promise<unknown>[] = [];
+		if (!samePosition(preview.position, compareTo.position)) {
+			const paramNode = getDirectParamNode(graph, liveNode, 'position');
+			if (paramNode?.data.kind === 'parameter') {
+				operations.push(
+					sendSetParamIntent(
+						paramNode.node_id,
+						{ kind: 'vec2', value: [preview.position.x, preview.position.y] },
+						paramNode.data.param.event_behaviour
+					)
+				);
+			}
 		}
 		if (!sameCssValue(preview.size.width, compareTo.size.width)) {
 			operations.push(setCssParamValue('width', preview.size.width));
@@ -629,8 +747,8 @@
 			resizeEdges: null,
 			startClient: [event.clientX, event.clientY],
 			startPosition: {
-				x: { ...placement.position.x },
-				y: { ...placement.position.y }
+				x: placement.position.x,
+				y: placement.position.y
 			},
 			startSize: {
 				width: { ...placement.size.width },
@@ -646,8 +764,8 @@
 		};
 		freeLayoutPreview = {
 			position: {
-				x: { ...placement.position.x },
-				y: { ...placement.position.y }
+				x: placement.position.x,
+				y: placement.position.y
 			},
 			size: {
 				width: { ...placement.size.width },
@@ -678,8 +796,8 @@
 			resizeEdges,
 			startClient: [event.clientX, event.clientY],
 			startPosition: {
-				x: { ...placement.position.x },
-				y: { ...placement.position.y }
+				x: placement.position.x,
+				y: placement.position.y
 			},
 			startSize: {
 				width: { ...placement.size.width },
@@ -695,8 +813,8 @@
 		};
 		freeLayoutPreview = {
 			position: {
-				x: { ...placement.position.x },
-				y: { ...placement.position.y }
+				x: placement.position.x,
+				y: placement.position.y
 			},
 			size: {
 				width: { ...placement.size.width },
@@ -733,30 +851,29 @@
 			const deltaYPx =
 				(event.clientY - freeLayoutInteraction.startClient[1]) /
 				Math.max(freeLayoutInteraction.surfaceScaleY, 1e-6);
-			const xContext = createCssUnitContext(freeLayoutInteraction, 'x');
-			const yContext = createCssUnitContext(freeLayoutInteraction, 'y');
 			const minWidthPx = minFreeWidgetWidthRem * freeLayoutInteraction.rootRemPx;
 			const minHeightPx = minFreeWidgetHeightRem * freeLayoutInteraction.rootRemPx;
 			const snapPx = parentSnapGrid.enabled ? parentSnapGrid.step * freeLayoutInteraction.rootRemPx : 0;
+			const startRect = freeLayoutRectFromPlacement(
+				{
+					position: freeLayoutInteraction.startPosition,
+					size: freeLayoutInteraction.startSize,
+					anchor: placement.anchor
+				},
+				freeLayoutInteraction
+			);
 			if (freeLayoutInteraction.mode === 'move') {
-				const nextX = snapToGridPx(
-					cssValueToPx(freeLayoutInteraction.startPosition.x, 'x', xContext) + deltaXPx,
-					snapPx
-				);
-				const nextY = snapToGridPx(
-					cssValueToPx(freeLayoutInteraction.startPosition.y, 'y', yContext) + deltaYPx,
-					snapPx
-				);
-				freeLayoutPreview = {
-					position: {
-						x: pxToCssValue(nextX, freeLayoutInteraction.startPosition.x, 'x', xContext),
-						y: pxToCssValue(nextY, freeLayoutInteraction.startPosition.y, 'y', yContext)
+				freeLayoutPreview = freeLayoutPreviewFromRect(
+					{
+						...startRect,
+						left: snapToGridPx(startRect.left + deltaXPx, snapPx),
+						top: snapToGridPx(startRect.top + deltaYPx, snapPx)
 					},
-					size: {
-						width: { ...freeLayoutInteraction.startSize.width },
-						height: { ...freeLayoutInteraction.startSize.height }
-					}
-				};
+					placement.anchor,
+					freeLayoutInteraction,
+					freeLayoutInteraction.startPosition,
+					freeLayoutInteraction.startSize
+				);
 				scheduleFreeLayoutCommit(freeLayoutPreview);
 				return;
 			}
@@ -764,17 +881,17 @@
 			if (!resizeEdges) {
 				return;
 			}
-			let nextPositionPxX = cssValueToPx(freeLayoutInteraction.startPosition.x, 'x', xContext);
-			let nextPositionPxY = cssValueToPx(freeLayoutInteraction.startPosition.y, 'y', yContext);
-			let nextWidthPx = cssValueToPx(freeLayoutInteraction.startSize.width, 'x', xContext);
-			let nextHeightPx = cssValueToPx(freeLayoutInteraction.startSize.height, 'y', yContext);
+			let nextLeftPx = startRect.left;
+			let nextTopPx = startRect.top;
+			let nextWidthPx = startRect.width;
+			let nextHeightPx = startRect.height;
 
 			if (resizeEdges.left) {
 				const appliedDeltaX = Math.min(
-					Math.max(deltaXPx, -nextPositionPxX),
+					Math.max(deltaXPx, -nextLeftPx),
 					nextWidthPx - minWidthPx
 				);
-				nextPositionPxX += appliedDeltaX;
+				nextLeftPx += appliedDeltaX;
 				nextWidthPx -= appliedDeltaX;
 			}
 			if (resizeEdges.right) {
@@ -782,31 +899,33 @@
 			}
 			if (resizeEdges.top) {
 				const appliedDeltaY = Math.min(
-					Math.max(deltaYPx, -nextPositionPxY),
+					Math.max(deltaYPx, -nextTopPx),
 					nextHeightPx - minHeightPx
 				);
-				nextPositionPxY += appliedDeltaY;
+				nextTopPx += appliedDeltaY;
 				nextHeightPx -= appliedDeltaY;
 			}
 			if (resizeEdges.bottom) {
 				nextHeightPx = Math.max(minHeightPx, nextHeightPx + deltaYPx);
 			}
 			if (snapPx > 0) {
-				nextPositionPxX = snapToGridPx(nextPositionPxX, snapPx);
-				nextPositionPxY = snapToGridPx(nextPositionPxY, snapPx);
+				nextLeftPx = snapToGridPx(nextLeftPx, snapPx);
+				nextTopPx = snapToGridPx(nextTopPx, snapPx);
 				nextWidthPx = Math.max(minWidthPx, snapToGridPx(nextWidthPx, snapPx));
 				nextHeightPx = Math.max(minHeightPx, snapToGridPx(nextHeightPx, snapPx));
 			}
-			freeLayoutPreview = {
-				position: {
-					x: pxToCssValue(nextPositionPxX, freeLayoutInteraction.startPosition.x, 'x', xContext),
-					y: pxToCssValue(nextPositionPxY, freeLayoutInteraction.startPosition.y, 'y', yContext)
+			freeLayoutPreview = freeLayoutPreviewFromRect(
+				{
+					left: nextLeftPx,
+					top: nextTopPx,
+					width: nextWidthPx,
+					height: nextHeightPx
 				},
-				size: {
-					width: pxToCssValue(nextWidthPx, freeLayoutInteraction.startSize.width, 'x', xContext),
-					height: pxToCssValue(nextHeightPx, freeLayoutInteraction.startSize.height, 'y', yContext)
-				}
-			};
+				placement.anchor,
+				freeLayoutInteraction,
+				freeLayoutInteraction.startPosition,
+				freeLayoutInteraction.startSize
+			);
 			scheduleFreeLayoutCommit(freeLayoutPreview);
 		};
 
@@ -908,20 +1027,24 @@
 		if (!editMode || !supportsFreePlacement || !freeLayoutPreview) {
 			return '';
 		}
-		const context = {
+		const context = freeLayoutInteraction ?? {
 			rootRemPx: getRootRemPixels(),
 			surfaceWidthPx: getViewportWidthPx(),
 			surfaceHeightPx: getViewportHeightPx(),
+			surfaceScaleX: 1,
+			surfaceScaleY: 1,
 			viewportWidthPx: getViewportWidthPx(),
 			viewportHeightPx: getViewportHeightPx()
 		};
-		const deltaX =
-			cssValueToPx(freeLayoutPreview.position.x, 'x', createCssUnitContext(context, 'x')) -
-			cssValueToPx(placement.position.x, 'x', createCssUnitContext(context, 'x'));
-		const deltaY =
-			cssValueToPx(freeLayoutPreview.position.y, 'y', createCssUnitContext(context, 'y')) -
-			cssValueToPx(placement.position.y, 'y', createCssUnitContext(context, 'y'));
-		return `transform: translate(${deltaX}px, ${deltaY}px); inline-size: max(${formatCssValue(freeLayoutPreview.size.width)}, 6.5rem); block-size: max(${formatCssValue(freeLayoutPreview.size.height)}, 2.8rem); z-index: 4;`;
+		const currentRect = freeLayoutRectFromPlacement(
+			{ position: placement.position, size: placement.size, anchor: placement.anchor },
+			context
+		);
+		const previewRect = freeLayoutRectFromPlacement(
+			{ position: freeLayoutPreview.position, size: freeLayoutPreview.size, anchor: placement.anchor },
+			context
+		);
+		return `transform: translate(${previewRect.left - currentRect.left}px, ${previewRect.top - currentRect.top}px); inline-size: ${previewRect.width}px; block-size: ${previewRect.height}px; z-index: 4;`;
 	});
 
 	const freeSurfaceHeightPx = $derived.by(() => {
@@ -939,10 +1062,10 @@
 		let maxExtent = 18 * rootRemPx;
 		for (const child of childWidgets) {
 			const childPlacement = getDashboardPlacement(graph, child);
+			const childRect = freeLayoutRectFromPlacement(childPlacement, surfaceContext as FreeLayoutInteraction);
 			maxExtent = Math.max(
 				maxExtent,
-				cssValueToPx(childPlacement.position.y, 'y', createCssUnitContext(surfaceContext, 'y')) +
-					cssValueToPx(childPlacement.size.height, 'y', createCssUnitContext(surfaceContext, 'y')) +
+				childRect.top + childRect.height +
 					cssValueToPx(gap.y, 'y', createCssUnitContext(surfaceContext, 'y')) +
 					2 * rootRemPx
 			);
@@ -993,20 +1116,41 @@
 		const baseHeight = pageSize.enabled ? pageLogicalHeightPx * pageFitScale : pageViewportHeightPx;
 		return `inline-size: ${baseWidth}px; block-size: ${baseHeight}px; transform: translate(${pageView.panX}px, ${pageView.panY}px) scale(${pageView.zoom});`;
 	});
+	const pageBleedFrameStyle = $derived.by(() => {
+		const baseWidth = pageSize.enabled ? pageLogicalWidthPx * pageFitScale : pageViewportWidthPx;
+		const baseHeight = pageSize.enabled ? pageLogicalHeightPx * pageFitScale : pageViewportHeightPx;
+		return `inline-size: ${baseWidth}px; block-size: ${baseHeight}px; transform: translate(${pageView.panX}px, ${pageView.panY}px) scale(${pageView.zoom}); z-index: 0;`;
+	});
 
 	const slotStyle = (child: UiNodeDto): string => {
 		const childPlacement = getDashboardPlacement(graph, child);
 		if (layoutKind === 'free') {
-			return `left: ${formatCssValue(childPlacement.position.x)}; top: ${formatCssValue(childPlacement.position.y)}; inline-size: max(${formatCssValue(childPlacement.size.width)}, 6.5rem); block-size: max(${formatCssValue(childPlacement.size.height)}, 2.8rem);`;
+			const width = `max(${formatCssValue(childPlacement.size.width)}, 6.5rem)`;
+			const height = `max(${formatCssValue(childPlacement.size.height)}, 2.8rem)`;
+			const anchorX = anchorXFromAnchor(childPlacement.anchor);
+			const anchorY = anchorYFromAnchor(childPlacement.anchor);
+			const left =
+				anchorX === 'left'
+					? `${childPlacement.position.x}px`
+					: anchorX === 'center'
+						? `calc(${anchorBaseExpression(anchorX)} + ${childPlacement.position.x}px - (${width} / 2))`
+						: `calc(${anchorBaseExpression(anchorX)} + ${childPlacement.position.x}px - ${width})`;
+			const top =
+				anchorY === 'top'
+					? `${childPlacement.position.y}px`
+					: anchorY === 'center'
+						? `calc(${anchorBaseExpression(anchorY)} + ${childPlacement.position.y}px - (${height} / 2))`
+						: `calc(${anchorBaseExpression(anchorY)} + ${childPlacement.position.y}px - ${height})`;
+			return `left: ${left}; top: ${top}; inline-size: ${width}; block-size: ${height};`;
 		}
 		if (layoutKind === 'grid') {
 			return `grid-column: span ${childPlacement.columnSpan}; grid-row: span ${childPlacement.rowSpan}; min-block-size: max(${formatCssValue(childPlacement.size.height)}, 3.25rem);`;
 		}
 		const basis = layoutKind === 'horizontal' ? childPlacement.size.width : childPlacement.size.height;
 		if (layoutKind === 'horizontal') {
-			return `flex: 1 1 auto; flex-basis: max(${formatCssValue(basis)}, 6.5rem); min-inline-size: max(${formatCssValue(childPlacement.size.width)}, 6.5rem); min-block-size: max(${formatCssValue(childPlacement.size.height)}, 2.8rem);`;
+			return `flex: 0 0 max(${formatCssValue(basis)}, 6.5rem); inline-size: max(${formatCssValue(childPlacement.size.width)}, 6.5rem); block-size: 100%; min-inline-size: 0; min-block-size: 0;`;
 		}
-		return `inline-size: 100%; min-block-size: max(${formatCssValue(childPlacement.size.height)}, 2.8rem);`;
+		return `flex: 0 0 max(${formatCssValue(basis)}, 2.8rem); inline-size: 100%; block-size: max(${formatCssValue(childPlacement.size.height)}, 2.8rem); min-inline-size: 0; min-block-size: 0;`;
 	};
 
 	const widgetKind = $derived.by(() => {
@@ -1343,7 +1487,7 @@
 				</div>
 			</div>
 			{#if editMode && pageSize.enabled}
-				<div class="dashboard-page-visibility-overlay" style={pageFrameStyle} aria-hidden="true"></div>
+				<div class="dashboard-page-visibility-overlay" style={pageBleedFrameStyle} aria-hidden="true"></div>
 			{/if}
 		</div>
 	</div>
@@ -1614,8 +1758,15 @@
 	}
 
 	.dashboard-page {
+		box-sizing: border-box;
+		block-size: 100%;
 		min-block-size: 100%;
 		padding: 0.55rem;
+	}
+
+	.dashboard-container-surface {
+		box-sizing: border-box;
+		block-size: 100%;
 	}
 
 	.dashboard-page-viewport {
@@ -1635,7 +1786,7 @@
 		inline-size: 100%;
 		block-size: 100%;
 		min-block-size: 0;
-		overflow: hidden;
+		overflow: visible;
 		padding: 0.2rem;
 	}
 
@@ -1656,7 +1807,6 @@
 		box-shadow: 0 0 0 100vmax rgb(from var(--gc-color-background) r g b / 0.42);
 		border: solid 0.06rem rgb(from var(--gc-color-selection) r g b / 0.26);
 		transform-origin: center center;
-		z-index: 2;
 	}
 
 	.dashboard-page.surface-target-active,
@@ -1688,17 +1838,35 @@
 	.dashboard-surface.horizontal .dashboard-layout,
 	.dashboard-surface.vertical .dashboard-layout {
 		display: flex;
+		flex: 1 1 auto;
 		gap: var(--dashboard-gap-y) var(--dashboard-gap-x);
+		inline-size: 100%;
+		block-size: 100%;
+		min-inline-size: 0;
+		min-block-size: 0;
+	}
+
+	.dashboard-surface.horizontal {
+		overflow-x: auto;
+		overflow-y: hidden;
+	}
+
+	.dashboard-surface.vertical {
+		overflow-x: hidden;
+		overflow-y: auto;
 	}
 
 	.dashboard-surface.horizontal .dashboard-layout {
 		flex-direction: row;
-		flex-wrap: wrap;
+		flex-wrap: nowrap;
 		align-items: stretch;
+		align-content: flex-start;
 	}
 
 	.dashboard-surface.vertical .dashboard-layout {
 		flex-direction: column;
+		align-items: stretch;
+		justify-content: flex-start;
 	}
 
 	.dashboard-tab-strip {
@@ -1775,9 +1943,20 @@
 		block-size: 100%;
 	}
 
+	.dashboard-surface.horizontal .dashboard-slot {
+		flex: 0 0 auto;
+		align-self: stretch;
+		block-size: 100%;
+	}
+
 	.dashboard-surface.vertical .dashboard-slot,
 	.dashboard-surface.grid .dashboard-slot,
 	.dashboard-accordion .dashboard-slot {
+		inline-size: 100%;
+	}
+
+	.dashboard-surface.vertical .dashboard-slot {
+		flex: 0 0 auto;
 		inline-size: 100%;
 	}
 
