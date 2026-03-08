@@ -272,14 +272,9 @@
 
 	.multi-number-editor.widget-layout .single-number-editor {
 		flex: 1 1 0;
-		flex-direction: column;
 		align-items: stretch;
 		height: auto;
 		min-inline-size: 0;
-	}
-
-	.multi-number-editor.widget-layout.column-layout .single-number-editor {
-		flex-direction: row;
 	}
 
 	.slider-wrapper {
@@ -308,6 +303,5 @@
 
 	.multi-number-editor.widget-layout.column-layout .number-field {
 		inline-size: clamp(4rem, 26%, 7rem);
-		width: auto;
 	}
 </style>

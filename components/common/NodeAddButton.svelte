@@ -9,10 +9,12 @@
 
 	let creatableItems = $derived(node.creatable_user_items ?? []);
 	let canCreateItems = $derived(creatableItems.length > 0);
+	let showsContextMenu = $derived(creatableItems.length > 1);
 
 	let addMenuOpen = $state(false);
 	let addMenuTrigger: HTMLButtonElement | null = $state(null);
 	let addMenuNodeId = $state<number | null>(null);
+	let creatingSingleItem = $state(false);
 
 	$effect(() => {
 		const nodeId = node?.node_id ?? null;
@@ -23,8 +25,21 @@
 		addMenuOpen = false;
 	});
 
-	const toggleAddMenu = (): void => {
-		if (!canCreateItems) {
+	const toggleAddMenu = async (): Promise<void> => {
+		if (!canCreateItems || creatingSingleItem) {
+			return;
+		}
+		if (!showsContextMenu) {
+			const singleItem = creatableItems[0];
+			if (!singleItem) {
+				return;
+			}
+			creatingSingleItem = true;
+			try {
+				await createItem(singleItem);
+			} finally {
+				creatingSingleItem = false;
+			}
 			return;
 		}
 		addMenuOpen = !addMenuOpen;
@@ -69,17 +84,20 @@
 			type="button"
 			aria-label="Add child item"
 			title="Add item"
-			aria-expanded={addMenuOpen}
+			aria-expanded={showsContextMenu ? addMenuOpen : undefined}
+			disabled={creatingSingleItem}
 			onclick={toggleAddMenu}>
 			<img src={addIcon} alt="" />
 		</button>
-		<ContextMenu
-			bind:open={addMenuOpen}
-			items={menuItems}
-			anchor={menuAnchor}
-			insideElements={[addMenuTrigger]}
-			minWidthRem={10}
-			maxWidthCss="min(18rem, calc(100vw - 2rem))" />
+		{#if showsContextMenu}
+			<ContextMenu
+				bind:open={addMenuOpen}
+				items={menuItems}
+				anchor={menuAnchor}
+				insideElements={[addMenuTrigger]}
+				minWidthRem={10}
+				maxWidthCss="min(18rem, calc(100vw - 2rem))" />
+		{/if}
 	</div>
 {/if}
 

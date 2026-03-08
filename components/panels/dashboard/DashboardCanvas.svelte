@@ -1510,10 +1510,15 @@
 		}
 		event.preventDefault();
 		event.stopPropagation();
+		const surfaceElement =
+			isPage && event.currentTarget instanceof HTMLElement
+				? (event.currentTarget.closest('.dashboard-page-scene') as HTMLElement | null) ??
+					event.currentTarget
+				: event.currentTarget;
 		const selection: MarqueeSelectionState = {
 			pointerId: event.pointerId,
 			surfaceNodeId: liveNode.node_id,
-			surfaceElement: event.currentTarget,
+			surfaceElement: surfaceElement,
 			startClient: [event.clientX, event.clientY],
 			currentClient: [event.clientX, event.clientY],
 			baseSelection: [...(session?.selectedNodesIds ?? [])],
@@ -1760,7 +1765,10 @@
 			return '';
 		}
 		const rect = normalizeClientRect(marqueeSelection.startClient, marqueeSelection.currentClient);
-		return `left: ${rect.left}px; top: ${rect.top}px; inline-size: ${rect.width}px; block-size: ${rect.height}px;`;
+		const surfaceRect = marqueeSelection.surfaceElement.getBoundingClientRect();
+		const localLeft = rect.left - surfaceRect.left;
+		const localTop = rect.top - surfaceRect.top;
+		return `left: ${localLeft}px; top: ${localTop}px; inline-size: ${rect.width}px; block-size: ${rect.height}px;`;
 	});
 	let widgetShellStyle = $derived.by(() => {
 		if (!editMode || !supportsFreePlacement || !currentNodeFreeLayoutPreview) {
@@ -2598,10 +2606,11 @@
 			{#if surfaceDragDepth > 0 && (!surfaceDropPreview || layoutKind !== 'free')}
 				<div class="dashboard-drop-indicator">Drop to add a child widget</div>
 			{/if}
+
+			{#if marqueeSelection}
+				<div class="dashboard-marquee-selection" style={marqueeStyle} aria-hidden="true"></div>
+			{/if}
 		</div>
-		{#if marqueeSelection}
-			<div class="dashboard-marquee-selection" style={marqueeStyle} aria-hidden="true"></div>
-		{/if}
 	</section>
 {:else if isNodeWidget}
 	<section
@@ -3344,7 +3353,7 @@
 	}
 
 	.dashboard-marquee-selection {
-		position: fixed;
+		position: absolute;
 		pointer-events: none;
 		z-index: 1000;
 		border: solid 0.08rem rgb(from var(--gc-color-selection) r g b / 0.92);

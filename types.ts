@@ -418,6 +418,13 @@ export type UiEditIntent =
 	| { kind: 'removeNodes'; nodes: NodeId[] }
 	| { kind: 'createUserItem'; parent: NodeId; node_type: string; label?: string }
 	| {
+			kind: 'duplicateNode';
+			source: NodeId;
+			new_parent: NodeId;
+			new_prev_sibling?: NodeId;
+			label?: string;
+	  }
+	| {
 			kind: 'fitAnimationCurvePath';
 			curve: NodeId;
 			points: UiAnimationCurveFitPoint[];
