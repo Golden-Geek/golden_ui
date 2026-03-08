@@ -1890,12 +1890,18 @@ interface CurveDrawPathPoint {
 		height: min(26rem, 38vh);
 		display: flex;
 		flex-direction: column;
+		width: 100%;
+		max-width: 100%;
+		min-width: 0;
 		min-height: 0;
 		gap: 0.18rem;
 	}
 
 	.curve-canvas-wrap {
 		flex: 1 1 auto;
+		width: 100%;
+		max-width: 100%;
+		min-width: 0;
 		min-height: 0;
 		overflow: hidden;
 		background: var(--gc-color-curve-canvas-wrap-bg);
@@ -1906,6 +1912,7 @@ interface CurveDrawPathPoint {
 	.curve-canvas {
 		display: block;
 		width: 100%;
+		max-width: 100%;
 		height: 100%;
 		cursor: crosshair;
 		background: var(--gc-color-curve-canvas-bg);

@@ -1,4 +1,9 @@
 <script lang="ts">
+	import { registerCommandHandler } from '$lib/golden_ui/store/commands.svelte';
+	import {
+		readPanelPersistedState,
+		writePanelPersistedState
+	} from '$lib/golden_ui/dockview/panel-persistence';
 	import type { PanelProps, PanelState } from '$lib/golden_ui/dockview/panel-types';
 	import type { NodeId, UiNodeDto } from '$lib/golden_ui/types';
 	import { appState } from '$lib/golden_ui/store/workbench.svelte';
@@ -13,6 +18,16 @@
 		editMode?: boolean;
 	};
 
+	type DashboardPersistedPageView = {
+		panX: number;
+		panY: number;
+		zoom: number;
+	};
+
+	type DashboardPanelPersistedState = {
+		pageViewsByPageId?: Record<string, DashboardPersistedPageView>;
+	};
+
 	let { panelApi, panelId, panelType, title, params }: PanelProps = $props();
 
 	let panel = $state<PanelState>({
@@ -23,6 +38,51 @@
 	});
 	let pendingPanelParams = $state<DashboardPanelParams | null>(null);
 	let publishedTitle = $state('');
+	let isPanelFocused = $state(false);
+
+	const isRecord = (value: unknown): value is Record<string, unknown> =>
+		typeof value === 'object' && value !== null && !Array.isArray(value);
+
+	const sanitizePersistedPageView = (value: unknown): DashboardPersistedPageView | null => {
+		if (!isRecord(value)) {
+			return null;
+		}
+		const panX = Number(value.panX);
+		const panY = Number(value.panY);
+		const zoom = Number(value.zoom);
+		if (!Number.isFinite(panX) || !Number.isFinite(panY) || !Number.isFinite(zoom) || zoom <= 0) {
+			return null;
+		}
+		return { panX, panY, zoom };
+	};
+
+	const sanitizePageViewsByPageId = (
+		value: unknown
+	): Record<string, DashboardPersistedPageView> => {
+		if (!isRecord(value)) {
+			return {};
+		}
+		const nextEntries: Array<[string, DashboardPersistedPageView]> = [];
+		for (const [pageId, rawPageView] of Object.entries(value)) {
+			const pageView = sanitizePersistedPageView(rawPageView);
+			if (!pageView) {
+				continue;
+			}
+			nextEntries.push([pageId, pageView]);
+		}
+		return Object.fromEntries(nextEntries);
+	};
+
+	const samePersistedPageView = (
+		left: DashboardPersistedPageView | null | undefined,
+		right: DashboardPersistedPageView | null | undefined
+	): boolean => {
+		return (
+			(left?.panX ?? 0) === (right?.panX ?? 0) &&
+			(left?.panY ?? 0) === (right?.panY ?? 0) &&
+			(left?.zoom ?? 1) === (right?.zoom ?? 1)
+		);
+	};
 
 	export const setPanelState = (next: PanelState): void => {
 		panel = next;
@@ -35,6 +95,12 @@
 	let session = $derived(appState.session);
 	let graph = $derived(session?.graph.state ?? null);
 	let panelParams = $derived((panel.params ?? {}) as DashboardPanelParams);
+	let persistedPanelState = $derived.by(() =>
+		readPanelPersistedState<DashboardPanelPersistedState>(panel.params)
+	);
+	let pageViewsByPageId = $derived.by(() =>
+		sanitizePageViewsByPageId(persistedPanelState.pageViewsByPageId)
+	);
 	let selectedNode = $derived.by((): UiNodeDto | null => {
 		if (!graph || session?.selectedNodeId === null || session?.selectedNodeId === undefined) {
 			return null;
@@ -151,12 +217,65 @@
 		updatePanelParams({ pageNodeId: page.node_id });
 	};
 
-	const toggleEditMode = (): void => {
-		updatePanelParams({ editMode: !(panelParams.editMode ?? false) });
+	const setEditMode = (nextEditMode: boolean): void => {
+		if (!nextEditMode) {
+			session?.clearSelection();
+		}
+		updatePanelParams({ editMode: nextEditMode });
 	};
+
+	const toggleEditMode = (): void => {
+		setEditMode(!(panelParams.editMode ?? false));
+	};
+
+	const handlePersistedPageViewChange = (
+		pageNodeId: NodeId,
+		nextPageView: DashboardPersistedPageView
+	): void => {
+		const pageKey = String(pageNodeId);
+		const currentPageView = pageViewsByPageId[pageKey] ?? null;
+		if (samePersistedPageView(currentPageView, nextPageView)) {
+			return;
+		}
+		writePanelPersistedState(panelApi, {
+			pageViewsByPageId: {
+				...pageViewsByPageId,
+				[pageKey]: nextPageView
+			}
+		});
+	};
+
+	$effect(() => {
+		const unregister = registerCommandHandler(
+			'dashboard.toggleEditMode',
+			() => {
+				if (!isPanelFocused) {
+					return false;
+				}
+				toggleEditMode();
+				return true;
+			},
+			{ priority: 220 }
+		);
+
+		return () => {
+			unregister();
+		};
+	});
 </script>
 
-<div class="dashboard-panel">
+<div
+	class="dashboard-panel"
+	onfocusin={() => {
+		isPanelFocused = true;
+	}}
+	onfocusout={(event) => {
+		const nextTarget = event.relatedTarget;
+		if (nextTarget instanceof Node && (event.currentTarget as HTMLElement).contains(nextTarget)) {
+			return;
+		}
+		isPanelFocused = false;
+	}}>
 	{#if dashboards.length === 0}
 		<div class="dashboard-empty-state">
 			<h3>No dashboard nodes are available</h3>
@@ -199,7 +318,11 @@
 
 			<div class="dashboard-main-content">
 				{#if selectedPage}
-					<DashboardCanvas node={selectedPage} editMode={panelParams.editMode ?? false} />
+					<DashboardCanvas
+						node={selectedPage}
+						editMode={panelParams.editMode ?? false}
+						persistedPageView={pageViewsByPageId[String(selectedPage.node_id)] ?? null}
+						onPersistedPageViewChange={handlePersistedPageViewChange} />
 				{:else}
 					<div class="dashboard-empty-state inline">
 						<span class="eyebrow">Pages</span>

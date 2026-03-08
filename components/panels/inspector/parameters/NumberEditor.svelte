@@ -5,8 +5,15 @@
 	import { createUiEditSession, sendSetParamIntent } from '$lib/golden_ui/store/ui-intents';
 	import type { UiNodeDto } from '$lib/golden_ui/types';
 
-	let { node } = $props<{
+	interface NumberEditorPresentation {
+		show_value_field?: boolean;
+		max_decimals?: number;
+	}
+
+	let { node, layoutMode = 'default', presentation = {} } = $props<{
 		node: UiNodeDto;
+		layoutMode?: 'default' | 'widget';
+		presentation?: NumberEditorPresentation;
 	}>();
 
 	let session = $derived(appState.session);
@@ -37,6 +44,13 @@
 	let isEditing = $state(false);
 	let editSession = createUiEditSession('Edit number', 'param-number');
 	const NUMERIC_EPSILON = 1e-9;
+	let showValueField = $derived(presentation.show_value_field !== false);
+	let fractionDigits = $derived(isInteger ? 0 : Math.max(0, Math.min(8, Math.round(presentation.max_decimals ?? 3))));
+	let fieldStep = $derived(
+		isInteger ? 1 : fractionDigits <= 0 ? 1 : Number(`1e-${fractionDigits}`)
+	);
+	let formattedDraftValue = $derived(draftValue.toFixed(fractionDigits));
+	let formattedValue = $derived(value.toFixed(fractionDigits));
 
 	$effect(() => {
 		if (isEditing) {
@@ -139,7 +153,7 @@
 		if (Number.isFinite(parsedValue)) {
 			commitValue(parsedValue);
 		} else {
-			numberInput.value = draftValue.toFixed(isInteger ? 0 : 3);
+			numberInput.value = formattedDraftValue;
 		}
 	}
 
@@ -160,7 +174,7 @@
 	};
 </script>
 
-<div class="number-property-container" class:infinite={!hasRange}>
+<div class="number-property-container" class:infinite={!hasRange} class:widget-layout={layoutMode === 'widget'}>
 	<div class="slider-wrapper">
 		<Slider
 			bind:value={draftValue}
@@ -177,25 +191,27 @@
 			onEndEdit={endEdit} />
 	</div>
 
-	<input
-		bind:this={numberInput}
-		type="number"
-		step={isInteger ? 1 : 0.01}
-		class="number-field"
-		disabled={!enabled}
-		class:readonly={readOnly}
-		value={draftValue.toFixed(isInteger ? 0 : 3)}
-		onblur={setValueFromField}
-		onkeydown={(event) => {
-			if (event.key === 'Enter') {
-				numberInput?.blur();
-			} else if (event.key === 'Escape') {
-				if (numberInput) {
-					numberInput.value = value.toFixed(isInteger ? 0 : 3);
-					numberInput.blur();
+	{#if showValueField}
+		<input
+			bind:this={numberInput}
+			type="number"
+			step={fieldStep}
+			class="number-field"
+			disabled={!enabled}
+			class:readonly={readOnly}
+			value={formattedDraftValue}
+			onblur={setValueFromField}
+			onkeydown={(event) => {
+				if (event.key === 'Enter') {
+					numberInput?.blur();
+				} else if (event.key === 'Escape') {
+					if (numberInput) {
+						numberInput.value = formattedValue;
+						numberInput.blur();
+					}
 				}
-			}
-		}} />
+			}} />
+	{/if}
 </div>
 
 <style>
@@ -204,6 +220,7 @@
 		flex-grow: 1;
 		justify-content: right;
 		height: 70%;
+		min-width: 0;
 	}
 
 	.number-property-container {
@@ -213,6 +230,16 @@
 		gap: 0.25rem;
 		width: 100%;
 		height: 1.2rem;
+	}
+
+	.number-property-container.widget-layout {
+		height: 100%;
+		align-items: stretch;
+		gap: 0.5rem;
+	}
+
+	.number-property-container.widget-layout .slider-wrapper {
+		height: 100%;
 	}
 
 	.number-field {
@@ -225,6 +252,12 @@
 
 	.infinite .number-field {
 		width: 100%;
+	}
+
+	.number-property-container.widget-layout .number-field {
+		width: clamp(4.5rem, 28%, 8rem);
+		max-width: none;
+		margin-left: 0;
 	}
 
 	input::-webkit-outer-spin-button,

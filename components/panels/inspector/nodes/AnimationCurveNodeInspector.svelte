@@ -116,6 +116,7 @@
 			selected_key_id = filtered_selection[0];
 		}
 	});
+
 </script>
 
 {#snippet curveHeaderExtra()}
@@ -166,31 +167,57 @@
 	.animation-curve-node-inspector {
 		display: flex;
 		flex-direction: column;
+		gap: 0.6rem;
 		height: 100%;
+		width: 100%;
+		max-width: 100%;
+		min-inline-size: 0;
+		min-block-size: 0;
+		box-sizing: border-box;
+		overflow: hidden;
 	}
 
 	.curve-editor {
-		min-height: 50%;
+		flex: 0 0 auto;
+		inline-size: 100%;
+		max-inline-size: 100%;
+		min-inline-size: 0;
+		box-sizing: border-box;
+		overflow: hidden;
+	}
+
+	.curve-editor :global(.curve-canvas-container),
+	.curve-editor :global(.curve-canvas-wrap) {
+		inline-size: 100%;
+		max-inline-size: 100%;
+		min-inline-size: 0;
 		overflow: hidden;
 	}
 
 	.curve-params-editor {
 		display: flex;
 		flex-direction: column;
+		flex: 1 1 auto;
+		min-inline-size: 0;
+		min-block-size: 0;
+		overflow: auto;
 	}
 
 	.range-node-inspector {
 		overflow: auto;
+		min-inline-size: 0;
 	}
 
 	.selected-key-node-inspector {
 		overflow: auto;
-		height:100%;
+		height: 100%;
+		min-inline-size: 0;
 	}
 
 	.selected-curve-node-inspector {
 		overflow: auto;
 		height: 100%;
+		min-inline-size: 0;
 	}
 
 	.empty-state {

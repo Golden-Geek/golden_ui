@@ -1507,7 +1507,7 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 
 		unregisterCommands = registerWorkbenchCommandHandlers();
 		if (typeof window !== 'undefined') {
-			window.addEventListener('keydown', onWindowKeydown);
+			window.addEventListener('keydown', onWindowKeydown, true);
 		}
 		void bootstrap();
 
@@ -1516,7 +1516,7 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 			clearRetry();
 			rejectQueuedIntents(new Error('workbench session unmounted'));
 			if (typeof window !== 'undefined') {
-				window.removeEventListener('keydown', onWindowKeydown);
+				window.removeEventListener('keydown', onWindowKeydown, true);
 			}
 			unregisterCommands();
 			unsubscribe();

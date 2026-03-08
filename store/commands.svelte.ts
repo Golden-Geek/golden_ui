@@ -4,6 +4,7 @@ export type CommandId =
 	| 'edit.deleteSelection'
 	| 'view.frame'
 	| 'view.home'
+	| 'dashboard.toggleEditMode'
 	| 'select.all'
 	| 'edit.copy'
 	| 'edit.cut'
@@ -58,6 +59,11 @@ const commandDefinitions: CommandDefinition[] = [
 		id: 'view.home',
 		label: 'Home',
 		shortcuts: [{ key: 'h' }]
+	},
+	{
+		id: 'dashboard.toggleEditMode',
+		label: 'Toggle Dashboard Edit Mode',
+		shortcuts: [{ key: 'e', mod: true }]
 	},
 	{
 		id: 'select.all',

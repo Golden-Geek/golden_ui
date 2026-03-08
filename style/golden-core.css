@@ -17,6 +17,12 @@ html {
     background: transparent;
 }
 
+*:focus,
+*:focus-visible {
+    border: none;
+    outline: none;
+}
+
 
 
 /* MAIN LAYOUT */
@@ -523,8 +529,10 @@ select {
     }
 
     .dv-tabs-and-actions-container {
-        align-items: center;;
+        align-items: center;
+        ;
     }
+
     .dv-tabs-and-actions-container .dv-tabs-container>.dv-tab {
         transition: background-color .2s, color .2s;
     }

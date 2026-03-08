@@ -1,9 +1,9 @@
 <script lang="ts">
 	import { onDestroy } from 'svelte';
 	import { registerCommandHandler } from '$lib/golden_ui/store/commands.svelte';
-	import { appState } from '$lib/golden_ui/store/workbench.svelte';
+	import { appState, type SelectionMode } from '$lib/golden_ui/store/workbench.svelte';
 	import { createUiEditSession, sendSetParamIntent } from '$lib/golden_ui/store/ui-intents';
-	import type { NodeId, ParamValue, UiNodeDto } from '$lib/golden_ui/types';
+	import type { NodeId, ParamEventBehaviour, ParamValue, UiNodeDto } from '$lib/golden_ui/types';
 	import {
 		cssValueToPx,
 		formatCssValue,
@@ -14,12 +14,16 @@
 	} from '$lib/golden_ui/css-value';
 	import DashboardCanvasSelf from './DashboardCanvas.svelte';
 	import { resolveDashboardNodeWidgetDisplayMode } from './dashboard-node-widget-registry';
+	import DashboardNodeWidgetParameterEditorContent from './DashboardNodeWidgetParameterEditorContent.svelte';
 
 	import {
 		bindDashboardGenericWidgetTarget,
 		bindDashboardNodeWidgetTarget,
 		createDashboardGenericWidget,
-		createDashboardNodeWidget
+		createDashboardNodeWidget,
+		getDashboardGenericWidgetCreationDefaults,
+		getDashboardNodeWidgetCreationDefaults,
+		type DashboardWidgetCreationPlacement
 	} from './dashboard-actions';
 	import { readDashboardDragPayload, type DashboardDragPayload } from './dashboard-drag';
 	import {
@@ -36,10 +40,38 @@
 		getGap,
 		getGridColumns,
 		resolveReferenceTarget,
+		type DashboardPlacement,
 		type DashboardLayoutKind
 	} from './dashboard-model';
 
-	let { node, editMode = false } = $props<{ node: UiNodeDto; editMode?: boolean }>();
+	type DashboardPersistedPageView = {
+		panX: number;
+		panY: number;
+		zoom: number;
+	};
+
+	type DashboardPersistedPageViewChangeHandler = (
+		pageNodeId: NodeId,
+		nextPageView: DashboardPersistedPageView
+	) => void;
+
+	type SurfaceDropPreview = {
+		label: string;
+		targetKind: DashboardDragPayload['kind'];
+		placement: DashboardWidgetCreationPlacement;
+	};
+
+	let {
+		node,
+		editMode = false,
+		persistedPageView = null,
+		onPersistedPageViewChange = null
+	} = $props<{
+		node: UiNodeDto;
+		editMode?: boolean;
+		persistedPageView?: DashboardPersistedPageView | null;
+		onPersistedPageViewChange?: DashboardPersistedPageViewChangeHandler | null;
+	}>();
 
 	let session = $derived(appState.session);
 	let graph = $derived(session?.graph.state ?? null);
@@ -71,7 +103,24 @@
 	let bindingDragDepth = $state(0);
 	let isPageViewportFocused = $state(false);
 	let pageViewportElement = $state<HTMLDivElement | null>(null);
+	let widgetShellElement = $state<HTMLElement | null>(null);
 	let pageViewportSize = $state({ width: 0, height: 0 });
+	let surfaceDropPreview = $state<SurfaceDropPreview | null>(null);
+	let pendingPersistedPageView = $state<DashboardPersistedPageView | null>(null);
+	let appliedPersistedPageView = $state<DashboardPersistedPageView | null>(null);
+	type ObservedAnchorPlacement = {
+		nodeId: NodeId;
+		anchor: DashboardAnchor;
+		position: { x: number; y: number };
+		size: { width: CssValueData; height: CssValueData };
+	};
+	type AnchorGuideAxis = 'horizontal' | 'vertical';
+	type AnchorGuideDirection = 'left' | 'right' | 'up' | 'down';
+	type AnchorGuide = {
+		axis: AnchorGuideAxis;
+		direction: AnchorGuideDirection;
+		style: string;
+	};
 
 	type FreeLayoutInteractionMode = 'move' | 'resize';
 	type FreeLayoutResizeEdges = {
@@ -84,13 +133,34 @@
 		position: { x: number; y: number };
 		size: { width: CssValueData; height: CssValueData };
 	};
+	type FreeLayoutTarget = {
+		nodeId: NodeId;
+		anchor: DashboardAnchor;
+		positionParamNodeId: NodeId | null;
+		positionParamBehaviour: ParamEventBehaviour | null;
+		widthParamNodeId: NodeId | null;
+		widthParamBehaviour: ParamEventBehaviour | null;
+		heightParamNodeId: NodeId | null;
+		heightParamBehaviour: ParamEventBehaviour | null;
+		startPreview: FreeLayoutPreview;
+		startRect: FreeLayoutRect;
+	};
+	type FreeLayoutTargetPreview = {
+		target: FreeLayoutTarget;
+		preview: FreeLayoutPreview;
+	};
+	type FreeLayoutPreviewSet = {
+		primaryNodeId: NodeId;
+		previews: FreeLayoutTargetPreview[];
+	};
 	type FreeLayoutInteraction = {
 		pointerId: number;
 		mode: FreeLayoutInteractionMode;
 		resizeEdges: FreeLayoutResizeEdges | null;
+		primaryNodeId: NodeId;
+		selectionRect: FreeLayoutRect;
+		targets: FreeLayoutTarget[];
 		startClient: [number, number];
-		startPosition: { x: number; y: number };
-		startSize: { width: CssValueData; height: CssValueData };
 		rootRemPx: number;
 		surfaceWidthPx: number;
 		surfaceHeightPx: number;
@@ -122,9 +192,19 @@
 		name: string;
 		edges: FreeLayoutResizeEdges;
 	};
+	type MarqueeSelectionState = {
+		pointerId: number;
+		surfaceNodeId: NodeId;
+		surfaceElement: HTMLElement;
+		startClient: [number, number];
+		currentClient: [number, number];
+		baseSelection: NodeId[];
+		selectionMode: SelectionMode;
+	};
 
 	let freeLayoutInteraction = $state<FreeLayoutInteraction | null>(null);
-	let freeLayoutPreview = $state<FreeLayoutPreview | null>(null);
+	let freeLayoutPreview = $state<FreeLayoutPreviewSet | null>(null);
+	let marqueeSelection = $state<MarqueeSelectionState | null>(null);
 	let pageView = $state<DashboardPageViewState>({
 		pointerId: null,
 		lastClient: null,
@@ -133,8 +213,8 @@
 		zoom: 1
 	});
 
-	const minFreeWidgetWidthRem = 6.5;
-	const minFreeWidgetHeightRem = 2.8;
+	const minFreeWidgetWidthRem = 0.5;
+	const minFreeWidgetHeightRem = 0.5;
 	const freeLayoutResizeZones: FreeLayoutResizeZone[] = [
 		{ name: 'north-west', edges: { left: true, right: false, top: true, bottom: false } },
 		{ name: 'north', edges: { left: false, right: false, top: true, bottom: false } },
@@ -147,12 +227,12 @@
 	];
 	const minPageZoom = 0.25;
 	const maxPageZoom = 4;
-
 	let freeLayoutCommitFrame: number | null = null;
 	let freeLayoutCommitInFlight = false;
-	let pendingFreeLayoutCommit: FreeLayoutPreview | null = null;
-	let lastCommittedFreeLayoutPreview: FreeLayoutPreview | null = null;
+	let pendingFreeLayoutCommit: FreeLayoutPreviewSet | null = null;
+	let lastCommittedFreeLayoutPreview: FreeLayoutPreviewSet | null = null;
 	let freeLayoutEditSession: ReturnType<typeof createUiEditSession> | null = null;
+	let observedAnchorPlacementCache: ObservedAnchorPlacement | null = null;
 
 	const getGraph = () => appState.session?.graph.state ?? null;
 
@@ -182,14 +262,137 @@
 			return { width: getViewportWidthPx(), height: 20 * rootRemPx, scaleX: 1, scaleY: 1 };
 		}
 		const rect = surface.getBoundingClientRect();
-		const layoutWidth = surface instanceof HTMLElement ? Math.max(surface.clientWidth, 1) : Math.max(rect.width, 1);
-		const layoutHeight = surface instanceof HTMLElement ? Math.max(surface.clientHeight, 1) : Math.max(rect.height, 1);
+		const layoutWidth =
+			surface instanceof HTMLElement ? Math.max(surface.clientWidth, 1) : Math.max(rect.width, 1);
+		const layoutHeight =
+			surface instanceof HTMLElement ? Math.max(surface.clientHeight, 1) : Math.max(rect.height, 1);
 		return {
 			width: Math.max(layoutWidth, rootRemPx),
 			height: Math.max(layoutHeight, rootRemPx),
 			scaleX: Math.max(rect.width, 1) / layoutWidth,
 			scaleY: Math.max(rect.height, 1) / layoutHeight
 		};
+	};
+
+	const getElementSurfaceMetrics = (element: HTMLElement, rootRemPx: number): SurfaceMetrics => {
+		const rect = element.getBoundingClientRect();
+		const layoutWidth = Math.max(element.clientWidth, 1);
+		const layoutHeight = Math.max(element.clientHeight, 1);
+		return {
+			width: Math.max(layoutWidth, rootRemPx),
+			height: Math.max(layoutHeight, rootRemPx),
+			scaleX: Math.max(rect.width, 1) / layoutWidth,
+			scaleY: Math.max(rect.height, 1) / layoutHeight
+		};
+	};
+
+	const getDirectDashboardLayoutElement = (surface: EventTarget | null): HTMLElement | null => {
+		if (!(surface instanceof HTMLElement)) {
+			return null;
+		}
+		for (const child of Array.from(surface.children)) {
+			if (child instanceof HTMLElement && child.classList.contains('dashboard-layout')) {
+				return child;
+			}
+		}
+		return null;
+	};
+
+	const selectionModeFromEvent = (
+		event: Pick<MouseEvent, 'ctrlKey' | 'metaKey' | 'shiftKey'>
+	): SelectionMode => {
+		if (event.ctrlKey || event.metaKey) {
+			return 'TOGGLE';
+		}
+		if (event.shiftKey) {
+			return 'ADD';
+		}
+		return 'REPLACE';
+	};
+
+	const isInteractiveSurfaceTarget = (target: EventTarget | null): boolean => {
+		if (!(target instanceof Element)) {
+			return false;
+		}
+		return Boolean(
+			target.closest(
+				'button, input, textarea, select, option, label, a, [contenteditable="true"], [role="button"]'
+			)
+		);
+	};
+
+	const normalizeClientRect = (
+		startClient: [number, number],
+		currentClient: [number, number]
+	): FreeLayoutRect => {
+		const left = Math.min(startClient[0], currentClient[0]);
+		const top = Math.min(startClient[1], currentClient[1]);
+		return {
+			left,
+			top,
+			width: Math.abs(currentClient[0] - startClient[0]),
+			height: Math.abs(currentClient[1] - startClient[1])
+		};
+	};
+
+	const rectsIntersect = (
+		left: DOMRect | FreeLayoutRect,
+		right: DOMRect | FreeLayoutRect
+	): boolean => {
+		return (
+			left.left < right.left + right.width &&
+			left.left + left.width > right.left &&
+			left.top < right.top + right.height &&
+			left.top + left.height > right.top
+		);
+	};
+
+	const collectMarqueeNodeIds = (selection: MarqueeSelectionState): NodeId[] => {
+		const childNodeIdByString = new Map(
+			childWidgets.map((child) => [String(child.node_id), child.node_id])
+		);
+		const selector = `.dashboard-widget-shell[data-dashboard-surface-id="${String(selection.surfaceNodeId)}"]`;
+		const selectionRect = normalizeClientRect(selection.startClient, selection.currentClient);
+		const nodeIds: NodeId[] = [];
+		for (const element of selection.surfaceElement.querySelectorAll<HTMLElement>(selector)) {
+			const nodeId = childNodeIdByString.get(element.dataset.nodeId ?? '');
+			if (nodeId === undefined) {
+				continue;
+			}
+			const rect = element.getBoundingClientRect();
+			if (rect.width <= 0 || rect.height <= 0) {
+				continue;
+			}
+			if (!rectsIntersect(selectionRect, rect)) {
+				continue;
+			}
+			nodeIds.push(nodeId);
+		}
+		return nodeIds;
+	};
+
+	const applyMarqueeSelection = (selection: MarqueeSelectionState): void => {
+		const intersectingNodeIds = collectMarqueeNodeIds(selection);
+		let nextSelection = intersectingNodeIds;
+		if (selection.selectionMode === 'ADD') {
+			nextSelection = [...selection.baseSelection];
+			for (const nodeId of intersectingNodeIds) {
+				if (!nextSelection.includes(nodeId)) {
+					nextSelection.push(nodeId);
+				}
+			}
+		} else if (selection.selectionMode === 'TOGGLE') {
+			const toggled = new Set(selection.baseSelection);
+			for (const nodeId of intersectingNodeIds) {
+				if (toggled.has(nodeId)) {
+					toggled.delete(nodeId);
+				} else {
+					toggled.add(nodeId);
+				}
+			}
+			nextSelection = Array.from(toggled);
+		}
+		session?.selectNodes(nextSelection, 'REPLACE');
 	};
 
 	const canScrollAxis = (element: HTMLElement, axis: 'x' | 'y', delta: number): boolean => {
@@ -264,6 +467,14 @@
 		return true;
 	};
 
+	const isFreeLayoutTransformableWidget = (candidate: UiNodeDto): boolean => {
+		return (
+			candidate.node_type === 'dashboard_widget_container' ||
+			candidate.node_type === 'dashboard_node_widget' ||
+			candidate.node_type === 'dashboard_generic_widget'
+		);
+	};
+
 	const cloneFreeLayoutPreview = (preview: FreeLayoutPreview): FreeLayoutPreview => ({
 		position: {
 			x: preview.position.x,
@@ -273,6 +484,40 @@
 			width: { ...preview.size.width },
 			height: { ...preview.size.height }
 		}
+	});
+
+	const cloneFreeLayoutPreviewSet = (previewSet: FreeLayoutPreviewSet): FreeLayoutPreviewSet => ({
+		primaryNodeId: previewSet.primaryNodeId,
+		previews: previewSet.previews.map((entry) => ({
+			target: entry.target,
+			preview: cloneFreeLayoutPreview(entry.preview)
+		}))
+	});
+
+	const resolveFreeLayoutPreview = (
+		previewSet: FreeLayoutPreviewSet | null,
+		nodeId: NodeId
+	): FreeLayoutPreview | null => {
+		if (!previewSet) {
+			return null;
+		}
+		for (const entry of previewSet.previews) {
+			if (entry.target.nodeId === nodeId) {
+				return entry.preview;
+			}
+		}
+		return null;
+	};
+
+	const buildPreviewSetFromTargets = (
+		primaryNodeId: NodeId,
+		targets: FreeLayoutTarget[]
+	): FreeLayoutPreviewSet => ({
+		primaryNodeId,
+		previews: targets.map((target) => ({
+			target,
+			preview: cloneFreeLayoutPreview(target.startPreview)
+		}))
 	});
 
 	const currentPlacementPreview = (): FreeLayoutPreview => ({
@@ -289,21 +534,13 @@
 	const sameCssValue = (left: CssValueData, right: CssValueData): boolean =>
 		left.value === right.value && left.unit === right.unit;
 
-	const samePosition = (
-		left: { x: number; y: number },
-		right: { x: number; y: number }
-	): boolean => left.x === right.x && left.y === right.y;
+	const samePosition = (left: { x: number; y: number }, right: { x: number; y: number }): boolean =>
+		left.x === right.x && left.y === right.y;
 
-	const isSameFreeLayoutPreview = (left: FreeLayoutPreview | null, right: FreeLayoutPreview | null): boolean => {
-		if (!left || !right) {
-			return left === right;
-		}
-		return (
-			samePosition(left.position, right.position) &&
-			sameCssValue(left.size.width, right.size.width) &&
-			sameCssValue(left.size.height, right.size.height)
-		);
-	};
+	const samePlacementSize = (
+		left: { width: CssValueData; height: CssValueData },
+		right: { width: CssValueData; height: CssValueData }
+	): boolean => sameCssValue(left.width, right.width) && sameCssValue(left.height, right.height);
 
 	const snapToGridPx = (valuePx: number, snapPx: number): number => {
 		if (!(snapPx > 0)) {
@@ -332,7 +569,10 @@
 		return 'top';
 	};
 
-	const anchorBasePx = (anchor: 'left' | 'center' | 'right' | 'top' | 'center' | 'bottom', axisExtentPx: number): number => {
+	const anchorBasePx = (
+		anchor: 'left' | 'center' | 'right' | 'top' | 'center' | 'bottom',
+		axisExtentPx: number
+	): number => {
 		if (anchor === 'center') {
 			return axisExtentPx * 0.5;
 		}
@@ -342,7 +582,10 @@
 		return 0;
 	};
 
-	const anchorOffsetPx = (anchor: 'left' | 'center' | 'right' | 'top' | 'center' | 'bottom', sizePx: number): number => {
+	const anchorOffsetPx = (
+		anchor: 'left' | 'center' | 'right' | 'top' | 'center' | 'bottom',
+		sizePx: number
+	): number => {
 		if (anchor === 'center') {
 			return sizePx * 0.5;
 		}
@@ -352,7 +595,9 @@
 		return 0;
 	};
 
-	const anchorBaseExpression = (anchor: 'left' | 'center' | 'right' | 'top' | 'center' | 'bottom'): string => {
+	const anchorBaseExpression = (
+		anchor: 'left' | 'center' | 'right' | 'top' | 'center' | 'bottom'
+	): string => {
 		if (anchor === 'center') {
 			return '50%';
 		}
@@ -368,7 +613,10 @@
 			size: { width: CssValueData; height: CssValueData };
 			anchor: DashboardAnchor;
 		},
-		interaction: Pick<FreeLayoutInteraction, 'surfaceWidthPx' | 'surfaceHeightPx' | 'rootRemPx' | 'viewportWidthPx' | 'viewportHeightPx'>
+		interaction: Pick<
+			FreeLayoutInteraction,
+			'surfaceWidthPx' | 'surfaceHeightPx' | 'rootRemPx' | 'viewportWidthPx' | 'viewportHeightPx'
+		>
 	): FreeLayoutRect => {
 		const xContext = createCssUnitContext(interaction, 'x');
 		const yContext = createCssUnitContext(interaction, 'y');
@@ -391,7 +639,10 @@
 	const freeLayoutPreviewFromRect = (
 		rect: FreeLayoutRect,
 		anchor: DashboardAnchor,
-		interaction: Pick<FreeLayoutInteraction, 'surfaceWidthPx' | 'surfaceHeightPx' | 'rootRemPx' | 'viewportWidthPx' | 'viewportHeightPx'>,
+		interaction: Pick<
+			FreeLayoutInteraction,
+			'surfaceWidthPx' | 'surfaceHeightPx' | 'rootRemPx' | 'viewportWidthPx' | 'viewportHeightPx'
+		>,
 		positionTemplate: { x: number; y: number },
 		sizeTemplate: { width: CssValueData; height: CssValueData }
 	): FreeLayoutPreview => {
@@ -413,7 +664,257 @@
 		};
 	};
 
-	const clampPageZoom = (zoom: number): number => Math.min(maxPageZoom, Math.max(minPageZoom, zoom));
+	const clampPageZoom = (zoom: number): number =>
+		Math.min(maxPageZoom, Math.max(minPageZoom, zoom));
+
+	const resolveSelectedFreeLayoutWidgets = (): UiNodeDto[] => {
+		if (!graph || !parentNode || !session) {
+			return [];
+		}
+		const selectedNodeIds = new Set(session.selectedNodesIds);
+		return getDirectItemChildren(graph, parentNode).filter(
+			(candidate) =>
+				selectedNodeIds.has(candidate.node_id) && isFreeLayoutTransformableWidget(candidate)
+		);
+	};
+
+	const resolveTransformNodes = (): UiNodeDto[] => {
+		const selectedWidgets = resolveSelectedFreeLayoutWidgets();
+		if (isSelected && selectedWidgets.length > 1) {
+			return selectedWidgets;
+		}
+		return [liveNode];
+	};
+
+	const buildFreeLayoutTargets = (
+		nodes: UiNodeDto[],
+		interaction: Pick<
+			FreeLayoutInteraction,
+			'rootRemPx' | 'surfaceWidthPx' | 'surfaceHeightPx' | 'viewportWidthPx' | 'viewportHeightPx'
+		>
+	): FreeLayoutTarget[] => {
+		if (!graph) {
+			return [];
+		}
+		const targets: FreeLayoutTarget[] = [];
+		for (const targetNode of nodes) {
+			const targetPlacement = getDashboardPlacement(graph, targetNode);
+			const positionParamNode = getDirectParamNode(graph, targetNode, 'position');
+			const widthParamNode = getDirectParamNode(graph, targetNode, 'width');
+			const heightParamNode = getDirectParamNode(graph, targetNode, 'height');
+			targets.push({
+				nodeId: targetNode.node_id,
+				anchor: targetPlacement.anchor,
+				positionParamNodeId: positionParamNode?.data.kind === 'parameter' ? positionParamNode.node_id : null,
+				positionParamBehaviour:
+					positionParamNode?.data.kind === 'parameter'
+						? positionParamNode.data.param.event_behaviour
+						: null,
+				widthParamNodeId: widthParamNode?.data.kind === 'parameter' ? widthParamNode.node_id : null,
+				widthParamBehaviour:
+					widthParamNode?.data.kind === 'parameter'
+						? widthParamNode.data.param.event_behaviour
+						: null,
+				heightParamNodeId: heightParamNode?.data.kind === 'parameter' ? heightParamNode.node_id : null,
+				heightParamBehaviour:
+					heightParamNode?.data.kind === 'parameter'
+						? heightParamNode.data.param.event_behaviour
+						: null,
+				startPreview: {
+					position: {
+						x: targetPlacement.position.x,
+						y: targetPlacement.position.y
+					},
+					size: {
+						width: { ...targetPlacement.size.width },
+						height: { ...targetPlacement.size.height }
+					}
+				},
+				startRect: freeLayoutRectFromPlacement(targetPlacement, interaction)
+			});
+		}
+		return targets;
+	};
+
+	const buildSelectionRect = (targets: FreeLayoutTarget[]): FreeLayoutRect | null => {
+		if (targets.length === 0) {
+			return null;
+		}
+		let left = Number.POSITIVE_INFINITY;
+		let top = Number.POSITIVE_INFINITY;
+		let right = Number.NEGATIVE_INFINITY;
+		let bottom = Number.NEGATIVE_INFINITY;
+		for (const target of targets) {
+			left = Math.min(left, target.startRect.left);
+			top = Math.min(top, target.startRect.top);
+			right = Math.max(right, target.startRect.left + target.startRect.width);
+			bottom = Math.max(bottom, target.startRect.top + target.startRect.height);
+		}
+		return {
+			left,
+			top,
+			width: Math.max(0, right - left),
+			height: Math.max(0, bottom - top)
+		};
+	};
+
+	const buildFreeLayoutMovePreview = (
+		interaction: FreeLayoutInteraction,
+		deltaXPx: number,
+		deltaYPx: number,
+		snapPx: number
+	): FreeLayoutPreviewSet => {
+		const primaryTarget =
+			interaction.targets.find((target) => target.nodeId === interaction.primaryNodeId) ??
+			interaction.targets[0];
+		let appliedDeltaX = deltaXPx;
+		let appliedDeltaY = deltaYPx;
+		if (snapPx > 0) {
+			appliedDeltaX =
+				snapToGridPx(primaryTarget.startRect.left + appliedDeltaX, snapPx) -
+				primaryTarget.startRect.left;
+			appliedDeltaY =
+				snapToGridPx(primaryTarget.startRect.top + appliedDeltaY, snapPx) -
+				primaryTarget.startRect.top;
+		}
+		appliedDeltaX = Math.max(appliedDeltaX, -interaction.selectionRect.left);
+		appliedDeltaY = Math.max(appliedDeltaY, -interaction.selectionRect.top);
+		return {
+			primaryNodeId: interaction.primaryNodeId,
+			previews: interaction.targets.map((target) => ({
+				target,
+				preview: freeLayoutPreviewFromRect(
+					{
+						...target.startRect,
+						left: target.startRect.left + appliedDeltaX,
+						top: target.startRect.top + appliedDeltaY
+					},
+					target.anchor,
+					interaction,
+					target.startPreview.position,
+					target.startPreview.size
+				)
+			}))
+		};
+	};
+
+	const buildFreeLayoutResizePreview = (
+		interaction: FreeLayoutInteraction,
+		deltaXPx: number,
+		deltaYPx: number,
+		snapPx: number
+	): FreeLayoutPreviewSet | null => {
+		const resizeEdges = interaction.resizeEdges;
+		if (!resizeEdges) {
+			return null;
+		}
+		const minWidthPx = minFreeWidgetWidthRem * interaction.rootRemPx;
+		const minHeightPx = minFreeWidgetHeightRem * interaction.rootRemPx;
+		const startRect = interaction.selectionRect;
+		let requiredScaleX = 0;
+		let requiredScaleY = 0;
+		for (const target of interaction.targets) {
+			requiredScaleX = Math.max(
+				requiredScaleX,
+				target.startRect.width > 1e-6 ? minWidthPx / target.startRect.width : 1
+			);
+			requiredScaleY = Math.max(
+				requiredScaleY,
+				target.startRect.height > 1e-6 ? minHeightPx / target.startRect.height : 1
+			);
+		}
+		const groupMinWidthPx = Math.max(minWidthPx, startRect.width * Math.max(requiredScaleX, 1e-6));
+		const groupMinHeightPx = Math.max(
+			minHeightPx,
+			startRect.height * Math.max(requiredScaleY, 1e-6)
+		);
+		let nextLeftPx = startRect.left;
+		let nextTopPx = startRect.top;
+		let nextWidthPx = startRect.width;
+		let nextHeightPx = startRect.height;
+
+		if (resizeEdges.left) {
+			const appliedDeltaX = Math.min(
+				Math.max(deltaXPx, -nextLeftPx),
+				nextWidthPx - groupMinWidthPx
+			);
+			nextLeftPx += appliedDeltaX;
+			nextWidthPx -= appliedDeltaX;
+		}
+		if (resizeEdges.right) {
+			nextWidthPx = Math.max(groupMinWidthPx, nextWidthPx + deltaXPx);
+		}
+		if (resizeEdges.top) {
+			const appliedDeltaY = Math.min(
+				Math.max(deltaYPx, -nextTopPx),
+				nextHeightPx - groupMinHeightPx
+			);
+			nextTopPx += appliedDeltaY;
+			nextHeightPx -= appliedDeltaY;
+		}
+		if (resizeEdges.bottom) {
+			nextHeightPx = Math.max(groupMinHeightPx, nextHeightPx + deltaYPx);
+		}
+		if (snapPx > 0) {
+			nextLeftPx = snapToGridPx(nextLeftPx, snapPx);
+			nextTopPx = snapToGridPx(nextTopPx, snapPx);
+			nextWidthPx = Math.max(groupMinWidthPx, snapToGridPx(nextWidthPx, snapPx));
+			nextHeightPx = Math.max(groupMinHeightPx, snapToGridPx(nextHeightPx, snapPx));
+		}
+		const scaleX = startRect.width > 1e-6 ? nextWidthPx / startRect.width : 1;
+		const scaleY = startRect.height > 1e-6 ? nextHeightPx / startRect.height : 1;
+		return {
+			primaryNodeId: interaction.primaryNodeId,
+			previews: interaction.targets.map((target) => {
+				const nextRect: FreeLayoutRect = {
+					left: nextLeftPx + (target.startRect.left - startRect.left) * scaleX,
+					top: nextTopPx + (target.startRect.top - startRect.top) * scaleY,
+					width: Math.max(minWidthPx, target.startRect.width * scaleX),
+					height: Math.max(minHeightPx, target.startRect.height * scaleY)
+				};
+				return {
+					target,
+					preview: freeLayoutPreviewFromRect(
+						nextRect,
+						target.anchor,
+						interaction,
+						target.startPreview.position,
+						target.startPreview.size
+					)
+				};
+			})
+		};
+	};
+
+	const sanitizePersistedPageView = (
+		candidate: DashboardPersistedPageView | null | undefined
+	): DashboardPersistedPageView => {
+		const panX = Number(candidate?.panX);
+		const panY = Number(candidate?.panY);
+		const zoom = Number(candidate?.zoom);
+		return {
+			panX: Number.isFinite(panX) ? panX : 0,
+			panY: Number.isFinite(panY) ? panY : 0,
+			zoom: clampPageZoom(Number.isFinite(zoom) && zoom > 0 ? zoom : 1)
+		};
+	};
+
+	const samePersistedPageView = (
+		left: DashboardPersistedPageView | null | undefined,
+		right: DashboardPersistedPageView | null | undefined
+	): boolean => {
+		return (
+			(left?.panX ?? 0) === (right?.panX ?? 0) &&
+			(left?.panY ?? 0) === (right?.panY ?? 0) &&
+			(left?.zoom ?? 1) === (right?.zoom ?? 1)
+		);
+	};
+
+	const currentPersistedPageView = (): DashboardPersistedPageView => ({
+		panX: pageView.panX,
+		panY: pageView.panY,
+		zoom: clampPageZoom(pageView.zoom)
+	});
 
 	const homePageView = (): void => {
 		pageView = {
@@ -433,7 +934,10 @@
 			activeTabNodeId = null;
 			return;
 		}
-		if (activeTabNodeId !== null && childWidgets.some((candidate) => candidate.node_id === activeTabNodeId)) {
+		if (
+			activeTabNodeId !== null &&
+			childWidgets.some((candidate) => candidate.node_id === activeTabNodeId)
+		) {
 			return;
 		}
 		activeTabNodeId = childWidgets[0]?.node_id ?? null;
@@ -444,7 +948,9 @@
 			return;
 		}
 		const availableIds = new Set(childWidgets.map((candidate) => candidate.node_id));
-		let nextOpenAccordionNodeIds = openAccordionNodeIds.filter((nodeId) => availableIds.has(nodeId));
+		let nextOpenAccordionNodeIds = openAccordionNodeIds.filter((nodeId) =>
+			availableIds.has(nodeId)
+		);
 		if (nextOpenAccordionNodeIds.length === 0 && childWidgets.length > 0) {
 			nextOpenAccordionNodeIds = [childWidgets[0].node_id];
 		}
@@ -456,7 +962,49 @@
 
 	$effect(() => {
 		void liveNode.node_id;
-		homePageView();
+		pendingPersistedPageView = null;
+		appliedPersistedPageView = null;
+	});
+
+	$effect(() => {
+		if (!isPage) {
+			return;
+		}
+		const nextPageView = sanitizePersistedPageView(persistedPageView);
+		if (appliedPersistedPageView && samePersistedPageView(nextPageView, appliedPersistedPageView)) {
+			return;
+		}
+		appliedPersistedPageView = nextPageView;
+		if (pendingPersistedPageView && samePersistedPageView(nextPageView, pendingPersistedPageView)) {
+			pendingPersistedPageView = null;
+			return;
+		}
+		if (pageView.pointerId !== null || pendingPersistedPageView) {
+			return;
+		}
+		pageView = {
+			pointerId: null,
+			lastClient: null,
+			panX: nextPageView.panX,
+			panY: nextPageView.panY,
+			zoom: nextPageView.zoom
+		};
+	});
+
+	$effect(() => {
+		if (!isPage || !onPersistedPageViewChange || pageView.pointerId !== null) {
+			return;
+		}
+		const nextPageView = currentPersistedPageView();
+		if (samePersistedPageView(nextPageView, sanitizePersistedPageView(persistedPageView))) {
+			pendingPersistedPageView = null;
+			return;
+		}
+		if (pendingPersistedPageView && samePersistedPageView(nextPageView, pendingPersistedPageView)) {
+			return;
+		}
+		pendingPersistedPageView = nextPageView;
+		onPersistedPageViewChange(liveNode.node_id, nextPageView);
 	});
 
 	$effect(() => {
@@ -479,11 +1027,11 @@
 		};
 	});
 
-	const selectWidgetNode = (): void => {
+	const selectWidgetNode = (selectionMode: SelectionMode = 'REPLACE'): void => {
 		if (!editMode) {
 			return;
 		}
-		session?.selectNode(liveNode.node_id, 'REPLACE');
+		session?.selectNode(liveNode.node_id, selectionMode);
 	};
 
 	const selectWidgetNodeFromKeyboard = (event: KeyboardEvent): void => {
@@ -491,7 +1039,7 @@
 			return;
 		}
 		event.preventDefault();
-		selectWidgetNode();
+		selectWidgetNode(selectionModeFromEvent(event));
 	};
 
 	const resolveDraggedNode = (payload: DashboardDragPayload | null): UiNodeDto | null => {
@@ -533,33 +1081,88 @@
 		return editMode && resolveDraggedParameterNode(payload) !== null;
 	};
 
+	const buildSurfaceDropPreview = (
+		event: DragEvent,
+		payload: DashboardDragPayload | null
+	): SurfaceDropPreview | null => {
+		if (layoutKind !== 'free' || !payload) {
+			return null;
+		}
+		const targetNode =
+			payload.kind === 'parameter'
+				? resolveDraggedParameterNode(payload)
+				: resolveDraggedNode(payload);
+		if (!targetNode) {
+			return null;
+		}
+		const layoutElement = getDirectDashboardLayoutElement(event.currentTarget);
+		if (!layoutElement) {
+			return null;
+		}
+		const rootRemPx = getRootRemPixels();
+		const metrics = getElementSurfaceMetrics(layoutElement, rootRemPx);
+		const rect = layoutElement.getBoundingClientRect();
+		const centerPx = {
+			x: (event.clientX - rect.left) / Math.max(metrics.scaleX, 1e-6),
+			y: (event.clientY - rect.top) / Math.max(metrics.scaleY, 1e-6)
+		};
+		const context = {
+			rootRemPx,
+			surfaceWidthPx: metrics.width,
+			surfaceHeightPx: metrics.height,
+			viewportWidthPx: getViewportWidthPx(),
+			viewportHeightPx: getViewportHeightPx()
+		};
+		const snapPx = surfaceSnapGrid.enabled ? surfaceSnapGrid.step * rootRemPx : 0;
+		const placement =
+			payload.kind === 'parameter'
+				? getDashboardGenericWidgetCreationDefaults(targetNode, context, { centerPx, snapPx })
+						.placement
+				: getDashboardNodeWidgetCreationDefaults(targetNode, context, { centerPx, snapPx });
+		return {
+			label: targetNode.meta.label,
+			targetKind: payload.kind,
+			placement
+		};
+	};
+
 	const handleSurfaceDragEnter = (event: DragEvent): void => {
 		const payload = readDashboardDragPayload(event);
 		if (!canCreateFromDrop(payload)) {
+			surfaceDropPreview = null;
 			return;
 		}
 		event.preventDefault();
 		surfaceDragDepth += 1;
+		surfaceDropPreview = buildSurfaceDropPreview(event, payload);
 	};
 
 	const handleSurfaceDragOver = (event: DragEvent): void => {
 		const payload = readDashboardDragPayload(event);
 		if (!canCreateFromDrop(payload)) {
+			surfaceDropPreview = null;
 			return;
 		}
 		event.preventDefault();
 		if (event.dataTransfer) {
 			event.dataTransfer.dropEffect = 'copy';
 		}
+		surfaceDropPreview = buildSurfaceDropPreview(event, payload);
 	};
 
 	const handleSurfaceDragLeave = (): void => {
-		surfaceDragDepth = Math.max(0, surfaceDragDepth - 1);
+		const nextDepth = Math.max(0, surfaceDragDepth - 1);
+		surfaceDragDepth = nextDepth;
+		if (nextDepth === 0) {
+			surfaceDropPreview = null;
+		}
 	};
 
 	const handleSurfaceDrop = async (event: DragEvent): Promise<void> => {
 		const payload = readDashboardDragPayload(event);
+		const dropPreview = buildSurfaceDropPreview(event, payload);
 		surfaceDragDepth = 0;
+		surfaceDropPreview = null;
 		if (!canCreateFromDrop(payload)) {
 			return;
 		}
@@ -570,10 +1173,14 @@
 			return;
 		}
 		if (payload?.kind === 'parameter') {
-			await createDashboardGenericWidget(getGraph, liveNode.node_id, targetNode);
+			await createDashboardGenericWidget(getGraph, liveNode.node_id, targetNode, {
+				placement: dropPreview?.placement
+			});
 			return;
 		}
-		await createDashboardNodeWidget(getGraph, liveNode.node_id, targetNode);
+		await createDashboardNodeWidget(getGraph, liveNode.node_id, targetNode, {
+			placement: dropPreview?.placement
+		});
 	};
 
 	const handleBindingDragEnter = (
@@ -638,15 +1245,18 @@
 		await bindDashboardGenericWidgetTarget(getGraph, liveNode.node_id, targetNode);
 	};
 
-	const setCssParamValue = async (declId: string, value: CssValueData): Promise<void> => {
-		const paramNode = getDirectParamNode(graph, liveNode, declId);
-		if (!paramNode || paramNode.data.kind !== 'parameter') {
+	const sendCssParamValue = async (
+		paramNodeId: NodeId | null,
+		behaviour: ParamEventBehaviour | null,
+		value: CssValueData
+	): Promise<void> => {
+		if (paramNodeId === null || behaviour === null) {
 			return;
 		}
 		await sendSetParamIntent(
-			paramNode.node_id,
+			paramNodeId,
 			{ kind: 'css_value', value: value.value, unit: value.unit },
-			paramNode.data.param.event_behaviour
+			behaviour
 		);
 	};
 
@@ -660,33 +1270,55 @@
 		await sessionToEnd?.end();
 	};
 
-	const sendFreeLayoutPreview = async (preview: FreeLayoutPreview): Promise<void> => {
-		const compareTo = lastCommittedFreeLayoutPreview ?? currentPlacementPreview();
+	const sendFreeLayoutPreview = async (previewSet: FreeLayoutPreviewSet): Promise<void> => {
 		const operations: Promise<unknown>[] = [];
-		if (!samePosition(preview.position, compareTo.position)) {
-			const paramNode = getDirectParamNode(graph, liveNode, 'position');
-			if (paramNode?.data.kind === 'parameter') {
+		for (const entry of previewSet.previews) {
+			const compareTo =
+				lastCommittedFreeLayoutPreview?.previews.find(
+					(candidate) => candidate.target.nodeId === entry.target.nodeId
+				)?.preview ?? entry.target.startPreview;
+			if (!samePosition(entry.preview.position, compareTo.position)) {
+				if (
+					entry.target.positionParamNodeId !== null &&
+					entry.target.positionParamBehaviour !== null
+				) {
+					operations.push(
+						sendSetParamIntent(
+							entry.target.positionParamNodeId,
+							{
+								kind: 'vec2',
+								value: [entry.preview.position.x, entry.preview.position.y]
+							},
+							entry.target.positionParamBehaviour
+						)
+					);
+				}
+			}
+			if (!sameCssValue(entry.preview.size.width, compareTo.size.width)) {
 				operations.push(
-					sendSetParamIntent(
-						paramNode.node_id,
-						{ kind: 'vec2', value: [preview.position.x, preview.position.y] },
-						paramNode.data.param.event_behaviour
+					sendCssParamValue(
+						entry.target.widthParamNodeId,
+						entry.target.widthParamBehaviour,
+						entry.preview.size.width
+					)
+				);
+			}
+			if (!sameCssValue(entry.preview.size.height, compareTo.size.height)) {
+				operations.push(
+					sendCssParamValue(
+						entry.target.heightParamNodeId,
+						entry.target.heightParamBehaviour,
+						entry.preview.size.height
 					)
 				);
 			}
 		}
-		if (!sameCssValue(preview.size.width, compareTo.size.width)) {
-			operations.push(setCssParamValue('width', preview.size.width));
-		}
-		if (!sameCssValue(preview.size.height, compareTo.size.height)) {
-			operations.push(setCssParamValue('height', preview.size.height));
-		}
 		if (operations.length === 0) {
-			lastCommittedFreeLayoutPreview = cloneFreeLayoutPreview(preview);
+			lastCommittedFreeLayoutPreview = cloneFreeLayoutPreviewSet(previewSet);
 			return;
 		}
 		await Promise.all(operations);
-		lastCommittedFreeLayoutPreview = cloneFreeLayoutPreview(preview);
+		lastCommittedFreeLayoutPreview = cloneFreeLayoutPreviewSet(previewSet);
 	};
 
 	const flushFreeLayoutCommitQueue = async (): Promise<void> => {
@@ -696,7 +1328,7 @@
 		freeLayoutCommitInFlight = true;
 		try {
 			while (pendingFreeLayoutCommit) {
-				const nextPreview = cloneFreeLayoutPreview(pendingFreeLayoutCommit);
+				const nextPreview = cloneFreeLayoutPreviewSet(pendingFreeLayoutCommit);
 				pendingFreeLayoutCommit = null;
 				await sendFreeLayoutPreview(nextPreview);
 			}
@@ -705,8 +1337,8 @@
 		}
 	};
 
-	const scheduleFreeLayoutCommit = (preview: FreeLayoutPreview): void => {
-		pendingFreeLayoutCommit = cloneFreeLayoutPreview(preview);
+	const scheduleFreeLayoutCommit = (preview: FreeLayoutPreviewSet): void => {
+		pendingFreeLayoutCommit = cloneFreeLayoutPreviewSet(preview);
 		if (typeof window === 'undefined') {
 			void flushFreeLayoutCommitQueue();
 			return;
@@ -720,7 +1352,9 @@
 		});
 	};
 
-	const finalizeFreeLayoutInteraction = async (preview: FreeLayoutPreview | null): Promise<void> => {
+	const finalizeFreeLayoutInteraction = async (
+		preview: FreeLayoutPreviewSet | null
+	): Promise<void> => {
 		if (preview) {
 			scheduleFreeLayoutCommit(preview);
 			await flushFreeLayoutCommitQueue();
@@ -728,32 +1362,39 @@
 		await finishFreeLayoutEditSession();
 	};
 
-	const beginFreeLayoutMove = (event: PointerEvent): void => {
+	const beginFreeLayoutMove = (event: PointerEvent, transformNodes: UiNodeDto[]): void => {
 		if (!editMode || !supportsFreePlacement) {
 			return;
 		}
 		event.preventDefault();
 		event.stopPropagation();
-		selectWidgetNode();
+		selectWidgetNode('REPLACE');
 		freeLayoutEditSession = createUiEditSession('Move dashboard widget', 'dashboard-free-layout');
 		void freeLayoutEditSession.begin();
 		const rootRemPx = getRootRemPixels();
 		const surfaceMetrics = getClosestSurfaceMetrics(event.currentTarget, rootRemPx);
-		lastCommittedFreeLayoutPreview = currentPlacementPreview();
+		const interactionMetrics = {
+			rootRemPx,
+			surfaceWidthPx: surfaceMetrics.width,
+			surfaceHeightPx: surfaceMetrics.height,
+			viewportWidthPx: getViewportWidthPx(),
+			viewportHeightPx: getViewportHeightPx()
+		};
+		const targets = buildFreeLayoutTargets(transformNodes, interactionMetrics);
+		const selectionRect = buildSelectionRect(targets);
+		if (targets.length === 0 || !selectionRect) {
+			return;
+		}
+		lastCommittedFreeLayoutPreview = buildPreviewSetFromTargets(liveNode.node_id, targets);
 		pendingFreeLayoutCommit = null;
 		freeLayoutInteraction = {
 			pointerId: event.pointerId,
 			mode: 'move',
 			resizeEdges: null,
+			primaryNodeId: liveNode.node_id,
+			selectionRect,
+			targets,
 			startClient: [event.clientX, event.clientY],
-			startPosition: {
-				x: placement.position.x,
-				y: placement.position.y
-			},
-			startSize: {
-				width: { ...placement.size.width },
-				height: { ...placement.size.height }
-			},
 			rootRemPx,
 			surfaceWidthPx: surfaceMetrics.width,
 			surfaceHeightPx: surfaceMetrics.height,
@@ -762,47 +1403,46 @@
 			viewportWidthPx: getViewportWidthPx(),
 			viewportHeightPx: getViewportHeightPx()
 		};
-		freeLayoutPreview = {
-			position: {
-				x: placement.position.x,
-				y: placement.position.y
-			},
-			size: {
-				width: { ...placement.size.width },
-				height: { ...placement.size.height }
-			}
-		};
+		freeLayoutPreview = buildPreviewSetFromTargets(liveNode.node_id, targets);
 	};
 
 	const beginFreeLayoutResize = (
 		event: PointerEvent,
-		resizeEdges: FreeLayoutResizeEdges
+		resizeEdges: FreeLayoutResizeEdges,
+		transformNodes: UiNodeDto[]
 	): void => {
 		if (!editMode || !supportsFreePlacement) {
 			return;
 		}
 		event.preventDefault();
 		event.stopPropagation();
-		selectWidgetNode();
+		selectWidgetNode('REPLACE');
 		freeLayoutEditSession = createUiEditSession('Resize dashboard widget', 'dashboard-free-layout');
 		void freeLayoutEditSession.begin();
 		const rootRemPx = getRootRemPixels();
 		const surfaceMetrics = getClosestSurfaceMetrics(event.currentTarget, rootRemPx);
-		lastCommittedFreeLayoutPreview = currentPlacementPreview();
+		const interactionMetrics = {
+			rootRemPx,
+			surfaceWidthPx: surfaceMetrics.width,
+			surfaceHeightPx: surfaceMetrics.height,
+			viewportWidthPx: getViewportWidthPx(),
+			viewportHeightPx: getViewportHeightPx()
+		};
+		const targets = buildFreeLayoutTargets(transformNodes, interactionMetrics);
+		const selectionRect = buildSelectionRect(targets);
+		if (targets.length === 0 || !selectionRect) {
+			return;
+		}
+		lastCommittedFreeLayoutPreview = buildPreviewSetFromTargets(liveNode.node_id, targets);
 		pendingFreeLayoutCommit = null;
 		freeLayoutInteraction = {
 			pointerId: event.pointerId,
 			mode: 'resize',
 			resizeEdges,
+			primaryNodeId: liveNode.node_id,
+			selectionRect,
+			targets,
 			startClient: [event.clientX, event.clientY],
-			startPosition: {
-				x: placement.position.x,
-				y: placement.position.y
-			},
-			startSize: {
-				width: { ...placement.size.width },
-				height: { ...placement.size.height }
-			},
 			rootRemPx,
 			surfaceWidthPx: surfaceMetrics.width,
 			surfaceHeightPx: surfaceMetrics.height,
@@ -811,28 +1451,62 @@
 			viewportWidthPx: getViewportWidthPx(),
 			viewportHeightPx: getViewportHeightPx()
 		};
-		freeLayoutPreview = {
-			position: {
-				x: placement.position.x,
-				y: placement.position.y
-			},
-			size: {
-				width: { ...placement.size.width },
-				height: { ...placement.size.height }
-			}
-		};
+		freeLayoutPreview = buildPreviewSetFromTargets(liveNode.node_id, targets);
 	};
 
 	const handleWidgetPointerDown = (event: PointerEvent): void => {
 		if (!editMode || event.button !== 0) {
 			return;
 		}
+		const selectionMode = selectionModeFromEvent(event);
 		if (supportsFreePlacement) {
-			beginFreeLayoutMove(event);
+			if (selectionMode !== 'REPLACE') {
+				event.stopPropagation();
+				selectWidgetNode(selectionMode);
+				return;
+			}
+			if (!isSelected) {
+				selectWidgetNode('REPLACE');
+			}
+			beginFreeLayoutMove(event, resolveTransformNodes());
 			return;
 		}
 		event.stopPropagation();
-		selectWidgetNode();
+		selectWidgetNode(selectionMode);
+	};
+
+	const handleSurfacePointerDown = (event: PointerEvent): void => {
+		if (!editMode || !isLayoutSurface || event.button !== 0) {
+			return;
+		}
+		if (freeLayoutInteraction || marqueeSelection) {
+			return;
+		}
+		if (!(event.currentTarget instanceof HTMLElement)) {
+			return;
+		}
+		const ownerWidgetShell = event.currentTarget.closest('.dashboard-widget-shell');
+		const childWidgetShell =
+			event.target instanceof Element ? event.target.closest('.dashboard-widget-shell') : null;
+		if (
+			(childWidgetShell !== null && childWidgetShell !== ownerWidgetShell) ||
+			isInteractiveSurfaceTarget(event.target)
+		) {
+			return;
+		}
+		event.preventDefault();
+		event.stopPropagation();
+		const selection: MarqueeSelectionState = {
+			pointerId: event.pointerId,
+			surfaceNodeId: liveNode.node_id,
+			surfaceElement: event.currentTarget,
+			startClient: [event.clientX, event.clientY],
+			currentClient: [event.clientX, event.clientY],
+			baseSelection: [...(session?.selectedNodesIds ?? [])],
+			selectionMode: selectionModeFromEvent(event)
+		};
+		marqueeSelection = selection;
+		applyMarqueeSelection(selection);
 	};
 
 	$effect(() => {
@@ -853,80 +1527,30 @@
 				Math.max(freeLayoutInteraction.surfaceScaleY, 1e-6);
 			const minWidthPx = minFreeWidgetWidthRem * freeLayoutInteraction.rootRemPx;
 			const minHeightPx = minFreeWidgetHeightRem * freeLayoutInteraction.rootRemPx;
-			const snapPx = parentSnapGrid.enabled ? parentSnapGrid.step * freeLayoutInteraction.rootRemPx : 0;
-			const startRect = freeLayoutRectFromPlacement(
-				{
-					position: freeLayoutInteraction.startPosition,
-					size: freeLayoutInteraction.startSize,
-					anchor: placement.anchor
-				},
-				freeLayoutInteraction
-			);
+			const snapPx = parentSnapGrid.enabled
+				? parentSnapGrid.step * freeLayoutInteraction.rootRemPx
+				: 0;
 			if (freeLayoutInteraction.mode === 'move') {
-				freeLayoutPreview = freeLayoutPreviewFromRect(
-					{
-						...startRect,
-						left: snapToGridPx(startRect.left + deltaXPx, snapPx),
-						top: snapToGridPx(startRect.top + deltaYPx, snapPx)
-					},
-					placement.anchor,
+				freeLayoutPreview = buildFreeLayoutMovePreview(
 					freeLayoutInteraction,
-					freeLayoutInteraction.startPosition,
-					freeLayoutInteraction.startSize
+					deltaXPx,
+					deltaYPx,
+					snapPx
 				);
 				scheduleFreeLayoutCommit(freeLayoutPreview);
 				return;
 			}
-			const resizeEdges = freeLayoutInteraction.resizeEdges;
-			if (!resizeEdges) {
+			const nextPreview = buildFreeLayoutResizePreview(
+				freeLayoutInteraction,
+				deltaXPx,
+				deltaYPx,
+				snapPx
+			);
+			if (!nextPreview) {
 				return;
 			}
-			let nextLeftPx = startRect.left;
-			let nextTopPx = startRect.top;
-			let nextWidthPx = startRect.width;
-			let nextHeightPx = startRect.height;
-
-			if (resizeEdges.left) {
-				const appliedDeltaX = Math.min(
-					Math.max(deltaXPx, -nextLeftPx),
-					nextWidthPx - minWidthPx
-				);
-				nextLeftPx += appliedDeltaX;
-				nextWidthPx -= appliedDeltaX;
-			}
-			if (resizeEdges.right) {
-				nextWidthPx = Math.max(minWidthPx, nextWidthPx + deltaXPx);
-			}
-			if (resizeEdges.top) {
-				const appliedDeltaY = Math.min(
-					Math.max(deltaYPx, -nextTopPx),
-					nextHeightPx - minHeightPx
-				);
-				nextTopPx += appliedDeltaY;
-				nextHeightPx -= appliedDeltaY;
-			}
-			if (resizeEdges.bottom) {
-				nextHeightPx = Math.max(minHeightPx, nextHeightPx + deltaYPx);
-			}
-			if (snapPx > 0) {
-				nextLeftPx = snapToGridPx(nextLeftPx, snapPx);
-				nextTopPx = snapToGridPx(nextTopPx, snapPx);
-				nextWidthPx = Math.max(minWidthPx, snapToGridPx(nextWidthPx, snapPx));
-				nextHeightPx = Math.max(minHeightPx, snapToGridPx(nextHeightPx, snapPx));
-			}
-			freeLayoutPreview = freeLayoutPreviewFromRect(
-				{
-					left: nextLeftPx,
-					top: nextTopPx,
-					width: nextWidthPx,
-					height: nextHeightPx
-				},
-				placement.anchor,
-				freeLayoutInteraction,
-				freeLayoutInteraction.startPosition,
-				freeLayoutInteraction.startSize
-			);
-			scheduleFreeLayoutCommit(freeLayoutPreview);
+			freeLayoutPreview = nextPreview;
+			scheduleFreeLayoutCommit(nextPreview);
 		};
 
 		const finishInteraction = (event: PointerEvent): void => {
@@ -956,7 +1580,8 @@
 							? 'nesw-resize'
 							: freeLayoutInteraction.resizeEdges?.left && freeLayoutInteraction.resizeEdges?.bottom
 								? 'nesw-resize'
-								: freeLayoutInteraction.resizeEdges?.left || freeLayoutInteraction.resizeEdges?.right
+								: freeLayoutInteraction.resizeEdges?.left ||
+									  freeLayoutInteraction.resizeEdges?.right
 									? 'ew-resize'
 									: 'ns-resize';
 		document.body.style.userSelect = 'none';
@@ -965,6 +1590,54 @@
 			window.removeEventListener('pointermove', handlePointerMove);
 			window.removeEventListener('pointerup', finishInteraction);
 			window.removeEventListener('pointercancel', finishInteraction);
+			document.body.style.cursor = previousCursor;
+			document.body.style.userSelect = previousUserSelect;
+		};
+	});
+
+	$effect(() => {
+		if (!marqueeSelection) {
+			return;
+		}
+
+		const handlePointerMove = (event: PointerEvent): void => {
+			if (!marqueeSelection || event.pointerId !== marqueeSelection.pointerId) {
+				return;
+			}
+			event.preventDefault();
+			const nextSelection = {
+				...marqueeSelection,
+				currentClient: [event.clientX, event.clientY] as [number, number]
+			};
+			marqueeSelection = nextSelection;
+			applyMarqueeSelection(nextSelection);
+		};
+
+		const finishSelection = (event: PointerEvent): void => {
+			if (!marqueeSelection || event.pointerId !== marqueeSelection.pointerId) {
+				return;
+			}
+			const completedSelection = {
+				...marqueeSelection,
+				currentClient: [event.clientX, event.clientY] as [number, number]
+			};
+			applyMarqueeSelection(completedSelection);
+			marqueeSelection = null;
+		};
+
+		window.addEventListener('pointermove', handlePointerMove);
+		window.addEventListener('pointerup', finishSelection);
+		window.addEventListener('pointercancel', finishSelection);
+
+		const previousCursor = document.body.style.cursor;
+		const previousUserSelect = document.body.style.userSelect;
+		document.body.style.cursor = 'crosshair';
+		document.body.style.userSelect = 'none';
+
+		return () => {
+			window.removeEventListener('pointermove', handlePointerMove);
+			window.removeEventListener('pointerup', finishSelection);
+			window.removeEventListener('pointercancel', finishSelection);
 			document.body.style.cursor = previousCursor;
 			document.body.style.userSelect = previousUserSelect;
 		};
@@ -1019,12 +1692,31 @@
 
 	let supportsFreePlacement = $derived(editMode && parentLayoutKind === 'free');
 	let supportsGridPlacement = $derived(editMode && parentLayoutKind === 'grid');
-	let supportsStackSizing = $derived(editMode && (parentLayoutKind === 'horizontal' || parentLayoutKind === 'vertical'));
-	let supportsOrdering = $derived(editMode && (parentLayoutKind === 'grid' || parentLayoutKind === 'horizontal' || parentLayoutKind === 'vertical'));
+	let supportsStackSizing = $derived(
+		editMode && (parentLayoutKind === 'horizontal' || parentLayoutKind === 'vertical')
+	);
+	let supportsOrdering = $derived(
+		editMode &&
+			(parentLayoutKind === 'grid' ||
+				parentLayoutKind === 'horizontal' ||
+				parentLayoutKind === 'vertical')
+	);
 	let pageSize = $derived(getDashboardPageSize(graph, liveNode));
 	let parentSnapGrid = $derived(getDashboardSnapGrid(graph, parentNode));
+	let surfaceSnapGrid = $derived(getDashboardSnapGrid(graph, liveNode));
+	let snapGridVisible = $derived(editMode && surfaceSnapGrid.enabled && layoutKind === 'free');
+	let currentNodeFreeLayoutPreview = $derived.by(() =>
+		resolveFreeLayoutPreview(freeLayoutPreview, liveNode.node_id)
+	);
+	let marqueeStyle = $derived.by(() => {
+		if (!marqueeSelection) {
+			return '';
+		}
+		const rect = normalizeClientRect(marqueeSelection.startClient, marqueeSelection.currentClient);
+		return `left: ${rect.left}px; top: ${rect.top}px; inline-size: ${rect.width}px; block-size: ${rect.height}px;`;
+	});
 	let widgetShellStyle = $derived.by(() => {
-		if (!editMode || !supportsFreePlacement || !freeLayoutPreview) {
+		if (!editMode || !supportsFreePlacement || !currentNodeFreeLayoutPreview) {
 			return '';
 		}
 		const context = freeLayoutInteraction ?? {
@@ -1041,7 +1733,11 @@
 			context
 		);
 		const previewRect = freeLayoutRectFromPlacement(
-			{ position: freeLayoutPreview.position, size: freeLayoutPreview.size, anchor: placement.anchor },
+			{
+				position: currentNodeFreeLayoutPreview.position,
+				size: currentNodeFreeLayoutPreview.size,
+				anchor: placement.anchor
+			},
 			context
 		);
 		return `transform: translate(${previewRect.left - currentRect.left}px, ${previewRect.top - currentRect.top}px); inline-size: ${previewRect.width}px; block-size: ${previewRect.height}px; z-index: 4;`;
@@ -1062,10 +1758,14 @@
 		let maxExtent = 18 * rootRemPx;
 		for (const child of childWidgets) {
 			const childPlacement = getDashboardPlacement(graph, child);
-			const childRect = freeLayoutRectFromPlacement(childPlacement, surfaceContext as FreeLayoutInteraction);
+			const childRect = freeLayoutRectFromPlacement(
+				childPlacement,
+				surfaceContext as FreeLayoutInteraction
+			);
 			maxExtent = Math.max(
 				maxExtent,
-				childRect.top + childRect.height +
+				childRect.top +
+					childRect.height +
 					cssValueToPx(gap.y, 'y', createCssUnitContext(surfaceContext, 'y')) +
 					2 * rootRemPx
 			);
@@ -1074,7 +1774,8 @@
 	});
 
 	const surfaceStyle = $derived.by((): string => {
-		const gapStyle = `--dashboard-gap-x: ${formatCssValue(gap.x)}; --dashboard-gap-y: ${formatCssValue(gap.y)};`;
+		const snapStepPx = surfaceSnapGrid.enabled ? surfaceSnapGrid.step * getRootRemPixels() : 0;
+		const gapStyle = `--dashboard-gap-x: ${formatCssValue(gap.x)}; --dashboard-gap-y: ${formatCssValue(gap.y)}; --dashboard-snap-grid-step: ${snapStepPx}px;`;
 		if (layoutKind === 'free') {
 			if (isPage) {
 				return `${gapStyle} inline-size: 100%; block-size: 100%; min-block-size: 0;`;
@@ -1098,16 +1799,18 @@
 		return Math.max(minFreeWidgetWidthRem * rootRemPx, viewportMinExtent * 0.12);
 	});
 	const pageSceneStyle = $derived.by(() => `padding: ${pageEditBleedPx}px;`);
-	const pageSizeContext = $derived.by((): Pick<
-		FreeLayoutInteraction,
-		'rootRemPx' | 'surfaceWidthPx' | 'surfaceHeightPx' | 'viewportWidthPx' | 'viewportHeightPx'
-	> => ({
-		rootRemPx: getRootRemPixels(),
-		surfaceWidthPx: pageViewportWidthPx,
-		surfaceHeightPx: pageViewportHeightPx,
-		viewportWidthPx: getViewportWidthPx(),
-		viewportHeightPx: getViewportHeightPx()
-	}));
+	const pageSizeContext = $derived.by(
+		(): Pick<
+			FreeLayoutInteraction,
+			'rootRemPx' | 'surfaceWidthPx' | 'surfaceHeightPx' | 'viewportWidthPx' | 'viewportHeightPx'
+		> => ({
+			rootRemPx: getRootRemPixels(),
+			surfaceWidthPx: pageViewportWidthPx,
+			surfaceHeightPx: pageViewportHeightPx,
+			viewportWidthPx: getViewportWidthPx(),
+			viewportHeightPx: getViewportHeightPx()
+		})
+	);
 	const pageLogicalWidthPx = $derived.by(() =>
 		Math.max(1, cssValueToPx(pageSize.width, 'x', createCssUnitContext(pageSizeContext, 'x')))
 	);
@@ -1133,11 +1836,12 @@
 		return `inline-size: ${baseWidth}px; block-size: ${baseHeight}px; transform: translate(${pageView.panX}px, ${pageView.panY}px) scale(${pageView.zoom}); z-index: 0;`;
 	});
 
-	const slotStyle = (child: UiNodeDto): string => {
-		const childPlacement = getDashboardPlacement(graph, child);
+	const placementStyle = (
+		childPlacement: DashboardPlacement | DashboardWidgetCreationPlacement
+	): string => {
 		if (layoutKind === 'free') {
-			const width = `max(${formatCssValue(childPlacement.size.width)}, 6.5rem)`;
-			const height = `max(${formatCssValue(childPlacement.size.height)}, 2.8rem)`;
+			const width = `max(${formatCssValue(childPlacement.size.width)}, ${minFreeWidgetWidthRem}rem)`;
+			const height = `max(${formatCssValue(childPlacement.size.height)}, ${minFreeWidgetHeightRem}rem)`;
 			const anchorX = anchorXFromAnchor(childPlacement.anchor);
 			const anchorY = anchorYFromAnchor(childPlacement.anchor);
 			const left =
@@ -1157,12 +1861,87 @@
 		if (layoutKind === 'grid') {
 			return `grid-column: span ${childPlacement.columnSpan}; grid-row: span ${childPlacement.rowSpan}; min-block-size: max(${formatCssValue(childPlacement.size.height)}, 3.25rem);`;
 		}
-		const basis = layoutKind === 'horizontal' ? childPlacement.size.width : childPlacement.size.height;
+		const basis =
+			layoutKind === 'horizontal' ? childPlacement.size.width : childPlacement.size.height;
 		if (layoutKind === 'horizontal') {
 			return `flex: 0 0 max(${formatCssValue(basis)}, 6.5rem); inline-size: max(${formatCssValue(childPlacement.size.width)}, 6.5rem); block-size: 100%; min-inline-size: 0; min-block-size: 0;`;
 		}
 		return `flex: 0 0 max(${formatCssValue(basis)}, 2.8rem); inline-size: 100%; block-size: max(${formatCssValue(childPlacement.size.height)}, 2.8rem); min-inline-size: 0; min-block-size: 0;`;
 	};
+
+	const displayedWidgetPlacement = $derived.by(() => ({
+		...placement,
+		position: currentNodeFreeLayoutPreview ? currentNodeFreeLayoutPreview.position : placement.position,
+		size: currentNodeFreeLayoutPreview ? currentNodeFreeLayoutPreview.size : placement.size
+	}));
+
+	const anchorGuides = $derived.by((): AnchorGuide[] => {
+		if (!editMode || !supportsFreePlacement || !isSelected) {
+			return [];
+		}
+		const anchorX = anchorXFromAnchor(displayedWidgetPlacement.anchor);
+		const anchorY = anchorYFromAnchor(displayedWidgetPlacement.anchor);
+		const anchorInline = anchorX === 'left' ? '0%' : anchorX === 'center' ? '50%' : '100%';
+		const anchorBlock = anchorY === 'top' ? '0%' : anchorY === 'center' ? '50%' : '100%';
+		const guides: AnchorGuide[] = [];
+
+		const pushHorizontalGuide = (direction: 'left' | 'right', lengthPx: number): void => {
+			if (!(lengthPx > 0.5)) {
+				return;
+			}
+			const start =
+				direction === 'left'
+					? `calc(${anchorInline} - ${lengthPx}px)`
+					: anchorInline;
+			guides.push({
+				axis: 'horizontal',
+				direction,
+				style: `inset-inline-start: ${start}; inset-block-start: calc(${anchorBlock} - 0.04rem); inline-size: ${lengthPx}px;`
+			});
+		};
+
+		const pushVerticalGuide = (direction: 'up' | 'down', lengthPx: number): void => {
+			if (!(lengthPx > 0.5)) {
+				return;
+			}
+			const start =
+				direction === 'up'
+					? `calc(${anchorBlock} - ${lengthPx}px)`
+					: anchorBlock;
+			guides.push({
+				axis: 'vertical',
+				direction,
+				style: `inset-inline-start: calc(${anchorInline} - 0.04rem); inset-block-start: ${start}; block-size: ${lengthPx}px;`
+			});
+		};
+
+		if (anchorX === 'left') {
+			pushHorizontalGuide('left', Math.max(0, displayedWidgetPlacement.position.x));
+		} else if (anchorX === 'right') {
+			pushHorizontalGuide('right', Math.max(0, -displayedWidgetPlacement.position.x));
+		} else if (displayedWidgetPlacement.position.x !== 0) {
+			pushHorizontalGuide(
+				displayedWidgetPlacement.position.x > 0 ? 'left' : 'right',
+				Math.abs(displayedWidgetPlacement.position.x)
+			);
+		}
+
+		if (anchorY === 'top') {
+			pushVerticalGuide('up', Math.max(0, displayedWidgetPlacement.position.y));
+		} else if (anchorY === 'bottom') {
+			pushVerticalGuide('down', Math.max(0, -displayedWidgetPlacement.position.y));
+		} else if (displayedWidgetPlacement.position.y !== 0) {
+			pushVerticalGuide(
+				displayedWidgetPlacement.position.y > 0 ? 'up' : 'down',
+				Math.abs(displayedWidgetPlacement.position.y)
+			);
+		}
+
+		return guides;
+	});
+
+	const slotStyle = (child: UiNodeDto): string =>
+		placementStyle(getDashboardPlacement(graph, child));
 
 	const widgetKind = $derived.by(() => {
 		const widgetKindParam = getDirectParam(graph, liveNode, 'widget_kind');
@@ -1181,27 +1960,40 @@
 
 	let boundNode = $derived(resolveReferenceTarget(graph, targetNodeParam?.value ?? null));
 	let boundParamNode = $derived(resolveReferenceTarget(graph, targetParamParam?.value ?? null));
-	let boundParam = $derived(boundParamNode?.data.kind === 'parameter' ? boundParamNode.data.param : null);
+	let boundParam = $derived(
+		boundParamNode?.data.kind === 'parameter' ? boundParamNode.data.param : null
+	);
 
 	const textConfig = $derived(textParam?.value.kind === 'str' ? textParam.value.value : '');
-	const placeholderConfig = $derived(placeholderParam?.value.kind === 'str' ? placeholderParam.value.value : '');
+	const placeholderConfig = $derived(
+		placeholderParam?.value.kind === 'str' ? placeholderParam.value.value : ''
+	);
 	const valueRange = $derived(
 		valueRangeParam?.value.kind === 'vec2' ? valueRangeParam.value.value : [0, 1]
 	);
 	const sliderStep = $derived(stepParam?.value.kind === 'float' ? stepParam.value.value : 0.01);
-	const multiline = $derived(multilineParam?.value.kind === 'bool' ? multilineParam.value.value : false);
-	const defaultChecked = $derived(defaultCheckedParam?.value.kind === 'bool' ? defaultCheckedParam.value.value : false);
+	const multiline = $derived(
+		multilineParam?.value.kind === 'bool' ? multilineParam.value.value : false
+	);
+	const defaultChecked = $derived(
+		defaultCheckedParam?.value.kind === 'bool' ? defaultCheckedParam.value.value : false
+	);
 	const requestedDisplayMode = $derived.by(() => {
 		if (displayModeParam?.value.kind === 'enum' || displayModeParam?.value.kind === 'str') {
 			return displayModeParam.value.value;
 		}
 		return 'auto';
 	});
-	const includeChildren = $derived(includeChildrenParam?.value.kind === 'bool' ? includeChildrenParam.value.value : true);
+	const includeChildren = $derived(
+		includeChildrenParam?.value.kind === 'bool' ? includeChildrenParam.value.value : true
+	);
 	const resolvedNodeWidgetDisplayMode = $derived.by(() =>
 		boundNode ? resolveDashboardNodeWidgetDisplayMode(boundNode, requestedDisplayMode) : null
 	);
 	const NodeWidgetDisplayComponent = $derived(resolvedNodeWidgetDisplayMode?.component ?? null);
+	const showsNodeWidgetEditor = $derived(
+		resolvedNodeWidgetDisplayMode?.id === 'editor' && boundNode?.data.kind === 'parameter'
+	);
 
 	const genericDisplayValue = $derived.by(() => {
 		if (widgetKind === 'text' && boundParam) {
@@ -1214,9 +2006,87 @@
 		if (!boundParamNode || boundParamNode.data.kind !== 'parameter') {
 			return;
 		}
-		await sendSetParamIntent(boundParamNode.node_id, value, boundParamNode.data.param.event_behaviour);
+		await sendSetParamIntent(
+			boundParamNode.node_id,
+			value,
+			boundParamNode.data.param.event_behaviour
+		);
 	};
 
+
+	$effect(() => {
+		const isWidget = isContainerWidget || isNodeWidget || isGenericWidget;
+		if (!isWidget) {
+			observedAnchorPlacementCache = null;
+			return;
+		}
+
+		const currentPlacement: ObservedAnchorPlacement = {
+			nodeId: liveNode.node_id,
+			anchor: placement.anchor,
+			position: { ...placement.position },
+			size: { width: { ...placement.size.width }, height: { ...placement.size.height } }
+		};
+
+		if (!editMode || !supportsFreePlacement || freeLayoutInteraction) {
+			observedAnchorPlacementCache = currentPlacement;
+			return;
+		}
+
+		const previousPlacement = observedAnchorPlacementCache;
+		observedAnchorPlacementCache = currentPlacement;
+
+		if (
+			!previousPlacement ||
+			previousPlacement.nodeId !== currentPlacement.nodeId ||
+			previousPlacement.anchor === currentPlacement.anchor
+		) {
+			return;
+		}
+
+		const rootRemPx = getRootRemPixels();
+		const surfaceMetrics = widgetShellElement
+			? getClosestSurfaceMetrics(widgetShellElement, rootRemPx)
+			: {
+				width: getViewportWidthPx(),
+				height: getViewportHeightPx(),
+				scaleX: 1,
+				scaleY: 1
+			};
+		const placementContext = {
+			rootRemPx,
+			surfaceWidthPx: surfaceMetrics.width,
+			surfaceHeightPx: surfaceMetrics.height,
+			viewportWidthPx: getViewportWidthPx(),
+			viewportHeightPx: getViewportHeightPx()
+		};
+		const previousRect = freeLayoutRectFromPlacement(previousPlacement, placementContext);
+		const nextPlacement = freeLayoutPreviewFromRect(
+			previousRect,
+			currentPlacement.anchor,
+			placementContext,
+			currentPlacement.position,
+			currentPlacement.size
+		);
+		if (samePosition(nextPlacement.position, currentPlacement.position)) {
+			return;
+		}
+
+		observedAnchorPlacementCache = {
+			...currentPlacement,
+			position: { ...nextPlacement.position }
+		};
+
+		const positionParamNode = getDirectParamNode(graph, liveNode, 'position');
+		if (!positionParamNode || positionParamNode.data.kind !== 'parameter') {
+			return;
+		}
+		void sendSetParamIntent(
+			positionParamNode.node_id,
+			{ kind: 'vec2', value: [nextPlacement.position.x, nextPlacement.position.y] },
+			positionParamNode.data.param.event_behaviour
+		);
+	});
 	const triggerGenericAction = async (): Promise<void> => {
 		if (boundParam?.value.kind === 'trigger') {
 			await applyGenericParamValue({ kind: 'trigger' });
@@ -1259,7 +2129,11 @@
 			await applyGenericParamValue({ kind: 'css_value', value: parsed.value, unit: parsed.unit });
 			return;
 		}
-		if (boundParam.value.kind === 'str' || boundParam.value.kind === 'file' || boundParam.value.kind === 'enum') {
+		if (
+			boundParam.value.kind === 'str' ||
+			boundParam.value.kind === 'file' ||
+			boundParam.value.kind === 'enum'
+		) {
 			await applyGenericParamValue({ kind: boundParam.value.kind, value: raw });
 		}
 	};
@@ -1270,21 +2144,6 @@
 			return;
 		}
 		openAccordionNodeIds = [...openAccordionNodeIds, nodeId];
-	};
-
-	const widgetNodeIdWithinPage = (candidateNodeId: NodeId | null | undefined): NodeId | null => {
-		if (!graph || candidateNodeId === null || candidateNodeId === undefined) {
-			return null;
-		}
-		let currentNodeId: NodeId | undefined = candidateNodeId;
-		while (currentNodeId !== undefined) {
-			const parentId = graph.parentById.get(currentNodeId);
-			if (parentId === liveNode.node_id) {
-				return currentNodeId;
-			}
-			currentNodeId = parentId;
-		}
-		return null;
 	};
 
 	const zoomPageAtClientPoint = (clientX: number, clientY: number, factor: number): void => {
@@ -1310,26 +2169,44 @@
 		if (!pageViewportElement) {
 			return false;
 		}
-		const selectedWidgetNodeId = widgetNodeIdWithinPage(session?.selectedNodeId);
-		if (selectedWidgetNodeId === null) {
+		const viewportElement = pageViewportElement;
+		const selectedWidgetElements = (session?.selectedNodesIds ?? [])
+			.map((nodeId) =>
+				viewportElement.querySelector<HTMLElement>(`[data-node-id="${String(nodeId)}"]`)
+			)
+			.filter((element): element is HTMLElement => element !== null);
+		if (selectedWidgetElements.length === 0) {
 			homePageView();
 			return true;
 		}
-		const widgetElement = pageViewportElement.querySelector<HTMLElement>(`[data-node-id="${selectedWidgetNodeId}"]`);
-		if (!widgetElement) {
-			homePageView();
-			return true;
+		const viewportRect = viewportElement.getBoundingClientRect();
+		let localLeft = Number.POSITIVE_INFINITY;
+		let localRight = Number.NEGATIVE_INFINITY;
+		let localTop = Number.POSITIVE_INFINITY;
+		let localBottom = Number.NEGATIVE_INFINITY;
+		for (const widgetElement of selectedWidgetElements) {
+			const widgetRect = widgetElement.getBoundingClientRect();
+			localLeft = Math.min(
+				localLeft,
+				(widgetRect.left - viewportRect.left - viewportRect.width * 0.5 - pageView.panX) /
+					pageView.zoom
+			);
+			localRight = Math.max(
+				localRight,
+				(widgetRect.right - viewportRect.left - viewportRect.width * 0.5 - pageView.panX) /
+					pageView.zoom
+			);
+			localTop = Math.min(
+				localTop,
+				(widgetRect.top - viewportRect.top - viewportRect.height * 0.5 - pageView.panY) /
+					pageView.zoom
+			);
+			localBottom = Math.max(
+				localBottom,
+				(widgetRect.bottom - viewportRect.top - viewportRect.height * 0.5 - pageView.panY) /
+					pageView.zoom
+			);
 		}
-		const viewportRect = pageViewportElement.getBoundingClientRect();
-		const widgetRect = widgetElement.getBoundingClientRect();
-		const localLeft =
-			(widgetRect.left - viewportRect.left - viewportRect.width * 0.5 - pageView.panX) / pageView.zoom;
-		const localRight =
-			(widgetRect.right - viewportRect.left - viewportRect.width * 0.5 - pageView.panX) / pageView.zoom;
-		const localTop =
-			(widgetRect.top - viewportRect.top - viewportRect.height * 0.5 - pageView.panY) / pageView.zoom;
-		const localBottom =
-			(widgetRect.bottom - viewportRect.top - viewportRect.height * 0.5 - pageView.panY) / pageView.zoom;
 		const localWidth = Math.max(1, localRight - localLeft);
 		const localHeight = Math.max(1, localBottom - localTop);
 		const nextZoom = clampPageZoom(
@@ -1428,9 +2305,11 @@
 					class="dashboard-surface dashboard-page {layoutKind}"
 					class:surface-target-active={surfaceDragDepth > 0}
 					class:edit-bleed-visible={editMode && pageSize.enabled}
+					class:snap-grid-visible={snapGridVisible}
 					role="region"
 					aria-label="Dashboard page surface"
 					style={surfaceStyle}
+					onpointerdown={handleSurfacePointerDown}
 					ondragenter={handleSurfaceDragEnter}
 					ondragover={handleSurfaceDragOver}
 					ondragleave={handleSurfaceDragLeave}
@@ -1451,9 +2330,14 @@
 						</div>
 						<div class="dashboard-tab-body">
 							{#if activeTabNodeId !== null}
-								{@const activeChild = childWidgets.find((candidate) => candidate.node_id === activeTabNodeId) ?? null}
+								{@const activeChild =
+									childWidgets.find((candidate) => candidate.node_id === activeTabNodeId) ?? null}
 								{#if activeChild}
-									<div class="dashboard-slot"><div class="dashboard-slot-fill"><DashboardCanvasSelf node={activeChild} {editMode} /></div></div>
+									<div class="dashboard-slot">
+										<div class="dashboard-slot-fill">
+											<DashboardCanvasSelf node={activeChild} {editMode} />
+										</div>
+									</div>
 								{/if}
 							{/if}
 						</div>
@@ -1469,7 +2353,11 @@
 											toggleAccordionNode(child.node_id);
 										}}>{child.meta.label}</button>
 									{#if openAccordionNodeIds.includes(child.node_id)}
-										<div class="dashboard-slot accordion-slot"><div class="dashboard-slot-fill"><DashboardCanvasSelf node={child} {editMode} /></div></div>
+										<div class="dashboard-slot accordion-slot">
+											<div class="dashboard-slot-fill">
+												<DashboardCanvasSelf node={child} {editMode} />
+											</div>
+										</div>
 									{/if}
 								</section>
 							{/each}
@@ -1478,9 +2366,27 @@
 						<div class="dashboard-layout">
 							{#each childWidgets as child}
 								<div class="dashboard-slot" style={slotStyle(child)}>
-									<div class="dashboard-slot-fill"><DashboardCanvasSelf node={child} {editMode} /></div>
+									<div class="dashboard-slot-fill">
+										<DashboardCanvasSelf node={child} {editMode} />
+									</div>
 								</div>
 							{/each}
+							{#if surfaceDropPreview && layoutKind === 'free'}
+								<div
+									class="dashboard-slot dashboard-drop-preview"
+									style={placementStyle(surfaceDropPreview.placement)}
+									aria-hidden="true">
+									<div class="dashboard-slot-fill">
+										<div class="dashboard-drop-preview-fill">
+											<span class="dashboard-drop-preview-kind"
+												>{surfaceDropPreview.targetKind === 'parameter'
+													? 'Parameter Widget'
+													: 'Node Widget'}</span>
+											<strong>{surfaceDropPreview.label}</strong>
+										</div>
+									</div>
+								</div>
+							{/if}
 						</div>
 					{/if}
 
@@ -1488,32 +2394,44 @@
 						<div class="dashboard-empty-state">
 							<span class="eyebrow">Dashboard Page</span>
 							<h3>Drop a node or parameter here</h3>
-							<p>Outliner drags create node widgets. Inspector parameter-label drags create generic widgets.</p>
+							<p>
+								Outliner drags create node widgets. Inspector parameter-label drags create generic
+								widgets.
+							</p>
 						</div>
 					{/if}
 
-					{#if surfaceDragDepth > 0}
+					{#if surfaceDragDepth > 0 && (!surfaceDropPreview || layoutKind !== 'free')}
 						<div class="dashboard-drop-indicator">Drop to create a widget</div>
 					{/if}
 				</div>
 			</div>
 			{#if editMode && pageSize.enabled}
-				<div class="dashboard-page-visibility-overlay" style={pageBleedFrameStyle} aria-hidden="true"></div>
+				<div
+					class="dashboard-page-visibility-overlay"
+					style={pageBleedFrameStyle}
+					aria-hidden="true">
+				</div>
+			{/if}
+			{#if marqueeSelection}
+				<div class="dashboard-marquee-selection" style={marqueeStyle} aria-hidden="true"></div>
 			{/if}
 		</div>
 	</div>
-	{:else if isContainerWidget}
+{:else if isContainerWidget}
 	<section
 		class="dashboard-widget-shell dashboard-container"
 		class:selected={isSelected}
 		class:free-layout-active={freeLayoutInteraction !== null}
 		class:editable-free={supportsFreePlacement}
+		class:run-mode={!editMode}
 		data-node-id={liveNode.node_id}
+		data-dashboard-surface-id={String(parentNode?.node_id ?? '')}
+		bind:this={widgetShellElement}
 		style={widgetShellStyle}
 		role="button"
 		tabindex={editMode ? 0 : -1}
 		onpointerdown={handleWidgetPointerDown}
-		onclick={selectWidgetNode}
 		onkeydown={selectWidgetNodeFromKeyboard}>
 		{#if editMode && supportsFreePlacement}
 			{#each freeLayoutResizeZones as resizeZone}
@@ -1521,16 +2439,29 @@
 					class="dashboard-resize-zone {resizeZone.name}"
 					aria-hidden="true"
 					onpointerdown={(event) => {
-						beginFreeLayoutResize(event, resizeZone.edges);
-					}}></div>
+						if (!isSelected) {
+							selectWidgetNode('REPLACE');
+						}
+						beginFreeLayoutResize(event, resizeZone.edges, resolveTransformNodes());
+					}}>
+				</div>
 			{/each}
+		{/if}
+		{#if anchorGuides.length > 0}
+			<div class="dashboard-anchor-guides" aria-hidden="true">
+				{#each anchorGuides as guide}
+					<div class="dashboard-anchor-guide {guide.axis} {guide.direction}" style={guide.style}></div>
+				{/each}
+			</div>
 		{/if}
 		<div
 			class="dashboard-surface dashboard-container-surface {layoutKind}"
 			class:surface-target-active={surfaceDragDepth > 0}
+			class:snap-grid-visible={snapGridVisible}
 			role="group"
 			aria-label="Dashboard container surface"
 			style={surfaceStyle}
+			onpointerdown={handleSurfacePointerDown}
 			ondragenter={handleSurfaceDragEnter}
 			ondragover={handleSurfaceDragOver}
 			ondragleave={handleSurfaceDragLeave}
@@ -1551,9 +2482,14 @@
 				</div>
 				<div class="dashboard-tab-body compact">
 					{#if activeTabNodeId !== null}
-						{@const activeChild = childWidgets.find((candidate) => candidate.node_id === activeTabNodeId) ?? null}
+						{@const activeChild =
+							childWidgets.find((candidate) => candidate.node_id === activeTabNodeId) ?? null}
 						{#if activeChild}
-							<div class="dashboard-slot"><div class="dashboard-slot-fill"><DashboardCanvasSelf node={activeChild} {editMode} /></div></div>
+							<div class="dashboard-slot">
+								<div class="dashboard-slot-fill">
+									<DashboardCanvasSelf node={activeChild} {editMode} />
+								</div>
+							</div>
 						{/if}
 					{/if}
 				</div>
@@ -1569,7 +2505,11 @@
 									toggleAccordionNode(child.node_id);
 								}}>{child.meta.label}</button>
 							{#if openAccordionNodeIds.includes(child.node_id)}
-								<div class="dashboard-slot accordion-slot"><div class="dashboard-slot-fill"><DashboardCanvasSelf node={child} {editMode} /></div></div>
+								<div class="dashboard-slot accordion-slot">
+									<div class="dashboard-slot-fill">
+										<DashboardCanvasSelf node={child} {editMode} />
+									</div>
+								</div>
 							{/if}
 						</section>
 					{/each}
@@ -1581,6 +2521,22 @@
 							<div class="dashboard-slot-fill"><DashboardCanvasSelf node={child} {editMode} /></div>
 						</div>
 					{/each}
+					{#if surfaceDropPreview && layoutKind === 'free'}
+						<div
+							class="dashboard-slot dashboard-drop-preview"
+							style={placementStyle(surfaceDropPreview.placement)}
+							aria-hidden="true">
+							<div class="dashboard-slot-fill">
+								<div class="dashboard-drop-preview-fill">
+									<span class="dashboard-drop-preview-kind"
+										>{surfaceDropPreview.targetKind === 'parameter'
+											? 'Parameter Widget'
+											: 'Node Widget'}</span>
+									<strong>{surfaceDropPreview.label}</strong>
+								</div>
+							</div>
+						</div>
+					{/if}
 				</div>
 			{/if}
 
@@ -1588,10 +2544,13 @@
 				<div class="dashboard-empty-inline">Drop widgets here or use the add menu.</div>
 			{/if}
 
-			{#if surfaceDragDepth > 0}
+			{#if surfaceDragDepth > 0 && (!surfaceDropPreview || layoutKind !== 'free')}
 				<div class="dashboard-drop-indicator">Drop to add a child widget</div>
 			{/if}
 		</div>
+		{#if marqueeSelection}
+			<div class="dashboard-marquee-selection" style={marqueeStyle} aria-hidden="true"></div>
+		{/if}
 	</section>
 {:else if isNodeWidget}
 	<section
@@ -1600,7 +2559,10 @@
 		class:binding-active={bindingDragDepth > 0}
 		class:free-layout-active={freeLayoutInteraction !== null}
 		class:editable-free={supportsFreePlacement}
+		class:run-mode={!editMode}
 		data-node-id={liveNode.node_id}
+		data-dashboard-surface-id={String(parentNode?.node_id ?? '')}
+		bind:this={widgetShellElement}
 		style={widgetShellStyle}
 		role="button"
 		tabindex={editMode ? 0 : -1}
@@ -1615,7 +2577,6 @@
 			void handleNodeWidgetBindingDrop(event);
 		}}
 		onpointerdown={handleWidgetPointerDown}
-		onclick={selectWidgetNode}
 		onkeydown={selectWidgetNodeFromKeyboard}>
 		{#if editMode && supportsFreePlacement}
 			{#each freeLayoutResizeZones as resizeZone}
@@ -1623,14 +2584,29 @@
 					class="dashboard-resize-zone {resizeZone.name}"
 					aria-hidden="true"
 					onpointerdown={(event) => {
-						beginFreeLayoutResize(event, resizeZone.edges);
-					}}></div>
+						if (!isSelected) {
+							selectWidgetNode('REPLACE');
+						}
+						beginFreeLayoutResize(event, resizeZone.edges, resolveTransformNodes());
+					}}>
+				</div>
 			{/each}
+		{/if}
+		{#if anchorGuides.length > 0}
+			<div class="dashboard-anchor-guides" aria-hidden="true">
+				{#each anchorGuides as guide}
+					<div class="dashboard-anchor-guide {guide.axis} {guide.direction}" style={guide.style}></div>
+				{/each}
+			</div>
 		{/if}
 		<div class="dashboard-widget-content inspector-body">
 			{#if boundNode}
 				<div class="dashboard-live-content" class:inert-mode={editMode} inert={editMode}>
-					{#if NodeWidgetDisplayComponent}
+					{#if showsNodeWidgetEditor}
+						<DashboardNodeWidgetParameterEditorContent
+							widgetNode={liveNode}
+							targetNode={boundNode} />
+					{:else if NodeWidgetDisplayComponent}
 						<NodeWidgetDisplayComponent targetNode={boundNode} {includeChildren} {editMode} />
 					{:else}
 						<div class="dashboard-empty-inline">No display mode is available for this node.</div>
@@ -1648,7 +2624,10 @@
 		class:binding-active={bindingDragDepth > 0}
 		class:free-layout-active={freeLayoutInteraction !== null}
 		class:editable-free={supportsFreePlacement}
+		class:run-mode={!editMode}
 		data-node-id={liveNode.node_id}
+		data-dashboard-surface-id={String(parentNode?.node_id ?? '')}
+		bind:this={widgetShellElement}
 		style={widgetShellStyle}
 		role="button"
 		tabindex={editMode ? 0 : -1}
@@ -1663,7 +2642,6 @@
 			void handleGenericWidgetBindingDrop(event);
 		}}
 		onpointerdown={handleWidgetPointerDown}
-		onclick={selectWidgetNode}
 		onkeydown={selectWidgetNodeFromKeyboard}>
 		{#if editMode && supportsFreePlacement}
 			{#each freeLayoutResizeZones as resizeZone}
@@ -1671,78 +2649,118 @@
 					class="dashboard-resize-zone {resizeZone.name}"
 					aria-hidden="true"
 					onpointerdown={(event) => {
-						beginFreeLayoutResize(event, resizeZone.edges);
-					}}></div>
+						if (!isSelected) {
+							selectWidgetNode('REPLACE');
+						}
+						beginFreeLayoutResize(event, resizeZone.edges, resolveTransformNodes());
+					}}>
+				</div>
 			{/each}
+		{/if}
+		{#if anchorGuides.length > 0}
+			<div class="dashboard-anchor-guides" aria-hidden="true">
+				{#each anchorGuides as guide}
+					<div class="dashboard-anchor-guide {guide.axis} {guide.direction}" style={guide.style}></div>
+				{/each}
+			</div>
 		{/if}
 		<div class="dashboard-widget-content generic-body">
 			<div class="dashboard-live-content" class:inert-mode={editMode} inert={editMode}>
-			{#if widgetKind === 'button'}
-				<button type="button" class="generic-button" onclick={() => {
-					void triggerGenericAction();
-				}} disabled={editMode}>{textConfig || boundParamNode?.meta.label || 'Trigger'}</button>
-			{:else if widgetKind === 'slider'}
-				<div class="generic-slider-wrap">
-					<input
-						type="range"
-						min={String(valueRange[0])}
-						max={String(valueRange[1])}
-						step={String(sliderStep)}
-						value={String(
-							boundParam?.value.kind === 'float' || boundParam?.value.kind === 'int'
-								? boundParam.value.value
-								: valueRange[0]
-						)}
-						disabled={editMode || !boundParam || (boundParam.value.kind !== 'float' && boundParam.value.kind !== 'int')}
-						oninput={(event) => {
-							void applySliderValue((event.target as HTMLInputElement).value);
-						}} />
-					<div class="generic-readout">{boundParam ? formatParamValue(boundParam.value) : 'Unbound'}</div>
-				</div>
-			{:else if widgetKind === 'checkbox'}
-				<label class="generic-checkbox">
-					<input
-						type="checkbox"
-						checked={boundParam?.value.kind === 'bool' ? boundParam.value.value : defaultChecked}
-						disabled={editMode || boundParam?.value.kind !== 'bool'}
-						onchange={(event) => {
-							void applyGenericParamValue({
-								kind: 'bool',
-								value: (event.target as HTMLInputElement).checked
-							});
-						}} />
-					<span>{textConfig || boundParamNode?.meta.label || 'Enabled'}</span>
-				</label>
-			{:else if widgetKind === 'textInput'}
-				{#if multiline}
-					<textarea
-						rows="4"
-						placeholder={placeholderConfig}
-						disabled={
-							editMode ||
-							!boundParam ||
-							(boundParam.value.kind !== 'str' && boundParam.value.kind !== 'file' && boundParam.value.kind !== 'enum' && boundParam.value.kind !== 'css_value')
-						}
-						onchange={(event) => {
-							void applyStringValue((event.target as HTMLTextAreaElement).value);
-						}}>{boundParam ? boundParam.value.kind === 'css_value' ? formatCssValue(boundParam.value) : boundParam.value.kind === 'str' || boundParam.value.kind === 'file' || boundParam.value.kind === 'enum' ? boundParam.value.value : textConfig : textConfig}</textarea>
+				{#if widgetKind === 'button'}
+					<button
+						type="button"
+						class="generic-button"
+						onclick={() => {
+							void triggerGenericAction();
+						}}
+						disabled={editMode}>{textConfig || boundParamNode?.meta.label || 'Trigger'}</button>
+				{:else if widgetKind === 'slider'}
+					<div class="generic-slider-wrap">
+						<input
+							type="range"
+							min={String(valueRange[0])}
+							max={String(valueRange[1])}
+							step={String(sliderStep)}
+							value={String(
+								boundParam?.value.kind === 'float' || boundParam?.value.kind === 'int'
+									? boundParam.value.value
+									: valueRange[0]
+							)}
+							disabled={editMode ||
+								!boundParam ||
+								(boundParam.value.kind !== 'float' && boundParam.value.kind !== 'int')}
+							oninput={(event) => {
+								void applySliderValue((event.target as HTMLInputElement).value);
+							}} />
+						<div class="generic-readout">
+							{boundParam ? formatParamValue(boundParam.value) : 'Unbound'}
+						</div>
+					</div>
+				{:else if widgetKind === 'checkbox'}
+					<label class="generic-checkbox">
+						<input
+							type="checkbox"
+							checked={boundParam?.value.kind === 'bool' ? boundParam.value.value : defaultChecked}
+							disabled={editMode || boundParam?.value.kind !== 'bool'}
+							onchange={(event) => {
+								void applyGenericParamValue({
+									kind: 'bool',
+									value: (event.target as HTMLInputElement).checked
+								});
+							}} />
+						<span>{textConfig || boundParamNode?.meta.label || 'Enabled'}</span>
+					</label>
+				{:else if widgetKind === 'textInput'}
+					{#if multiline}
+						<textarea
+							rows="4"
+							placeholder={placeholderConfig}
+							disabled={editMode ||
+								!boundParam ||
+								(boundParam.value.kind !== 'str' &&
+									boundParam.value.kind !== 'file' &&
+									boundParam.value.kind !== 'enum' &&
+									boundParam.value.kind !== 'css_value')}
+							onchange={(event) => {
+								void applyStringValue((event.target as HTMLTextAreaElement).value);
+							}}
+							>{boundParam
+								? boundParam.value.kind === 'css_value'
+									? formatCssValue(boundParam.value)
+									: boundParam.value.kind === 'str' ||
+										  boundParam.value.kind === 'file' ||
+										  boundParam.value.kind === 'enum'
+										? boundParam.value.value
+										: textConfig
+								: textConfig}</textarea>
+					{:else}
+						<input
+							type="text"
+							value={boundParam
+								? boundParam.value.kind === 'css_value'
+									? formatCssValue(boundParam.value)
+									: boundParam.value.kind === 'str' ||
+										  boundParam.value.kind === 'file' ||
+										  boundParam.value.kind === 'enum'
+										? boundParam.value.value
+										: textConfig
+								: textConfig}
+							placeholder={placeholderConfig}
+							disabled={editMode ||
+								!boundParam ||
+								(boundParam.value.kind !== 'str' &&
+									boundParam.value.kind !== 'file' &&
+									boundParam.value.kind !== 'enum' &&
+									boundParam.value.kind !== 'css_value')}
+							onchange={(event) => {
+								void applyStringValue((event.target as HTMLInputElement).value);
+							}} />
+					{/if}
 				{:else}
-					<input
-						type="text"
-						value={boundParam ? boundParam.value.kind === 'css_value' ? formatCssValue(boundParam.value) : boundParam.value.kind === 'str' || boundParam.value.kind === 'file' || boundParam.value.kind === 'enum' ? boundParam.value.value : textConfig : textConfig}
-						placeholder={placeholderConfig}
-						disabled={
-							editMode ||
-							!boundParam ||
-							(boundParam.value.kind !== 'str' && boundParam.value.kind !== 'file' && boundParam.value.kind !== 'enum' && boundParam.value.kind !== 'css_value')
-						}
-						onchange={(event) => {
-							void applyStringValue((event.target as HTMLInputElement).value);
-						}} />
+					<div class="generic-text-display">
+						{genericDisplayValue || 'Drop a parameter or set static text.'}
+					</div>
 				{/if}
-			{:else}
-				<div class="generic-text-display">{genericDisplayValue || 'Drop a parameter or set static text.'}</div>
-			{/if}
 			</div>
 		</div>
 	</section>
@@ -1759,6 +2777,27 @@
 		border: dashed 0.06rem rgb(from var(--gc-color-panel-outline) r g b / 0.55);
 	}
 
+	.dashboard-surface.snap-grid-visible::before {
+		content: '';
+		position: absolute;
+		inset: 0;
+		pointer-events: none;
+		background-image:
+			linear-gradient(
+				to right,
+				rgb(from var(--gc-color-panel-outline) r g b / 0.16) 0.06rem,
+				transparent 0.06rem
+			),
+			linear-gradient(
+				to bottom,
+				rgb(from var(--gc-color-panel-outline) r g b / 0.16) 0.06rem,
+				transparent 0.06rem
+			);
+		background-size: var(--dashboard-snap-grid-step) var(--dashboard-snap-grid-step);
+		background-position: 0 0;
+		z-index: 0;
+	}
+
 	.dashboard-page.edit-bleed-visible,
 	.dashboard-page.edit-bleed-visible .dashboard-layout {
 		overflow: visible;
@@ -1768,7 +2807,7 @@
 		box-sizing: border-box;
 		block-size: 100%;
 		min-block-size: 100%;
-		padding: 0.55rem;
+		padding: 0;
 	}
 
 	.dashboard-container-surface {
@@ -1784,6 +2823,11 @@
 		block-size: 100%;
 		min-block-size: 0;
 		overflow: hidden;
+	}
+
+	.dashboard-page-viewport:focus,
+	.dashboard-page-viewport:focus-visible {
+		outline: none;
 	}
 
 	.dashboard-page-scene {
@@ -1830,6 +2874,7 @@
 		inline-size: 100%;
 		block-size: 100%;
 		min-block-size: inherit;
+		z-index: 1;
 	}
 
 	.dashboard-surface.free .dashboard-slot {
@@ -1980,14 +3025,14 @@
 		align-self: stretch;
 		min-inline-size: 0;
 		min-block-size: 0;
-		border-radius: 0.8rem;
-		background:
-			linear-gradient(180deg, rgb(from var(--gc-color-header) r g b / 0.52), rgb(from var(--gc-color-panel) r g b / 0.94));
-		border: solid 0.06rem rgb(from var(--gc-color-panel-outline) r g b / 0.55);
-		box-shadow: 0 0.35rem 0.9rem rgb(from var(--gc-color-background) r g b / 0.22);
+		border-radius: 0.5rem;
+		background: rgb(from var(--gc-color-background) r g b / 0);
+		border: dashed 0.06rem rgb(from var(--gc-color-panel-outline) r g b / 0.28);
+		box-shadow: none;
 		overflow: hidden;
 		transition:
 			border-color 120ms ease,
+			border-style 120ms ease,
 			box-shadow 120ms ease,
 			background 120ms ease;
 	}
@@ -2000,18 +3045,26 @@
 		cursor: grabbing;
 	}
 
-	.dashboard-widget-shell:hover {
+	.dashboard-widget-shell:not(.run-mode):hover {
+		border-style: solid;
 		border-color: rgb(from var(--gc-color-panel-outline) r g b / 0.82);
+		background: rgb(from var(--gc-color-background) r g b / 0.08);
 	}
 
 	.dashboard-widget-shell.selected {
+		border-style: solid;
 		border-color: rgb(from var(--gc-color-selection) r g b / 0.8);
 		box-shadow:
 			0 0 0 0.08rem rgb(from var(--gc-color-selection) r g b / 0.35),
 			0 0.45rem 1rem rgb(from var(--gc-color-selection) r g b / 0.14);
 	}
 
+	.dashboard-widget-shell.selected.editable-free {
+		overflow: visible;
+	}
+
 	.dashboard-widget-shell.binding-active {
+		border-style: solid;
 		border-color: rgb(from var(--gc-color-focus) r g b / 0.84);
 		box-shadow: 0 0 0 0.08rem rgb(from var(--gc-color-focus) r g b / 0.28);
 	}
@@ -2019,7 +3072,14 @@
 	.dashboard-widget-shell.free-layout-active {
 		box-shadow:
 			0 0 0 0.08rem rgb(from var(--gc-color-focus) r g b / 0.34),
-			0 0.75rem 1.5rem rgb(from var(--gc-color-background) r g b / 0.28);
+			0 0 0.9rem rgb(from var(--gc-color-background) r g b / 0.2);
+	}
+
+	.dashboard-widget-shell.run-mode {
+		border-color: transparent;
+		border-style: solid;
+		box-shadow: none;
+		background: transparent;
 	}
 
 	.dashboard-resize-zone {
@@ -2093,6 +3153,7 @@
 	}
 
 	.dashboard-drop-indicator,
+	.dashboard-drop-preview-kind,
 	.dashboard-empty-state .eyebrow {
 		text-transform: uppercase;
 		letter-spacing: 0.08em;
@@ -2112,11 +3173,37 @@
 	.dashboard-widget-content.inspector-body {
 		display: flex;
 		flex: 1 1 auto;
+		position: relative;
 		overflow: auto;
+	}
+
+	.dashboard-widget-shell:not(.run-mode) .dashboard-widget-content::after {
+		content: '';
+		position: absolute;
+		inset: 0;
+		pointer-events: none;
+		z-index: 2;
+		background: rgb(from var(--gc-color-background) r g b / 0.12);
+		opacity: 0;
+		transition:
+			opacity 120ms ease,
+			background 120ms ease;
+	}
+
+	.dashboard-widget-shell:not(.run-mode):hover .dashboard-widget-content::after,
+	.dashboard-widget-shell.selected .dashboard-widget-content::after,
+	.dashboard-widget-shell.binding-active .dashboard-widget-content::after {
+		background: rgb(from var(--gc-color-background) r g b / 0.16);
+		opacity: 1;
+	}
+
+	.dashboard-widget-shell.run-mode .dashboard-widget-content::after {
+		display: none;
 	}
 
 	.dashboard-live-content {
 		position: relative;
+		z-index: 1;
 		display: flex;
 		flex: 1 1 auto;
 		inline-size: 100%;
@@ -2131,13 +3218,78 @@
 		user-select: none;
 	}
 
-
 	.dashboard-container-surface {
-		padding: 0.35rem;
+		padding: 0;
 		border: none;
 		background: transparent;
 		box-shadow: none;
 		min-block-size: 4rem;
+	}
+
+	.dashboard-anchor-guides {
+		position: absolute;
+		inset: 0;
+		pointer-events: none;
+		z-index: 5;
+		overflow: visible;
+	}
+
+	.dashboard-anchor-guide {
+		position: absolute;
+		pointer-events: none;
+		background: rgb(from var(--gc-color-selection) r g b / 0.42);
+		box-shadow: 0 0 0.3rem rgb(from var(--gc-color-selection) r g b / 0.15);
+	}
+
+	.dashboard-anchor-guide.horizontal {
+		block-size: 0.08rem;
+	}
+
+	.dashboard-anchor-guide.vertical {
+		inline-size: 0.08rem;
+	}
+
+	.dashboard-anchor-guide::after {
+		content: '';
+		position: absolute;
+		inline-size: 0.34rem;
+		block-size: 0.34rem;
+		background: rgb(from var(--gc-color-selection) r g b / 0.58);
+		clip-path: polygon(50% 0%, 100% 100%, 0% 100%);
+	}
+
+	.dashboard-anchor-guide.horizontal.left::after {
+		inset-inline-start: -0.18rem;
+		inset-block-start: calc(50% - 0.17rem);
+		transform: rotate(-90deg);
+	}
+
+	.dashboard-anchor-guide.horizontal.right::after {
+		inset-inline-end: -0.18rem;
+		inset-block-start: calc(50% - 0.17rem);
+		transform: rotate(90deg);
+	}
+
+	.dashboard-anchor-guide.vertical.up::after {
+		inset-inline-start: calc(50% - 0.17rem);
+		inset-block-start: -0.18rem;
+		transform: rotate(0deg);
+	}
+
+	.dashboard-anchor-guide.vertical.down::after {
+		inset-inline-start: calc(50% - 0.17rem);
+		inset-block-end: -0.18rem;
+		transform: rotate(180deg);
+	}
+
+	.dashboard-marquee-selection {
+		position: fixed;
+		pointer-events: none;
+		z-index: 1000;
+		border: solid 0.08rem rgb(from var(--gc-color-selection) r g b / 0.92);
+		background: rgb(from var(--gc-color-selection) r g b / 0.16);
+		box-shadow: inset 0 0 0 0.04rem rgb(from var(--gc-color-selection) r g b / 0.24);
+		border-radius: 0.2rem;
 	}
 
 	.dashboard-empty-state,
@@ -2192,6 +3344,46 @@
 		pointer-events: none;
 	}
 
+	.dashboard-drop-preview {
+		pointer-events: none;
+		z-index: 2;
+	}
+
+	.dashboard-drop-preview-fill {
+		display: flex;
+		flex-direction: column;
+		justify-content: center;
+		gap: 0.35rem;
+		inline-size: 100%;
+		block-size: 100%;
+		padding: 0.75rem 0.85rem;
+		box-sizing: border-box;
+		border-radius: 0.8rem;
+		border: dashed 0.08rem rgb(from var(--gc-color-focus) r g b / 0.92);
+		background:
+			linear-gradient(
+				180deg,
+				rgb(from var(--gc-color-focus) r g b / 0.18),
+				rgb(from var(--gc-color-selection) r g b / 0.1)
+			),
+			rgb(from var(--gc-color-background) r g b / 0.62);
+		box-shadow: 0 0.4rem 1rem rgb(from var(--gc-color-background) r g b / 0.2);
+		color: white;
+		overflow: hidden;
+	}
+
+	.dashboard-drop-preview-fill strong {
+		font-size: 0.78rem;
+		font-weight: 600;
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+
+	.dashboard-drop-preview-kind {
+		opacity: 0.72;
+	}
+
 	.generic-body {
 		display: flex;
 		flex: 1 1 auto;
@@ -2219,7 +3411,11 @@
 		border-radius: 0.7rem;
 		padding: 0.55rem 0.8rem;
 		background:
-			linear-gradient(135deg, rgb(from var(--gc-color-selection) r g b / 0.32), rgb(from var(--gc-color-binding) r g b / 0.18)),
+			linear-gradient(
+				135deg,
+				rgb(from var(--gc-color-selection) r g b / 0.32),
+				rgb(from var(--gc-color-binding) r g b / 0.18)
+			),
 			rgb(from var(--gc-color-background) r g b / 0.7);
 		border: solid 0.06rem rgb(from var(--gc-color-selection) r g b / 0.6);
 		color: #f2f5ff;
@@ -2273,5 +3469,4 @@
 		resize: none;
 		min-block-size: 0;
 	}
-
 </style>

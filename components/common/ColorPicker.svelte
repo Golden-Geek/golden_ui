@@ -8,7 +8,10 @@
 		onStartEdit = undefined,
 		onEndEdit = undefined,
 		previewIsSwitch = false,
-		forceExpanded = false
+		forceExpanded = false,
+		showHex = true,
+		showRgbaFields = true,
+		layoutMode = 'default'
 	} = $props();
 
 	let isSwitch = $derived(previewIsSwitch);
@@ -237,7 +240,7 @@
 	}
 </script>
 
-<div class="cp-container" class:expanded={!previewOnly}>
+<div class="cp-container" class:expanded={!previewOnly} class:widget-layout={layoutMode === 'widget'}>
 	<div class="cp-header">
 		{#if !previewOnly}
 			<div class="cp-modes" transition:slide={{ duration: animTime }}>
@@ -345,22 +348,28 @@
 			</div>
 
 			<div class="cp-inputs">
-				<div class="cp-hex-row">
-					<span class="cp-label">#</span>
-					<input
-						type="text"
-						value={hexInput}
-						oninput={handleHexInput}
-						onfocus={notifyStartEdit}
-						onblur={notifyEndEdit}
-						class="cp-input-hex"
-					/>
-					<button class="cp-toggle-btn" onclick={() => (showInputs = !showInputs)}>
-						{showInputs ? 'Hide' : 'Edit'}
-					</button>
-				</div>
+				{#if showHex || showRgbaFields}
+					<div class="cp-hex-row">
+						{#if showHex}
+							<span class="cp-label">#</span>
+							<input
+								type="text"
+								value={hexInput}
+								oninput={handleHexInput}
+								onfocus={notifyStartEdit}
+								onblur={notifyEndEdit}
+								class="cp-input-hex"
+							/>
+						{/if}
+						{#if showRgbaFields}
+							<button class="cp-toggle-btn" onclick={() => (showInputs = !showInputs)}>
+								{showInputs ? 'Hide' : 'Edit'}
+							</button>
+						{/if}
+					</div>
+				{/if}
 
-				{#if showInputs}
+				{#if showInputs && showRgbaFields}
 					<div class="cp-rgba-grid">
 						<div class="cp-field">
 							<label for="cp-r">R</label>
@@ -438,6 +447,15 @@
 		padding: 0.3rem 0.7rem;
 	}
 
+	.cp-container.widget-layout {
+		display: flex;
+		flex-direction: column;
+		inline-size: 100%;
+		block-size: 100%;
+		min-inline-size: 0;
+		min-block-size: 0;
+	}
+
 	/* Header */
 	.cp-header {
 		display: flex;
@@ -507,6 +525,12 @@
 		touch-action: none;
 	}
 
+	.cp-container.widget-layout .cp-area {
+		flex: 1 1 auto;
+		min-block-size: 8rem;
+		margin-bottom: 0.5rem;
+	}
+
 	.cp-area.dragging {
 		cursor: none;
 	}
@@ -537,6 +561,10 @@
 		flex-direction: column;
 		gap: 0.625rem;
 		margin-bottom: 0.75rem;
+	}
+
+	.cp-container.widget-layout .cp-controls {
+		margin-bottom: 0.5rem;
 	}
 
 	.cp-slider-track {

@@ -25,13 +25,15 @@
 
 	.dashboard-node-widget-inspector-natural {
 		display: block;
-		inline-size: max-content;
-		min-inline-size: 100%;
+		inline-size: 100%;
+		max-inline-size: 100%;
+		min-inline-size: 0;
 		min-block-size: 100%;
 	}
 
 	.dashboard-node-widget-inspector-natural :global(.node-inspector.root) {
-		inline-size: auto;
-		min-inline-size: 100%;
+		inline-size: 100%;
+		max-inline-size: 100%;
+		min-inline-size: 0;
 	}
 </style>

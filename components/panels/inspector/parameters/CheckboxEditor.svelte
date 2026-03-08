@@ -3,8 +3,9 @@
 	import { sendSetParamIntent } from '$lib/golden_ui/store/ui-intents';
 	import type { UiNodeDto } from '$lib/golden_ui/types';
 
-	let { node } = $props<{
+	let { node, layoutMode = 'default' } = $props<{
 		node: UiNodeDto;
+		layoutMode?: 'default' | 'widget';
 	}>();
 
 	let session = $derived(appState.session);
@@ -33,12 +34,35 @@
 	};
 </script>
 
-<input
-	type="checkbox"
-	class="editor-checkbox"
-	disabled={!enabled}
-	class:readonly={readOnly}
-	checked={draftValue}
-	onchange={(event) => {
-		updateValue((event.target as HTMLInputElement).checked);
-	}} />
+<div class="editor-checkbox-shell" class:widget-layout={layoutMode === 'widget'}>
+	<input
+		type="checkbox"
+		class="editor-checkbox"
+		disabled={!enabled}
+		class:readonly={readOnly}
+		class:widget-layout={layoutMode === 'widget'}
+		checked={draftValue}
+		onchange={(event) => {
+			updateValue((event.target as HTMLInputElement).checked);
+		}} />
+</div>
+
+<style>
+	.editor-checkbox-shell {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		inline-size: 100%;
+	}
+
+	.editor-checkbox-shell.widget-layout {
+		block-size: 100%;
+		padding: 0.4rem;
+	}
+
+	.editor-checkbox.widget-layout {
+		inline-size: min(100%, 4rem);
+		block-size: min(100%, 4rem);
+		aspect-ratio: 1;
+	}
+</style>

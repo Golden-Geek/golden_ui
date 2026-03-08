@@ -5,8 +5,16 @@
 	import { createUiEditSession, sendSetParamIntent } from '$lib/golden_ui/store/ui-intents';
 	import type { UiNodeDto } from '$lib/golden_ui/types';
 
-	let { node } = $props<{
+	interface VectorEditorPresentation {
+		layout?: 'inline' | 'column';
+		show_value_fields?: boolean;
+		max_decimals?: number;
+	}
+
+	let { node, layoutMode = 'default', presentation = {} } = $props<{
 		node: UiNodeDto;
+		layoutMode?: 'default' | 'widget';
+		presentation?: VectorEditorPresentation;
 	}>();
 
 	let session = $derived(appState.session);
@@ -22,6 +30,9 @@
 	let isEditing = $state(false);
 	let editSession = createUiEditSession('Edit vector', 'param-vector');
 	const NUMERIC_EPSILON = 1e-9;
+	let showValueFields = $derived(presentation.show_value_fields !== false);
+	let fractionDigits = $derived(Math.max(0, Math.min(8, Math.round(presentation.max_decimals ?? 2))));
+	let widgetLayoutKind = $derived(presentation.layout === 'column' ? 'column' : 'inline');
 
 	
 	$effect(() => {
@@ -175,7 +186,10 @@
 	};
 </script>
 
-<div class="multi-number-editor">
+<div
+	class="multi-number-editor"
+	class:widget-layout={layoutMode === 'widget'}
+	class:column-layout={layoutMode === 'widget' && widgetLayoutKind === 'column'}>
 	{#if draftValue.length > 0}
 		{#each draftValue as item, index}
 			<div class="single-number-editor">
@@ -192,32 +206,34 @@
 						onStartEdit={startEdit}
 						onEndEdit={endEdit} />
 				</div>
-				<input
-					type="text"
-					class="number-field"
-					disabled={!enabled}
-					class:readonly={readOnly}
-					value={item.toFixed(2)}
-					onchange={(event) => {
-						const nextValue = Number((event.target as HTMLInputElement).value);
-						if (Number.isFinite(nextValue)) {
-							commitValue(nextValue, index);
-						}
-					}}
-					onkeydown={(event) => {
-						if (event.key === 'Enter') {
+				{#if showValueFields}
+					<input
+						type="text"
+						class="number-field"
+						disabled={!enabled}
+						class:readonly={readOnly}
+						value={item.toFixed(fractionDigits)}
+						onchange={(event) => {
 							const nextValue = Number((event.target as HTMLInputElement).value);
 							if (Number.isFinite(nextValue)) {
 								commitValue(nextValue, index);
 							}
-							(event.target as HTMLInputElement).blur();
-						} else if (event.key === 'Escape') {
-							const reverted = [...draftValue];
-							reverted[index] = value[index] ?? 0;
-							draftValue = reverted;
-							(event.target as HTMLInputElement).blur();
-						}
-					}} />
+						}}
+						onkeydown={(event) => {
+							if (event.key === 'Enter') {
+								const nextValue = Number((event.target as HTMLInputElement).value);
+								if (Number.isFinite(nextValue)) {
+									commitValue(nextValue, index);
+								}
+								(event.target as HTMLInputElement).blur();
+							} else if (event.key === 'Escape') {
+								const reverted = [...draftValue];
+								reverted[index] = value[index] ?? 0;
+								draftValue = reverted;
+								(event.target as HTMLInputElement).blur();
+							}
+						}} />
+				{/if}
 			</div>
 		{/each}
 	{:else}
@@ -233,12 +249,31 @@
 		width: 100%;
 	}
 
+	.multi-number-editor.widget-layout {
+		height: 100%;
+		justify-content: stretch;
+	}
+
+	.multi-number-editor.widget-layout.column-layout {
+		gap: 0.45rem;
+	}
+
 	.single-number-editor {
 		display: flex;
 		align-items: center;
 		gap: 0.25rem;
 		width: 100%;
 		height: 1.2rem;
+	}
+
+	.multi-number-editor.widget-layout .single-number-editor {
+		flex: 1 1 0;
+		align-items: stretch;
+		height: auto;
+	}
+
+	.multi-number-editor.widget-layout.column-layout .single-number-editor {
+		flex-direction: column;
 	}
 
 	.slider-wrapper {
@@ -249,9 +284,21 @@
 		height: 70%;
 	}
 
+	.multi-number-editor.widget-layout .slider-wrapper {
+		height: 100%;
+	}
+
 	.number-field {
 		height: 100%;
 		box-sizing: border-box;
 		width: 30%;
+	}
+
+	.multi-number-editor.widget-layout .number-field {
+		width: clamp(4rem, 26%, 7rem);
+	}
+
+	.multi-number-editor.widget-layout.column-layout .number-field {
+		width: 100%;
 	}
 </style>

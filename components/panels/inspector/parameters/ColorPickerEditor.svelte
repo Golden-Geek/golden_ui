@@ -5,8 +5,16 @@
 	import { createUiEditSession, sendSetParamIntent } from '$lib/golden_ui/store/ui-intents';
 	import type { UiNodeDto } from '$lib/golden_ui/types';
 
-	let { node } = $props<{
+	interface ColorEditorPresentation {
+		force_expanded?: boolean;
+		show_hex?: boolean;
+		show_rgba_fields?: boolean;
+	}
+
+	let { node, layoutMode = 'default', presentation = {} } = $props<{
 		node: UiNodeDto;
+		layoutMode?: 'default' | 'widget';
+		presentation?: ColorEditorPresentation;
 	}>();
 
 	let session = $derived(appState.session);
@@ -92,14 +100,30 @@
 	};
 </script>
 
-<ColorPicker
-	previewIsSwitch={enabled && !readOnly}
-	color={draftColor}
-	onchange={(nextColor: unknown) => {
-		updateValue(nextColor);
-	}}
-	onStartEdit={startEdit}
-	onEndEdit={endEdit}></ColorPicker>
+<div class="color-picker-editor" class:widget-layout={layoutMode === 'widget'}>
+	<ColorPicker
+		previewIsSwitch={enabled && !readOnly}
+		forceExpanded={presentation.force_expanded === true}
+		showHex={presentation.show_hex !== false}
+		showRgbaFields={presentation.show_rgba_fields !== false}
+		layoutMode={layoutMode}
+		color={draftColor}
+		onchange={(nextColor: unknown) => {
+			updateValue(nextColor);
+		}}
+		onStartEdit={startEdit}
+		onEndEdit={endEdit}></ColorPicker>
+</div>
 
 <style>
+	.color-picker-editor {
+		display: flex;
+		inline-size: 100%;
+		min-inline-size: 0;
+	}
+
+	.color-picker-editor.widget-layout {
+		block-size: 100%;
+		min-block-size: 0;
+	}
 </style>
