@@ -1823,14 +1823,34 @@ interface CurveDrawPathPoint {
 			context.setTransform(dpr, 0, 0, dpr, 0, 0);
 		};
 
+		let resizeFrameId: number | null = null;
+		const scheduleCanvasSizeSync = (): void => {
+			if (typeof window === 'undefined') {
+				sync_canvas_size();
+				return;
+			}
+			if (resizeFrameId !== null) {
+				return;
+			}
+			resizeFrameId = window.requestAnimationFrame(() => {
+				resizeFrameId = null;
+				sync_canvas_size();
+			});
+		};
+
 		let observer: ResizeObserver | null = null;
 		if (typeof ResizeObserver !== 'undefined') {
-			observer = new ResizeObserver(sync_canvas_size);
+			observer = new ResizeObserver(() => {
+				scheduleCanvasSizeSync();
+			});
 			observer.observe(canvasElement);
 		}
 		sync_canvas_size();
 
 		return () => {
+			if (resizeFrameId !== null && typeof window !== 'undefined') {
+				window.cancelAnimationFrame(resizeFrameId);
+			}
 			observer?.disconnect();
 			canvas_context = null;
 		};

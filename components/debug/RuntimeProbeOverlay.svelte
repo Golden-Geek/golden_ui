@@ -6,7 +6,7 @@
 	} from '$lib/golden_ui/debug/runtime-probe.svelte';
 
 	let expanded = $state(false);
-	const visible = $derived(runtimeProbe.overlayEnabled || runtimeProbe.entries.length > 0);
+	const visible = $derived(runtimeProbe.overlayEnabled);
 	const entryCountLabel = $derived(
 		runtimeProbe.entries.length === 1
 			? '1 runtime issue'

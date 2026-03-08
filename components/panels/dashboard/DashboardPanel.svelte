@@ -348,6 +348,7 @@
 	.dashboard-panel {
 		inline-size: 100%;
 		block-size: 100%;
+		min-inline-size: 0;
 		min-block-size: 0;
 	}
 
@@ -361,6 +362,7 @@
 	.dashboard-main {
 		display: flex;
 		flex-direction: column;
+		min-inline-size: 0;
 		min-block-size: 0;
 		overflow: hidden;
 	}
@@ -455,7 +457,9 @@
 
 	.dashboard-main-content {
 		flex: 1 1 auto;
+		min-inline-size: 0;
 		min-block-size: 0;
+		overflow: hidden;
 	}
 
 	.dashboard-empty-state {

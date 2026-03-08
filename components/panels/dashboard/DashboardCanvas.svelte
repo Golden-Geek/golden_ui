@@ -1842,8 +1842,7 @@
 			return 0;
 		}
 		const rootRemPx = getRootRemPixels();
-		const viewportMinExtent = Math.min(pageViewportWidthPx, pageViewportHeightPx);
-		return Math.max(minFreeWidgetWidthRem * rootRemPx, viewportMinExtent * 0.12);
+		return Math.max(minFreeWidgetWidthRem * rootRemPx, 2 * rootRemPx);
 	});
 	const pageSceneStyle = $derived.by(() => `padding: ${pageEditBleedPx}px;`);
 	const pageSizeContext = $derived.by(
@@ -2873,6 +2872,7 @@
 		flex-direction: column;
 		inline-size: 100%;
 		block-size: 100%;
+		min-inline-size: 0;
 		min-block-size: 0;
 		overflow: hidden;
 	}
@@ -2888,6 +2888,7 @@
 		place-items: center;
 		inline-size: 100%;
 		block-size: 100%;
+		min-inline-size: 0;
 		min-block-size: 0;
 		overflow: visible;
 		box-sizing: border-box;
@@ -2903,6 +2904,8 @@
 		position: relative;
 		grid-area: 1 / 1;
 		flex: 0 0 auto;
+		min-inline-size: 0;
+		min-block-size: 0;
 		overflow: visible;
 		z-index: 1;
 		transform-origin: center center;

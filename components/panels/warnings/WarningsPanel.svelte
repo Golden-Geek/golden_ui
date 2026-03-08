@@ -57,14 +57,15 @@
 	const flashWarning = (warning: { warningId: string; sourceNodeId: NodeId }): void => {
 		const warningElement = warningElems[`${warning.sourceNodeId}:${warning.warningId}`];
 		if (warningElement) {
-			warningElement.classList.add('flashing');
+			warningElement.classList.remove('highlighted');
+			void warningElement.offsetWidth;
+			warningElement.classList.add('highlighted');
 
-			//focus on element
-			warningElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+			warningElement.scrollIntoView({ behavior: 'auto', block: 'nearest', inline: 'nearest' });
 
 			setTimeout(() => {
-				warningElement.classList.remove('flashing');
-			}, 20);
+				warningElement.classList.remove('highlighted');
+			}, 700);
 		}
 	};
 
@@ -219,9 +220,10 @@
 		transition: background-color 0.5s ease;
 	}
 
-	.warning-item:global(.flashing) {
-		background-color: rgb(from var(--gc-color-warning) r g b / 30%);
-		transition: none;
+	.warning-item:global(.highlighted) {
+		background-color: color-mix(in srgb, var(--gc-color-panel-row) 88%, var(--gc-color-warning) 12%);
+		border-color: color-mix(in srgb, var(--gc-color-warning) 58%, var(--gc-color-panel-outline) 42%);
+		box-shadow: 0 0 0 0.08rem rgb(from var(--gc-color-warning) r g b / 0.16);
 	}
 
 	.warning-head {

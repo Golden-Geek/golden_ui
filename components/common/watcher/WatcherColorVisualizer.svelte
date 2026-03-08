@@ -191,10 +191,25 @@
 			animationFrameId = window.requestAnimationFrame(frame);
 		};
 
+		let resizeFrameId: number | null = null;
+		const scheduleCanvasSizeSync = (): void => {
+			if (typeof window === 'undefined') {
+				syncCanvasSize();
+				return;
+			}
+			if (resizeFrameId !== null) {
+				return;
+			}
+			resizeFrameId = window.requestAnimationFrame(() => {
+				resizeFrameId = null;
+				syncCanvasSize();
+			});
+		};
+
 		let resizeObserver: ResizeObserver | null = null;
 		if (typeof ResizeObserver !== 'undefined') {
 			resizeObserver = new ResizeObserver(() => {
-				syncCanvasSize();
+				scheduleCanvasSizeSync();
 			});
 			resizeObserver.observe(canvasElement);
 		}
@@ -204,6 +219,9 @@
 
 		return () => {
 			disposed = true;
+			if (resizeFrameId !== null && typeof window !== 'undefined') {
+				window.cancelAnimationFrame(resizeFrameId);
+			}
 			window.cancelAnimationFrame(animationFrameId);
 			resizeObserver?.disconnect();
 		};
