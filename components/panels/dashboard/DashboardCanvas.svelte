@@ -1,7 +1,15 @@
 <script lang="ts">
 	import { appState } from '$lib/golden_ui/store/workbench.svelte';
 	import { sendSetParamIntent } from '$lib/golden_ui/store/ui-intents';
-	import type { NodeId, ParamValue, UiNodeDto, UiParamDto } from '$lib/golden_ui/types';
+	import type { NodeId, ParamValue, UiNodeDto } from '$lib/golden_ui/types';
+	import {
+		cssValueToPx,
+		formatCssValue,
+		parseCssValue,
+		pxToCssValue,
+		type CssUnitConversionContext,
+		type CssValueData
+	} from '$lib/golden_ui/css-value';
 	import NodeAddButton from '$lib/golden_ui/components/common/NodeAddButton.svelte';
 	import NodeInspector from '$lib/golden_ui/components/panels/inspector/NodeInspector.svelte';
 	import DashboardCanvasSelf from './DashboardCanvas.svelte';
@@ -68,17 +76,21 @@
 		bottom: boolean;
 	};
 	type FreeLayoutPreview = {
-		position: [number, number];
-		size: [number, number];
+		position: { x: CssValueData; y: CssValueData };
+		size: { width: CssValueData; height: CssValueData };
 	};
 	type FreeLayoutInteraction = {
 		pointerId: number;
 		mode: FreeLayoutInteractionMode;
 		resizeEdges: FreeLayoutResizeEdges | null;
 		startClient: [number, number];
-		startPosition: [number, number];
-		startSize: [number, number];
+		startPosition: { x: CssValueData; y: CssValueData };
+		startSize: { width: CssValueData; height: CssValueData };
 		rootRemPx: number;
+		surfaceWidthPx: number;
+		surfaceHeightPx: number;
+		viewportWidthPx: number;
+		viewportHeightPx: number;
 	};
 	type FreeLayoutResizeZone = {
 		name: string;
@@ -110,6 +122,43 @@
 		const fontSize = Number.parseFloat(window.getComputedStyle(document.documentElement).fontSize);
 		return Number.isFinite(fontSize) && fontSize > 0 ? fontSize : 16;
 	};
+
+	const getViewportWidthPx = (): number =>
+		typeof window === 'undefined' ? 1280 : Math.max(window.innerWidth, 1);
+
+	const getViewportHeightPx = (): number =>
+		typeof window === 'undefined' ? 720 : Math.max(window.innerHeight, 1);
+
+	const getClosestSurfaceMetrics = (
+		target: EventTarget | null,
+		rootRemPx: number
+	): { width: number; height: number } => {
+		if (!(target instanceof Element)) {
+			return { width: getViewportWidthPx(), height: 20 * rootRemPx };
+		}
+		const surface = target.closest('.dashboard-surface');
+		if (!surface) {
+			return { width: getViewportWidthPx(), height: 20 * rootRemPx };
+		}
+		const rect = surface.getBoundingClientRect();
+		return {
+			width: Math.max(rect.width, rootRemPx),
+			height: Math.max(rect.height, rootRemPx)
+		};
+	};
+
+	const createCssUnitContext = (
+		interaction: Pick<
+			FreeLayoutInteraction,
+			'rootRemPx' | 'surfaceWidthPx' | 'surfaceHeightPx' | 'viewportWidthPx' | 'viewportHeightPx'
+		>,
+		axis: 'x' | 'y'
+	): CssUnitConversionContext => ({
+		rootRemPx: interaction.rootRemPx,
+		axisBasePx: axis === 'x' ? interaction.surfaceWidthPx : interaction.surfaceHeightPx,
+		viewportWidthPx: interaction.viewportWidthPx,
+		viewportHeightPx: interaction.viewportHeightPx
+	});
 
 	const sameNodeIdList = (left: NodeId[], right: NodeId[]): boolean => {
 		if (left.length !== right.length) {
@@ -311,14 +360,14 @@
 		await bindDashboardGenericWidgetTarget(getGraph, liveNode.node_id, targetNode);
 	};
 
-	const setVec2ParamValue = async (declId: string, value: [number, number]): Promise<void> => {
+	const setCssParamValue = async (declId: string, value: CssValueData): Promise<void> => {
 		const paramNode = getDirectParamNode(graph, liveNode, declId);
 		if (!paramNode || paramNode.data.kind !== 'parameter') {
 			return;
 		}
 		await sendSetParamIntent(
 			paramNode.node_id,
-			{ kind: 'vec2', value },
+			{ kind: 'css_value', value: value.value, unit: value.unit },
 			paramNode.data.param.event_behaviour
 		);
 	};
@@ -334,18 +383,36 @@
 		event.preventDefault();
 		event.stopPropagation();
 		selectWidgetNode();
+		const rootRemPx = getRootRemPixels();
+		const surfaceMetrics = getClosestSurfaceMetrics(event.currentTarget, rootRemPx);
 		freeLayoutInteraction = {
 			pointerId: event.pointerId,
 			mode: 'move',
 			resizeEdges: null,
 			startClient: [event.clientX, event.clientY],
-			startPosition: [...placement.position],
-			startSize: [...placement.size],
-			rootRemPx: getRootRemPixels()
+			startPosition: {
+				x: { ...placement.position.x },
+				y: { ...placement.position.y }
+			},
+			startSize: {
+				width: { ...placement.size.width },
+				height: { ...placement.size.height }
+			},
+			rootRemPx,
+			surfaceWidthPx: surfaceMetrics.width,
+			surfaceHeightPx: surfaceMetrics.height,
+			viewportWidthPx: getViewportWidthPx(),
+			viewportHeightPx: getViewportHeightPx()
 		};
 		freeLayoutPreview = {
-			position: [...placement.position],
-			size: [...placement.size]
+			position: {
+				x: { ...placement.position.x },
+				y: { ...placement.position.y }
+			},
+			size: {
+				width: { ...placement.size.width },
+				height: { ...placement.size.height }
+			}
 		};
 	};
 
@@ -359,18 +426,36 @@
 		event.preventDefault();
 		event.stopPropagation();
 		selectWidgetNode();
+		const rootRemPx = getRootRemPixels();
+		const surfaceMetrics = getClosestSurfaceMetrics(event.currentTarget, rootRemPx);
 		freeLayoutInteraction = {
 			pointerId: event.pointerId,
 			mode: 'resize',
 			resizeEdges,
 			startClient: [event.clientX, event.clientY],
-			startPosition: [...placement.position],
-			startSize: [...placement.size],
-			rootRemPx: getRootRemPixels()
+			startPosition: {
+				x: { ...placement.position.x },
+				y: { ...placement.position.y }
+			},
+			startSize: {
+				width: { ...placement.size.width },
+				height: { ...placement.size.height }
+			},
+			rootRemPx,
+			surfaceWidthPx: surfaceMetrics.width,
+			surfaceHeightPx: surfaceMetrics.height,
+			viewportWidthPx: getViewportWidthPx(),
+			viewportHeightPx: getViewportHeightPx()
 		};
 		freeLayoutPreview = {
-			position: [...placement.position],
-			size: [...placement.size]
+			position: {
+				x: { ...placement.position.x },
+				y: { ...placement.position.y }
+			},
+			size: {
+				width: { ...placement.size.width },
+				height: { ...placement.size.height }
+			}
 		};
 	};
 
@@ -391,13 +476,28 @@
 		try {
 			const operations: Promise<void>[] = [];
 			if (
-				preview.position[0] !== placement.position[0] ||
-				preview.position[1] !== placement.position[1]
+				preview.position.x.value !== placement.position.x.value ||
+				preview.position.x.unit !== placement.position.x.unit
 			) {
-				operations.push(setVec2ParamValue('position', preview.position));
+				operations.push(setCssParamValue('position_x', preview.position.x));
 			}
-			if (preview.size[0] !== placement.size[0] || preview.size[1] !== placement.size[1]) {
-				operations.push(setVec2ParamValue('size', preview.size));
+			if (
+				preview.position.y.value !== placement.position.y.value ||
+				preview.position.y.unit !== placement.position.y.unit
+			) {
+				operations.push(setCssParamValue('position_y', preview.position.y));
+			}
+			if (
+				preview.size.width.value !== placement.size.width.value ||
+				preview.size.width.unit !== placement.size.width.unit
+			) {
+				operations.push(setCssParamValue('width', preview.size.width));
+			}
+			if (
+				preview.size.height.value !== placement.size.height.value ||
+				preview.size.height.unit !== placement.size.height.unit
+			) {
+				operations.push(setCssParamValue('height', preview.size.height));
 			}
 			await Promise.all(operations);
 		} finally {
@@ -419,21 +519,23 @@
 		}
 	};
 
-	const updateVec2Param = async (
+	const updateCssParam = async (
 		declId: string,
-		fallback: [number, number],
-		mutate: (current: [number, number]) => [number, number]
+		fallback: CssValueData,
+		mutate: (current: CssValueData) => CssValueData
 	): Promise<void> => {
 		const paramNode = getDirectParamNode(graph, liveNode, declId);
 		if (!paramNode || paramNode.data.kind !== 'parameter') {
 			return;
 		}
 		const currentValue =
-			paramNode.data.param.value.kind === 'vec2' ? ([...paramNode.data.param.value.value] as [number, number]) : fallback;
+			paramNode.data.param.value.kind === 'css_value'
+				? { value: paramNode.data.param.value.value, unit: paramNode.data.param.value.unit }
+				: fallback;
 		const nextValue = mutate(currentValue);
 		await sendSetParamIntent(
 			paramNode.node_id,
-			{ kind: 'vec2', value: nextValue },
+			{ kind: 'css_value', value: nextValue.value, unit: nextValue.unit },
 			paramNode.data.param.event_behaviour
 		);
 	};
@@ -460,11 +562,27 @@
 	};
 
 	const resizePrimaryAxis = async (delta: number): Promise<void> => {
-		await updateVec2Param('size', [8, 4], ([width, height]) => {
-			if (parentLayoutKind === 'vertical') {
-				return [width, Math.max(2.4, height + delta)];
-			}
-			return [Math.max(3.5, width + delta), height];
+		const rootRemPx = getRootRemPixels();
+		const interactionLike = {
+			rootRemPx,
+			surfaceWidthPx: getViewportWidthPx(),
+			surfaceHeightPx: getViewportHeightPx(),
+			viewportWidthPx: getViewportWidthPx(),
+			viewportHeightPx: getViewportHeightPx()
+		};
+		const deltaPx = delta * rootRemPx;
+		if (parentLayoutKind === 'vertical') {
+			await updateCssParam('height', { value: 4, unit: 'rem' }, (current) => {
+				const context = createCssUnitContext(interactionLike, 'y');
+				const nextPx = Math.max(2.4 * rootRemPx, cssValueToPx(current, 'y', context) + deltaPx);
+				return pxToCssValue(nextPx, current, 'y', context);
+			});
+			return;
+		}
+		await updateCssParam('width', { value: 8, unit: 'rem' }, (current) => {
+			const context = createCssUnitContext(interactionLike, 'x');
+			const nextPx = Math.max(3.5 * rootRemPx, cssValueToPx(current, 'x', context) + deltaPx);
+			return pxToCssValue(nextPx, current, 'x', context);
 		});
 	};
 
@@ -486,15 +604,24 @@
 				return;
 			}
 			event.preventDefault();
-			const deltaX = (event.clientX - freeLayoutInteraction.startClient[0]) / freeLayoutInteraction.rootRemPx;
-			const deltaY = (event.clientY - freeLayoutInteraction.startClient[1]) / freeLayoutInteraction.rootRemPx;
+			const deltaXPx = event.clientX - freeLayoutInteraction.startClient[0];
+			const deltaYPx = event.clientY - freeLayoutInteraction.startClient[1];
+			const xContext = createCssUnitContext(freeLayoutInteraction, 'x');
+			const yContext = createCssUnitContext(freeLayoutInteraction, 'y');
+			const minWidthPx = minFreeWidgetWidthRem * freeLayoutInteraction.rootRemPx;
+			const minHeightPx = minFreeWidgetHeightRem * freeLayoutInteraction.rootRemPx;
 			if (freeLayoutInteraction.mode === 'move') {
+				const nextX = Math.max(0, cssValueToPx(freeLayoutInteraction.startPosition.x, 'x', xContext) + deltaXPx);
+				const nextY = Math.max(0, cssValueToPx(freeLayoutInteraction.startPosition.y, 'y', yContext) + deltaYPx);
 				freeLayoutPreview = {
-					position: [
-						Math.max(0, freeLayoutInteraction.startPosition[0] + deltaX),
-						Math.max(0, freeLayoutInteraction.startPosition[1] + deltaY)
-					],
-					size: [...freeLayoutInteraction.startSize]
+					position: {
+						x: pxToCssValue(nextX, freeLayoutInteraction.startPosition.x, 'x', xContext),
+						y: pxToCssValue(nextY, freeLayoutInteraction.startPosition.y, 'y', yContext)
+					},
+					size: {
+						width: { ...freeLayoutInteraction.startSize.width },
+						height: { ...freeLayoutInteraction.startSize.height }
+					}
 				};
 				return;
 			}
@@ -502,34 +629,42 @@
 			if (!resizeEdges) {
 				return;
 			}
-			let nextPosition: [number, number] = [...freeLayoutInteraction.startPosition];
-			let nextSize: [number, number] = [...freeLayoutInteraction.startSize];
+			let nextPositionPxX = cssValueToPx(freeLayoutInteraction.startPosition.x, 'x', xContext);
+			let nextPositionPxY = cssValueToPx(freeLayoutInteraction.startPosition.y, 'y', yContext);
+			let nextWidthPx = cssValueToPx(freeLayoutInteraction.startSize.width, 'x', xContext);
+			let nextHeightPx = cssValueToPx(freeLayoutInteraction.startSize.height, 'y', yContext);
 
 			if (resizeEdges.left) {
 				const appliedDeltaX = Math.min(
-					Math.max(deltaX, -freeLayoutInteraction.startPosition[0]),
-					freeLayoutInteraction.startSize[0] - minFreeWidgetWidthRem
+					Math.max(deltaXPx, -nextPositionPxX),
+					nextWidthPx - minWidthPx
 				);
-				nextPosition = [freeLayoutInteraction.startPosition[0] + appliedDeltaX, nextPosition[1]];
-				nextSize = [freeLayoutInteraction.startSize[0] - appliedDeltaX, nextSize[1]];
+				nextPositionPxX += appliedDeltaX;
+				nextWidthPx -= appliedDeltaX;
 			}
 			if (resizeEdges.right) {
-				nextSize = [Math.max(minFreeWidgetWidthRem, freeLayoutInteraction.startSize[0] + deltaX), nextSize[1]];
+				nextWidthPx = Math.max(minWidthPx, nextWidthPx + deltaXPx);
 			}
 			if (resizeEdges.top) {
 				const appliedDeltaY = Math.min(
-					Math.max(deltaY, -freeLayoutInteraction.startPosition[1]),
-					freeLayoutInteraction.startSize[1] - minFreeWidgetHeightRem
+					Math.max(deltaYPx, -nextPositionPxY),
+					nextHeightPx - minHeightPx
 				);
-				nextPosition = [nextPosition[0], freeLayoutInteraction.startPosition[1] + appliedDeltaY];
-				nextSize = [nextSize[0], freeLayoutInteraction.startSize[1] - appliedDeltaY];
+				nextPositionPxY += appliedDeltaY;
+				nextHeightPx -= appliedDeltaY;
 			}
 			if (resizeEdges.bottom) {
-				nextSize = [nextSize[0], Math.max(minFreeWidgetHeightRem, freeLayoutInteraction.startSize[1] + deltaY)];
+				nextHeightPx = Math.max(minHeightPx, nextHeightPx + deltaYPx);
 			}
 			freeLayoutPreview = {
-				position: nextPosition,
-				size: nextSize
+				position: {
+					x: pxToCssValue(nextPositionPxX, freeLayoutInteraction.startPosition.x, 'x', xContext),
+					y: pxToCssValue(nextPositionPxY, freeLayoutInteraction.startPosition.y, 'y', yContext)
+				},
+				size: {
+					width: pxToCssValue(nextWidthPx, freeLayoutInteraction.startSize.width, 'x', xContext),
+					height: pxToCssValue(nextHeightPx, freeLayoutInteraction.startSize.height, 'y', yContext)
+				}
 			};
 		};
 
@@ -585,27 +720,52 @@
 		if (!editMode || !supportsFreePlacement || !freeLayoutPreview) {
 			return '';
 		}
-		const deltaX = freeLayoutPreview.position[0] - placement.position[0];
-		const deltaY = freeLayoutPreview.position[1] - placement.position[1];
-		return `transform: translate(${deltaX}rem, ${deltaY}rem); inline-size: ${Math.max(6.5, freeLayoutPreview.size[0])}rem; min-block-size: ${Math.max(2.8, freeLayoutPreview.size[1])}rem; z-index: 4;`;
+		const context = {
+			rootRemPx: getRootRemPixels(),
+			surfaceWidthPx: getViewportWidthPx(),
+			surfaceHeightPx: getViewportHeightPx(),
+			viewportWidthPx: getViewportWidthPx(),
+			viewportHeightPx: getViewportHeightPx()
+		};
+		const deltaX =
+			cssValueToPx(freeLayoutPreview.position.x, 'x', createCssUnitContext(context, 'x')) -
+			cssValueToPx(placement.position.x, 'x', createCssUnitContext(context, 'x'));
+		const deltaY =
+			cssValueToPx(freeLayoutPreview.position.y, 'y', createCssUnitContext(context, 'y')) -
+			cssValueToPx(placement.position.y, 'y', createCssUnitContext(context, 'y'));
+		return `transform: translate(${deltaX}px, ${deltaY}px); inline-size: max(${formatCssValue(freeLayoutPreview.size.width)}, 6.5rem); min-block-size: max(${formatCssValue(freeLayoutPreview.size.height)}, 2.8rem); z-index: 4;`;
 	});
 
-	const freeSurfaceHeightRem = $derived.by(() => {
+	const freeSurfaceHeightPx = $derived.by(() => {
 		if (layoutKind !== 'free') {
-			return 20;
+			return 20 * getRootRemPixels();
 		}
-		let maxExtent = 18;
+		const rootRemPx = getRootRemPixels();
+		const surfaceContext = {
+			rootRemPx,
+			surfaceWidthPx: getViewportWidthPx(),
+			surfaceHeightPx: getViewportHeightPx(),
+			viewportWidthPx: getViewportWidthPx(),
+			viewportHeightPx: getViewportHeightPx()
+		};
+		let maxExtent = 18 * rootRemPx;
 		for (const child of childWidgets) {
 			const childPlacement = getDashboardPlacement(graph, child);
-			maxExtent = Math.max(maxExtent, childPlacement.position[1] + childPlacement.size[1] + gap[1] + 2);
+			maxExtent = Math.max(
+				maxExtent,
+				cssValueToPx(childPlacement.position.y, 'y', createCssUnitContext(surfaceContext, 'y')) +
+					cssValueToPx(childPlacement.size.height, 'y', createCssUnitContext(surfaceContext, 'y')) +
+					cssValueToPx(gap.y, 'y', createCssUnitContext(surfaceContext, 'y')) +
+					2 * rootRemPx
+			);
 		}
 		return maxExtent;
 	});
 
 	const surfaceStyle = $derived.by((): string => {
-		const gapStyle = `--dashboard-gap-x: ${gap[0]}rem; --dashboard-gap-y: ${gap[1]}rem;`;
+		const gapStyle = `--dashboard-gap-x: ${formatCssValue(gap.x)}; --dashboard-gap-y: ${formatCssValue(gap.y)};`;
 		if (layoutKind === 'free') {
-			return `${gapStyle} min-block-size: ${freeSurfaceHeightRem}rem;`;
+			return `${gapStyle} min-block-size: ${freeSurfaceHeightPx}px;`;
 		}
 		if (layoutKind === 'grid') {
 			return `${gapStyle} --dashboard-grid-columns: ${gridColumns};`;
@@ -616,16 +776,16 @@
 	const slotStyle = (child: UiNodeDto): string => {
 		const childPlacement = getDashboardPlacement(graph, child);
 		if (layoutKind === 'free') {
-			return `left: ${childPlacement.position[0]}rem; top: ${childPlacement.position[1]}rem; inline-size: ${Math.max(6.5, childPlacement.size[0])}rem; min-block-size: ${Math.max(2.8, childPlacement.size[1])}rem;`;
+			return `left: ${formatCssValue(childPlacement.position.x)}; top: ${formatCssValue(childPlacement.position.y)}; inline-size: max(${formatCssValue(childPlacement.size.width)}, 6.5rem); min-block-size: max(${formatCssValue(childPlacement.size.height)}, 2.8rem);`;
 		}
 		if (layoutKind === 'grid') {
-			return `grid-column: span ${childPlacement.columnSpan}; grid-row: span ${childPlacement.rowSpan}; min-block-size: ${Math.max(3.25, childPlacement.size[1])}rem;`;
+			return `grid-column: span ${childPlacement.columnSpan}; grid-row: span ${childPlacement.rowSpan}; min-block-size: max(${formatCssValue(childPlacement.size.height)}, 3.25rem);`;
 		}
-		const basis = layoutKind === 'horizontal' ? childPlacement.size[0] : childPlacement.size[1];
+		const basis = layoutKind === 'horizontal' ? childPlacement.size.width : childPlacement.size.height;
 		if (layoutKind === 'horizontal') {
-			return `flex: 1 1 ${Math.max(6.5, basis)}rem; min-inline-size: ${Math.max(6.5, childPlacement.size[0])}rem; min-block-size: ${Math.max(2.8, childPlacement.size[1])}rem;`;
+			return `flex: 1 1 auto; flex-basis: max(${formatCssValue(basis)}, 6.5rem); min-inline-size: max(${formatCssValue(childPlacement.size.width)}, 6.5rem); min-block-size: max(${formatCssValue(childPlacement.size.height)}, 2.8rem);`;
 		}
-		return `inline-size: 100%; min-block-size: ${Math.max(2.8, childPlacement.size[1])}rem;`;
+		return `inline-size: 100%; min-block-size: max(${formatCssValue(childPlacement.size.height)}, 2.8rem);`;
 	};
 
 	const widgetKind = $derived.by(() => {
@@ -704,6 +864,14 @@
 
 	const applyStringValue = async (raw: string): Promise<void> => {
 		if (!boundParam) {
+			return;
+		}
+		if (boundParam.value.kind === 'css_value') {
+			const parsed = parseCssValue(raw, boundParam.value.unit);
+			if (!parsed) {
+				return;
+			}
+			await applyGenericParamValue({ kind: 'css_value', value: parsed.value, unit: parsed.unit });
 			return;
 		}
 		if (boundParam.value.kind === 'str' || boundParam.value.kind === 'file' || boundParam.value.kind === 'enum') {
@@ -1114,20 +1282,20 @@
 						disabled={
 							editMode ||
 							!boundParam ||
-							(boundParam.value.kind !== 'str' && boundParam.value.kind !== 'file' && boundParam.value.kind !== 'enum')
+							(boundParam.value.kind !== 'str' && boundParam.value.kind !== 'file' && boundParam.value.kind !== 'enum' && boundParam.value.kind !== 'css_value')
 						}
 						onchange={(event) => {
 							void applyStringValue((event.target as HTMLTextAreaElement).value);
-						}}>{boundParam && (boundParam.value.kind === 'str' || boundParam.value.kind === 'file' || boundParam.value.kind === 'enum') ? boundParam.value.value : textConfig}</textarea>
+						}}>{boundParam ? boundParam.value.kind === 'css_value' ? formatCssValue(boundParam.value) : boundParam.value.kind === 'str' || boundParam.value.kind === 'file' || boundParam.value.kind === 'enum' ? boundParam.value.value : textConfig : textConfig}</textarea>
 				{:else}
 					<input
 						type="text"
-						value={boundParam && (boundParam.value.kind === 'str' || boundParam.value.kind === 'file' || boundParam.value.kind === 'enum') ? boundParam.value.value : textConfig}
+						value={boundParam ? boundParam.value.kind === 'css_value' ? formatCssValue(boundParam.value) : boundParam.value.kind === 'str' || boundParam.value.kind === 'file' || boundParam.value.kind === 'enum' ? boundParam.value.value : textConfig : textConfig}
 						placeholder={placeholderConfig}
 						disabled={
 							editMode ||
 							!boundParam ||
-							(boundParam.value.kind !== 'str' && boundParam.value.kind !== 'file' && boundParam.value.kind !== 'enum')
+							(boundParam.value.kind !== 'str' && boundParam.value.kind !== 'file' && boundParam.value.kind !== 'enum' && boundParam.value.kind !== 'css_value')
 						}
 						onchange={(event) => {
 							void applyStringValue((event.target as HTMLInputElement).value);

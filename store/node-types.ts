@@ -57,6 +57,7 @@ const defaultNodeIcons: ResolvedNodeIconSet = {
         enum: parameterEnumIcon,
         float: parameterFloatIcon,
         int: parameterIntIcon,
+        css_value: parameterFloatIcon,
         str: parameterStringIcon,
         file: parameterFileIcon,
         trigger: parameterTriggerIcon,

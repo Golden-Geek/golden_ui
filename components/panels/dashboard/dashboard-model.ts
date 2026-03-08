@@ -1,5 +1,6 @@
 import type { GraphState } from '$lib/golden_ui/store/graph.svelte';
 import type { NodeId, ParamValue, UiNodeDto, UiParamDto, UiParamValueProjection } from '$lib/golden_ui/types';
+import { cssValueFromParamValue, formatCssValue, type CssValueData } from '$lib/golden_ui/css-value';
 
 export type DashboardLayoutKind =
 	| 'free'
@@ -11,10 +12,15 @@ export type DashboardLayoutKind =
 
 export interface DashboardPlacement {
 	titleVisible: boolean;
-	position: [number, number];
-	size: [number, number];
+	position: { x: CssValueData; y: CssValueData };
+	size: { width: CssValueData; height: CssValueData };
 	columnSpan: number;
 	rowSpan: number;
+}
+
+export interface DashboardGap {
+	x: CssValueData;
+	y: CssValueData;
 }
 
 export const getLiveNode = (graph: GraphState | null, node: UiNodeDto): UiNodeDto => {
@@ -96,25 +102,34 @@ const asBool = (value: ParamValue | undefined, fallback: boolean): boolean => {
 	return value.value;
 };
 
-const asVec2 = (value: ParamValue | undefined, fallback: [number, number]): [number, number] => {
-	if (!value || value.kind !== 'vec2') {
-		return fallback;
-	}
-	return [...value.value] as [number, number];
-};
-
 export const getDashboardPlacement = (graph: GraphState | null, node: UiNodeDto | null): DashboardPlacement => {
 	return {
 		titleVisible: asBool(getDirectParam(graph, node, 'title_visible')?.value, true),
-		position: asVec2(getDirectParam(graph, node, 'position')?.value, [0, 0]),
-		size: asVec2(getDirectParam(graph, node, 'size')?.value, [12, 4]),
+		position: {
+			x: cssValueFromParamValue(getDirectParam(graph, node, 'position_x')?.value, { value: 0, unit: 'rem' }),
+			y: cssValueFromParamValue(getDirectParam(graph, node, 'position_y')?.value, { value: 0, unit: 'rem' })
+		},
+		size: {
+			width: cssValueFromParamValue(getDirectParam(graph, node, 'width')?.value, { value: 12, unit: 'rem' }),
+			height: cssValueFromParamValue(getDirectParam(graph, node, 'height')?.value, { value: 4, unit: 'rem' })
+		},
 		columnSpan: Math.max(1, Math.round(asNumber(getDirectParam(graph, node, 'column_span')?.value, 1))),
 		rowSpan: Math.max(1, Math.round(asNumber(getDirectParam(graph, node, 'row_span')?.value, 1)))
 	};
 };
 
-export const getGap = (graph: GraphState | null, node: UiNodeDto | null, fallback: [number, number] = [1, 1]): [number, number] => {
-	return asVec2(getDirectParam(graph, node, 'gap')?.value, fallback);
+export const getGap = (
+	graph: GraphState | null,
+	node: UiNodeDto | null,
+	fallback: DashboardGap = {
+		x: { value: 1, unit: 'rem' },
+		y: { value: 1, unit: 'rem' }
+	}
+): DashboardGap => {
+	return {
+		x: cssValueFromParamValue(getDirectParam(graph, node, 'gap_x')?.value, fallback.x),
+		y: cssValueFromParamValue(getDirectParam(graph, node, 'gap_y')?.value, fallback.y)
+	};
 };
 
 export const getGridColumns = (graph: GraphState | null, node: UiNodeDto | null, fallback = 12): number => {
@@ -138,6 +153,8 @@ export const formatParamValue = (value: ParamValue | null | undefined): string =
 			return value.value;
 		case 'bool':
 			return value.value ? 'True' : 'False';
+		case 'css_value':
+			return formatCssValue(value);
 		case 'vec2':
 			return `${value.value[0]}, ${value.value[1]}`;
 		case 'vec3':

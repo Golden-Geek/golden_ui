@@ -1,5 +1,6 @@
 import CheckboxEditor from "./parameters/CheckboxEditor.svelte";
 import ColorPickerEditor from "./parameters/ColorPickerEditor.svelte";
+import CssValueEditor from "./parameters/CssValueEditor.svelte";
 import DropdownEditor from "./parameters/DropdownEditor.svelte";
 import NumberEditor from "./parameters/NumberEditor.svelte";
 import TextInputEditor from "./parameters/TextInputEditor.svelte";
@@ -15,6 +16,7 @@ export const propertiesInspectorClass: Record<string, { component: any; useFullS
     "file": { component: FilePathEditor },
     "float": { component: NumberEditor },
     "bool": { component: CheckboxEditor },
+    "css_value": { component: CssValueEditor },
     "color": { component: ColorPickerEditor },
     "enum": { component: DropdownEditor },
     "vec2": { component: MultiNumberEditor },

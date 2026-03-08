@@ -107,6 +107,7 @@ export const extractNumericSample = (value: ParamValue): NumericSample | null =>
 	switch (value.kind) {
 		case 'int':
 		case 'float':
+		case 'css_value':
 			return {
 				labels: ['V'],
 				values: [value.value]
@@ -142,6 +143,8 @@ export const extractEventLabel = (value: ParamValue): string | null => {
 			const trimmed = value.value.trim();
 			return trimmed.length > 0 ? shorten(trimmed) : '<none>';
 		}
+		case 'css_value':
+			return `${value.value}${value.unit === 'percent' ? '%' : value.unit}`;
 		case 'reference':
 			return shorten(value.cached_name || value.uuid || 'none');
 		default:

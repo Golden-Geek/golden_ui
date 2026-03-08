@@ -93,6 +93,7 @@ const genericWidgetKindForParam = (param: UiParamDto): 'text' | 'button' | 'slid
 		case 'str':
 		case 'file':
 		case 'enum':
+		case 'css_value':
 			return 'textInput';
 		default:
 			return 'text';

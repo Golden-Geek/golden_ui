@@ -35,6 +35,7 @@ import type {
 	UiParamControlCandidate,
 	UiParamValueProjection
 } from '../types';
+import { isCssUnit } from '../css-value';
 import { wholeGraphScope } from '../types';
 
 const DEFAULT_BASE_URL = 'http://localhost:7010/api/ui';
@@ -390,6 +391,15 @@ const fromRustParamValue = (value: unknown): ParamValue => {
 	if ('Bool' in value) {
 		return { kind: 'bool', value: Boolean(value.Bool) };
 	}
+	if ('CssValue' in value && isRecord(value.CssValue)) {
+		const cssValue = value.CssValue;
+		const unit = isCssUnit(cssValue.unit) ? cssValue.unit : 'rem';
+		return {
+			kind: 'css_value',
+			value: Number(cssValue.value ?? 0),
+			unit
+		};
+	}
 	if ('Vec2' in value && Array.isArray(value.Vec2)) {
 		const vec = value.Vec2 as unknown[];
 		return { kind: 'vec2', value: [Number(vec[0] ?? 0), Number(vec[1] ?? 0)] };
@@ -449,6 +459,8 @@ const toRustParamValue = (value: ParamValue): RustParamValue => {
 			return { Enum: value.value };
 		case 'bool':
 			return { Bool: value.value };
+		case 'css_value':
+			return { CssValue: { value: value.value, unit: value.unit } };
 		case 'vec2':
 			return { Vec2: value.value };
 		case 'vec3':

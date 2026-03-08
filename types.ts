@@ -13,6 +13,8 @@ export type UiParameterControlMode =
 	| 'binding'
 	| 'animation';
 
+export type CssUnit = 'px' | 'rem' | 'em' | 'percent' | 'vw' | 'vh';
+
 export type ParamValue =
 	| { kind: 'trigger' }
 	| { kind: 'int'; value: number }
@@ -21,6 +23,7 @@ export type ParamValue =
 	| { kind: 'file'; value: string }
 	| { kind: 'enum'; value: string }
 	| { kind: 'bool'; value: boolean }
+	| { kind: 'css_value'; value: number; unit: CssUnit }
 	| { kind: 'vec2'; value: [number, number] }
 	| { kind: 'vec3'; value: [number, number, number] }
 	| { kind: 'color'; value: [number, number, number, number] }
@@ -175,6 +178,7 @@ export type UiUserContextValueType =
 	| 'file'
 	| 'enum'
 	| 'bool'
+	| 'css_value'
 	| 'vec2'
 	| 'vec3'
 	| 'color'

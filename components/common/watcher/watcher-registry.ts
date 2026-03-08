@@ -63,6 +63,7 @@ export const watcherVisualizerRegistry: Record<ParamValue['kind'], WatcherVisual
 	file: eventsVisualizer,
 	enum: eventsVisualizer,
 	bool: eventsVisualizer,
+	css_value: valueVisualizer,
 	vec2: vec2Visualizer,
 	vec3: vec3Visualizer,
 	color: colorVisualizer,

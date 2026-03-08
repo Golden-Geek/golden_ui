@@ -297,6 +297,11 @@
 			case 'enum':
 			case 'bool':
 				return left.value === (right as typeof left).value;
+				case 'css_value':
+					return (
+						left.value === (right as typeof left).value &&
+						left.unit === (right as typeof left).unit
+					);
 			case 'vec2':
 				return (
 					left.value[0] === (right as typeof left).value[0] &&
