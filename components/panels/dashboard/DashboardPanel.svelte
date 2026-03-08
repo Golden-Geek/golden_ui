@@ -36,6 +36,7 @@
 		title: '',
 		params: {}
 	});
+	let panelRootElement = $state<HTMLDivElement | null>(null);
 	let pendingPanelParams = $state<DashboardPanelParams | null>(null);
 	let publishedTitle = $state('');
 	let isPanelFocused = $state(false);
@@ -228,6 +229,11 @@
 		setEditMode(!(panelParams.editMode ?? false));
 	};
 
+	const focusPanelRoot = (): void => {
+		isPanelFocused = true;
+		panelRootElement?.focus();
+	};
+
 	const handlePersistedPageViewChange = (
 		pageNodeId: NodeId,
 		nextPageView: DashboardPersistedPageView
@@ -266,6 +272,9 @@
 
 <div
 	class="dashboard-panel"
+	bind:this={panelRootElement}
+	tabindex="-1"
+	onpointerdowncapture={focusPanelRoot}
 	onfocusin={() => {
 		isPanelFocused = true;
 	}}

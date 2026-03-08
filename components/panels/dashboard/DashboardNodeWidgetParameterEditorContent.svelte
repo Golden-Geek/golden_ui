@@ -3,9 +3,13 @@
 	import type { UiNodeDto } from '$lib/golden_ui/types';
 	import CheckboxEditor from '$lib/golden_ui/components/panels/inspector/parameters/CheckboxEditor.svelte';
 	import ColorPickerEditor from '$lib/golden_ui/components/panels/inspector/parameters/ColorPickerEditor.svelte';
+	import CssValueEditor from '$lib/golden_ui/components/panels/inspector/parameters/CssValueEditor.svelte';
+	import DropdownEditor from '$lib/golden_ui/components/panels/inspector/parameters/DropdownEditor.svelte';
 	import { propertiesInspectorClass } from '$lib/golden_ui/components/panels/inspector/inspector.svelte';
 	import MultiNumberEditor from '$lib/golden_ui/components/panels/inspector/parameters/MultiNumberEditor.svelte';
 	import NumberEditor from '$lib/golden_ui/components/panels/inspector/parameters/NumberEditor.svelte';
+	import TextInputEditor from '$lib/golden_ui/components/panels/inspector/parameters/TextInputEditor.svelte';
+	import TriggerEditor from '$lib/golden_ui/components/panels/inspector/parameters/TriggerEditor.svelte';
 	import { getDirectParam } from './dashboard-model';
 
 	type NumberEditorOptions = {
@@ -61,7 +65,7 @@
 	const getEnumWidgetParam = (declId: string, fallback: 'inline' | 'column'): 'inline' | 'column' => {
 		const value = liveWidgetNode ? getDirectParam(graph, liveWidgetNode, declId)?.value : null;
 		const rawValue = value?.kind === 'enum' || value?.kind === 'str' ? value.value : null;
-		return rawValue === 'column' ? 'column' : fallback;
+		return rawValue === 'column' || rawValue === 'inline' ? rawValue : fallback;
 	};
 
 	let numberPresentation = $derived.by((): NumberEditorOptions => ({
@@ -70,7 +74,7 @@
 	}));
 
 	let vectorPresentation = $derived.by((): VectorEditorOptions => ({
-		layout: getEnumWidgetParam('vector_layout', 'inline'),
+		layout: getEnumWidgetParam('vector_layout', 'column'),
 		show_value_fields: getBoolWidgetParam('vector_show_value_fields', true),
 		max_decimals: clampMaxDecimals(getIntWidgetParam('vector_max_decimals', 2), 2)
 	}));
@@ -110,8 +114,24 @@
 		<div class="dashboard-node-widget-parameter-editor-body widget-layout checkbox-layout">
 			<CheckboxEditor node={targetNode} layoutMode="widget" />
 		</div>
+	{:else if paramKind === 'trigger'}
+		<div class="dashboard-node-widget-parameter-editor-body widget-layout">
+			<TriggerEditor node={targetNode} layoutMode="widget" />
+		</div>
+	{:else if paramKind === 'str'}
+		<div class="dashboard-node-widget-parameter-editor-body widget-layout">
+			<TextInputEditor node={targetNode} layoutMode="widget" />
+		</div>
+	{:else if paramKind === 'enum'}
+		<div class="dashboard-node-widget-parameter-editor-body widget-layout">
+			<DropdownEditor node={targetNode} layoutMode="widget" />
+		</div>
+	{:else if paramKind === 'css_value'}
+		<div class="dashboard-node-widget-parameter-editor-body widget-layout">
+			<CssValueEditor node={targetNode} layoutMode="widget" />
+		</div>
 	{:else if EditorComponent}
-		<div class="dashboard-node-widget-parameter-editor-body">
+		<div class="dashboard-node-widget-parameter-editor-body widget-layout">
 			<EditorComponent node={targetNode} />
 		</div>
 	{:else}
@@ -127,7 +147,7 @@
 		block-size: 100%;
 		min-inline-size: 0;
 		min-block-size: 0;
-		overflow: auto;
+		overflow: hidden;
 	}
 
 	.dashboard-node-widget-parameter-editor-body {
@@ -148,7 +168,7 @@
 
 	.dashboard-node-widget-parameter-editor-body.color-layout,
 	.dashboard-node-widget-parameter-editor-body.checkbox-layout {
-		overflow: auto;
+		overflow: hidden;
 	}
 
 	.dashboard-node-widget-parameter-editor :global(.number-property-container),
@@ -157,8 +177,10 @@
 	.dashboard-node-widget-parameter-editor :global(.multi-number-editor),
 	.dashboard-node-widget-parameter-editor :global(.color-picker-editor),
 	.dashboard-node-widget-parameter-editor :global(.editor-checkbox-shell),
+	.dashboard-node-widget-parameter-editor :global(.trigger),
 	.dashboard-node-widget-parameter-editor :global(.reference-property-container),
 	.dashboard-node-widget-parameter-editor :global(.text-input-editor),
+	.dashboard-node-widget-parameter-editor :global(.dropdown-editor),
 	.dashboard-node-widget-parameter-editor :global(.dropdown-container) {
 		inline-size: 100%;
 		block-size: 100%;

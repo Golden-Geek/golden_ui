@@ -25,6 +25,11 @@ export interface UiEditSession {
 	end(): Promise<void>;
 }
 
+export interface UiIntentBatchResult {
+	readonly success: boolean;
+	readonly appliedCount: number;
+}
+
 const sendUiIntent = async (intent: UiEditIntent): Promise<boolean> => {
 	const session = appState.session;
 	if (!session) {
@@ -37,6 +42,30 @@ const sendUiIntent = async (intent: UiEditIntent): Promise<boolean> => {
 	} catch (error) {
 		console.error('failed to send ui intent', intent, error);
 		return false;
+	}
+};
+
+export const sendUiIntentBatch = async (
+	intents: UiEditIntent[]
+): Promise<UiIntentBatchResult> => {
+	const session = appState.session;
+	if (!session) {
+		return { success: false, appliedCount: 0 };
+	}
+	if (intents.length === 0) {
+		return { success: true, appliedCount: 0 };
+	}
+
+	try {
+		const acks = await session.client.sendIntents(intents);
+		const appliedCount = acks.filter((ack) => ack.success).length;
+		return {
+			success: appliedCount === intents.length,
+			appliedCount
+		};
+	} catch (error) {
+		console.error('failed to send ui intent batch', intents, error);
+		return { success: false, appliedCount: 0 };
 	}
 };
 

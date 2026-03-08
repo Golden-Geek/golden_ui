@@ -34,18 +34,35 @@
 	};
 </script>
 
-<div class="editor-checkbox-shell" class:widget-layout={layoutMode === 'widget'}>
-	<input
-		type="checkbox"
-		class="editor-checkbox"
+{#if layoutMode === 'widget'}
+	<button
+		type="button"
+		class="editor-checkbox-shell widget-layout widget-checkbox-button"
+		class:checked={draftValue}
 		disabled={!enabled}
 		class:readonly={readOnly}
-		class:widget-layout={layoutMode === 'widget'}
-		checked={draftValue}
-		onchange={(event) => {
-			updateValue((event.target as HTMLInputElement).checked);
-		}} />
-</div>
+		aria-pressed={draftValue}
+		onclick={() => {
+			if (readOnly || !enabled) {
+				return;
+			}
+			updateValue(!draftValue);
+		}}>
+		<span class="widget-checkbox-mark" aria-hidden="true">{draftValue ? '✓' : ''}</span>
+	</button>
+{:else}
+	<div class="editor-checkbox-shell">
+		<input
+			type="checkbox"
+			class="editor-checkbox"
+			disabled={!enabled}
+			class:readonly={readOnly}
+			checked={draftValue}
+			onchange={(event) => {
+				updateValue((event.target as HTMLInputElement).checked);
+			}} />
+	</div>
+{/if}
 
 <style>
 	.editor-checkbox-shell {
@@ -57,12 +74,38 @@
 
 	.editor-checkbox-shell.widget-layout {
 		block-size: 100%;
-		padding: 0.4rem;
+		padding: 0;
 	}
 
-	.editor-checkbox.widget-layout {
-		inline-size: min(100%, 4rem);
-		block-size: min(100%, 4rem);
-		aspect-ratio: 1;
+	.widget-checkbox-button {
+		inline-size: 100%;
+		block-size: 100%;
+		border-radius: 0.75rem;
+		border: solid 0.08rem rgb(from var(--gc-color-checkbox-fg) r g b / 0.45) !important;
+		background: rgb(from var(--gc-color-checkbox-bg) r g b / 0.95);
+		padding: 0.6rem;
+		box-sizing: border-box;
+	}
+
+	.widget-checkbox-button.checked {
+		background: rgb(from var(--gc-color-checkbox-fg) r g b / 0.18);
+		border-color: var(--gc-color-checkbox-fg) !important;
+	}
+
+	.widget-checkbox-button.readonly {
+		background: rgb(from var(--gc-color-readonly) r g b / 0.18);
+		border-color: rgb(from var(--gc-color-readonly) r g b / 0.4) !important;
+	}
+
+	.widget-checkbox-mark {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		inline-size: 100%;
+		block-size: 100%;
+		font-size: clamp(1.6rem, 4vw, 3.6rem);
+		font-weight: 700;
+		line-height: 1;
+		color: var(--gc-color-checkbox-fg);
 	}
 </style>

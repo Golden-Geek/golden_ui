@@ -250,11 +250,15 @@
 	}
 
 	.multi-number-editor.widget-layout {
+		flex-direction: row;
 		height: 100%;
 		justify-content: stretch;
+		align-items: stretch;
+		gap: 0.45rem;
 	}
 
 	.multi-number-editor.widget-layout.column-layout {
+		flex-direction: column;
 		gap: 0.45rem;
 	}
 
@@ -268,24 +272,27 @@
 
 	.multi-number-editor.widget-layout .single-number-editor {
 		flex: 1 1 0;
+		flex-direction: column;
 		align-items: stretch;
 		height: auto;
+		min-inline-size: 0;
 	}
 
 	.multi-number-editor.widget-layout.column-layout .single-number-editor {
-		flex-direction: column;
+		flex-direction: row;
 	}
 
 	.slider-wrapper {
 		display: flex;
 		flex: 1 1 auto;
-		justify-content: right;
+		align-items: stretch;
 		min-width: 0;
-		height: 70%;
+		height: 100%;
 	}
 
 	.multi-number-editor.widget-layout .slider-wrapper {
 		height: 100%;
+		inline-size: 100%;
 	}
 
 	.number-field {
@@ -295,10 +302,12 @@
 	}
 
 	.multi-number-editor.widget-layout .number-field {
-		width: clamp(4rem, 26%, 7rem);
+		inline-size: 100%;
+		width: 100%;
 	}
 
 	.multi-number-editor.widget-layout.column-layout .number-field {
-		width: 100%;
+		inline-size: clamp(4rem, 26%, 7rem);
+		width: auto;
 	}
 </style>

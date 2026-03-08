@@ -434,6 +434,7 @@
 		border-radius: 0.75rem;
 		color: #e4e4e7; /* Zinc 200 */
 		user-select: none;
+		box-sizing: border-box;
 		padding: 0;
 		transition:
 			padding 0.2s,
@@ -454,6 +455,18 @@
 		block-size: 100%;
 		min-inline-size: 0;
 		min-block-size: 0;
+	}
+
+	.color-picker-content {
+		display: flex;
+		flex-direction: column;
+		flex: 1 1 auto;
+		min-inline-size: 0;
+		min-block-size: 0;
+	}
+
+	.cp-container.widget-layout.expanded {
+		overflow: hidden;
 	}
 
 	/* Header */
@@ -564,6 +577,7 @@
 	}
 
 	.cp-container.widget-layout .cp-controls {
+		flex: 0 0 auto;
 		margin-bottom: 0.5rem;
 	}
 
@@ -609,6 +623,7 @@
 	.cp-inputs {
 		background: #27272a;
 		border-radius: 0.5rem;
+		box-sizing: border-box;
 		padding: 0.5rem;
 	}
 

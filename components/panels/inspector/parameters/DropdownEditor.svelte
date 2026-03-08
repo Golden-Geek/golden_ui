@@ -3,8 +3,9 @@
 	import { createUiEditSession, sendSetParamIntent } from '$lib/golden_ui/store/ui-intents';
 	import type { UiNodeDto } from '$lib/golden_ui/types';
 
-	let { node } = $props<{
+	let { node, layoutMode = 'default' } = $props<{
 		node: UiNodeDto;
+		layoutMode?: 'default' | 'widget';
 	}>();
 
 	let session = $derived(appState.session);
@@ -42,6 +43,7 @@
 
 <select
 	class="dropdown-editor"
+	class:widget-layout={layoutMode === 'widget'}
 	value={draftValue}
 	disabled={!enabled}
 	class:readonly={readOnly}
@@ -59,5 +61,10 @@
 		width: 100%;
 		box-sizing: border-box;
 		font-size: 0.75rem;
+	}
+
+	.dropdown-editor.widget-layout {
+		inline-size: 100%;
+		block-size: 100%;
 	}
 </style>

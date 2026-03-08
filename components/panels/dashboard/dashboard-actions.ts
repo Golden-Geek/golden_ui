@@ -1,6 +1,12 @@
 import type { GraphState } from '$lib/golden_ui/store/graph.svelte';
-import type { NodeId, ParamValue, UiNodeDto, UiParamDto } from '$lib/golden_ui/types';
-import { sendCreateUserItemByTypeIntent, sendMoveNodeIntent, sendSetParamIntent } from '$lib/golden_ui/store/ui-intents';
+import type { NodeId, ParamValue, UiEditIntent, UiNodeDto, UiParamDto } from '$lib/golden_ui/types';
+import {
+	createUiEditSession,
+	sendCreateUserItemByTypeIntent,
+	sendMoveNodeIntent,
+	sendSetParamIntent,
+	sendUiIntentBatch
+} from '$lib/golden_ui/store/ui-intents';
 import {
 	cssValueToPx,
 	type CssUnitConversionContext,
@@ -112,16 +118,14 @@ const createPlacement = (
 	const centerPx = options?.centerPx ?? { x: widthPx * 0.5, y: heightPx * 0.5 };
 	const snappedLeft = snapPixel(centerPx.x - widthPx * 0.5, options?.snapPx);
 	const snappedTop = snapPixel(centerPx.y - heightPx * 0.5, options?.snapPx);
-	const maxX = Math.max(0, context.surfaceWidthPx - widthPx);
-	const maxY = Math.max(0, context.surfaceHeightPx - heightPx);
 	const widthRem = widthPx / Math.max(context.rootRemPx, 1e-6);
 	const heightRem = heightPx / Math.max(context.rootRemPx, 1e-6);
 
 	return {
 		anchor: 'top-left',
 		position: {
-			x: clamp(snappedLeft, 0, maxX),
-			y: clamp(snappedTop, 0, maxY)
+			x: snappedLeft,
+			y: snappedTop
 		},
 		size,
 		columnSpan: clamp(Math.round(widthRem / 6), 1, 12),
@@ -440,6 +444,92 @@ const applyDashboardWidgetPlacement = async (
 	await Promise.all(operations);
 };
 
+const applyDashboardWidgetPlacementBatched = async (
+	getGraph: GraphGetter,
+	parentId: NodeId,
+	widgetNodeId: NodeId,
+	placement: DashboardWidgetCreationPlacement
+): Promise<boolean> => {
+	const graph = getGraph();
+	const parentNode = graph?.nodesById.get(parentId) ?? null;
+	const parentLayoutKind = getDashboardLayoutKind(graph, parentNode, 'free');
+	const widthTarget = await waitForDirectParam(getGraph, widgetNodeId, 'width');
+	const heightTarget = await waitForDirectParam(getGraph, widgetNodeId, 'height');
+	if (!widthTarget || !heightTarget) {
+		return false;
+	}
+
+	const intents: UiEditIntent[] = [
+		{
+			kind: 'setParam' as const,
+			node: widthTarget.node.node_id,
+			value: {
+				kind: 'css_value' as const,
+				value: placement.size.width.value,
+				unit: placement.size.width.unit
+			},
+			behaviour: widthTarget.param.event_behaviour
+		},
+		{
+			kind: 'setParam' as const,
+			node: heightTarget.node.node_id,
+			value: {
+				kind: 'css_value' as const,
+				value: placement.size.height.value,
+				unit: placement.size.height.unit
+			},
+			behaviour: heightTarget.param.event_behaviour
+		}
+	];
+
+	if (parentLayoutKind === 'free') {
+		const anchorTarget = await waitForDirectParam(getGraph, widgetNodeId, 'anchor');
+		const positionTarget = await waitForDirectParam(getGraph, widgetNodeId, 'position');
+		if (!anchorTarget || !positionTarget) {
+			return false;
+		}
+		intents.push(
+			{
+				kind: 'setParam',
+				node: anchorTarget.node.node_id,
+				value: { kind: 'enum', value: placement.anchor },
+				behaviour: anchorTarget.param.event_behaviour
+			},
+			{
+				kind: 'setParam',
+				node: positionTarget.node.node_id,
+				value: { kind: 'vec2', value: [placement.position.x, placement.position.y] },
+				behaviour: positionTarget.param.event_behaviour
+			}
+		);
+	}
+
+	if (parentLayoutKind === 'grid') {
+		const columnSpanTarget = await waitForDirectParam(getGraph, widgetNodeId, 'column_span');
+		const rowSpanTarget = await waitForDirectParam(getGraph, widgetNodeId, 'row_span');
+		if (!columnSpanTarget || !rowSpanTarget) {
+			return false;
+		}
+		intents.push(
+			{
+				kind: 'setParam',
+				node: columnSpanTarget.node.node_id,
+				value: { kind: 'int', value: placement.columnSpan },
+				behaviour: columnSpanTarget.param.event_behaviour
+			},
+			{
+				kind: 'setParam',
+				node: rowSpanTarget.node.node_id,
+				value: { kind: 'int', value: placement.rowSpan },
+				behaviour: rowSpanTarget.param.event_behaviour
+			}
+		);
+	}
+
+	const result = await sendUiIntentBatch(intents);
+	return result.success;
+};
+
 export const bindDashboardNodeWidgetTarget = async (
 	getGraph: GraphGetter,
 	widgetNodeId: NodeId,
@@ -527,6 +617,9 @@ export const createDashboardNodeWidget = async (
 	if (!parent) {
 		return null;
 	}
+	const editSession = createUiEditSession('Create dashboard node widget', 'dashboard-create');
+	await editSession.begin();
+	try {
 	const knownChildren = new Set(parent.children);
 	const created = await sendCreateUserItemByTypeIntent(parentId, 'dashboard_node_widget', targetNode.meta.label);
 	if (!created) {
@@ -537,13 +630,24 @@ export const createDashboardNodeWidget = async (
 		return null;
 	}
 	await bindDashboardNodeWidgetTarget(getGraph, widgetNode.node_id, targetNode);
-	await applyDashboardWidgetPlacement(
+	const placementApplied = await applyDashboardWidgetPlacementBatched(
 		getGraph,
 		parentId,
 		widgetNode.node_id,
 		options?.placement ?? getDashboardNodeWidgetCreationDefaults(targetNode, getDefaultSizingContext())
 	);
+	if (!placementApplied) {
+		await applyDashboardWidgetPlacement(
+			getGraph,
+			parentId,
+			widgetNode.node_id,
+			options?.placement ?? getDashboardNodeWidgetCreationDefaults(targetNode, getDefaultSizingContext())
+		);
+	}
 	return widgetNode;
+	} finally {
+		await editSession.end();
+	}
 };
 
 export const createDashboardGenericWidget = async (
@@ -559,6 +663,9 @@ export const createDashboardGenericWidget = async (
 	if (!parent) {
 		return null;
 	}
+	const editSession = createUiEditSession('Create dashboard parameter widget', 'dashboard-create');
+	await editSession.begin();
+	try {
 	const knownChildren = new Set(parent.children);
 	const created = await sendCreateUserItemByTypeIntent(parentId, 'dashboard_generic_widget', targetNode.meta.label);
 	if (!created) {
@@ -569,13 +676,25 @@ export const createDashboardGenericWidget = async (
 		return null;
 	}
 	await bindDashboardGenericWidgetTarget(getGraph, widgetNode.node_id, targetNode);
-	await applyDashboardWidgetPlacement(
+	const placementApplied = await applyDashboardWidgetPlacementBatched(
 		getGraph,
 		parentId,
 		widgetNode.node_id,
 		options?.placement ?? getDashboardGenericWidgetCreationDefaults(targetNode, getDefaultSizingContext()).placement
 	);
+	if (!placementApplied) {
+		await applyDashboardWidgetPlacement(
+			getGraph,
+			parentId,
+			widgetNode.node_id,
+			options?.placement ??
+				getDashboardGenericWidgetCreationDefaults(targetNode, getDefaultSizingContext()).placement
+		);
+	}
 	return widgetNode;
+	} finally {
+		await editSession.end();
+	}
 };
 
 export const moveDashboardWidgetByDelta = async (

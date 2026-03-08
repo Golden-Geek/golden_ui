@@ -105,6 +105,7 @@
 	let pageViewportElement = $state<HTMLDivElement | null>(null);
 	let widgetShellElement = $state<HTMLElement | null>(null);
 	let pageViewportSize = $state({ width: 0, height: 0 });
+	let pageViewportResizeFrame = $state<number | null>(null);
 	let surfaceDropPreview = $state<SurfaceDropPreview | null>(null);
 	let pendingPersistedPageView = $state<DashboardPersistedPageView | null>(null);
 	let appliedPersistedPageView = $state<DashboardPersistedPageView | null>(null);
@@ -777,8 +778,6 @@
 				snapToGridPx(primaryTarget.startRect.top + appliedDeltaY, snapPx) -
 				primaryTarget.startRect.top;
 		}
-		appliedDeltaX = Math.max(appliedDeltaX, -interaction.selectionRect.left);
-		appliedDeltaY = Math.max(appliedDeltaY, -interaction.selectionRect.top);
 		return {
 			primaryNodeId: interaction.primaryNodeId,
 			previews: interaction.targets.map((target) => ({
@@ -834,10 +833,7 @@
 		let nextHeightPx = startRect.height;
 
 		if (resizeEdges.left) {
-			const appliedDeltaX = Math.min(
-				Math.max(deltaXPx, -nextLeftPx),
-				nextWidthPx - groupMinWidthPx
-			);
+			const appliedDeltaX = Math.min(deltaXPx, nextWidthPx - groupMinWidthPx);
 			nextLeftPx += appliedDeltaX;
 			nextWidthPx -= appliedDeltaX;
 		}
@@ -845,10 +841,7 @@
 			nextWidthPx = Math.max(groupMinWidthPx, nextWidthPx + deltaXPx);
 		}
 		if (resizeEdges.top) {
-			const appliedDeltaY = Math.min(
-				Math.max(deltaYPx, -nextTopPx),
-				nextHeightPx - groupMinHeightPx
-			);
+			const appliedDeltaY = Math.min(deltaYPx, nextHeightPx - groupMinHeightPx);
 			nextTopPx += appliedDeltaY;
 			nextHeightPx -= appliedDeltaY;
 		}
@@ -1016,13 +1009,34 @@
 			if (!entry) {
 				return;
 			}
-			pageViewportSize = {
-				width: Math.max(entry.contentRect.width, 1),
-				height: Math.max(entry.contentRect.height, 1)
-			};
+			const nextWidth = Math.max(entry.contentRect.width, 1);
+			const nextHeight = Math.max(entry.contentRect.height, 1);
+			if (pageViewportResizeFrame !== null && typeof window !== 'undefined') {
+				window.cancelAnimationFrame(pageViewportResizeFrame);
+			}
+			pageViewportResizeFrame =
+				typeof window === 'undefined'
+					? null
+					: window.requestAnimationFrame(() => {
+						pageViewportResizeFrame = null;
+						if (
+							pageViewportSize.width === nextWidth &&
+							pageViewportSize.height === nextHeight
+						) {
+							return;
+						}
+						pageViewportSize = {
+							width: nextWidth,
+							height: nextHeight
+						};
+					});
 		});
 		observer.observe(pageViewportElement);
 		return () => {
+			if (pageViewportResizeFrame !== null && typeof window !== 'undefined') {
+				window.cancelAnimationFrame(pageViewportResizeFrame);
+				pageViewportResizeFrame = null;
+			}
 			observer.disconnect();
 		};
 	});
@@ -1509,6 +1523,36 @@
 		applyMarqueeSelection(selection);
 	};
 
+	const handlePageScenePointerDown = (event: PointerEvent): void => {
+		pageViewportElement?.focus();
+		if (!isPage || !editMode || event.button !== 0) {
+			return;
+		}
+		if (freeLayoutInteraction || marqueeSelection) {
+			return;
+		}
+		if (!(event.currentTarget instanceof HTMLElement)) {
+			return;
+		}
+		const sceneElement = event.currentTarget.parentElement;
+		if (!(sceneElement instanceof HTMLElement)) {
+			return;
+		}
+		event.preventDefault();
+		event.stopPropagation();
+		const selection: MarqueeSelectionState = {
+			pointerId: event.pointerId,
+			surfaceNodeId: liveNode.node_id,
+			surfaceElement: sceneElement,
+			startClient: [event.clientX, event.clientY],
+			currentClient: [event.clientX, event.clientY],
+			baseSelection: [...(session?.selectedNodesIds ?? [])],
+			selectionMode: selectionModeFromEvent(event)
+		};
+		marqueeSelection = selection;
+		applyMarqueeSelection(selection);
+	};
+
 	$effect(() => {
 		if (!freeLayoutInteraction) {
 			return;
@@ -1646,6 +1690,9 @@
 	onDestroy(() => {
 		if (typeof window !== 'undefined' && freeLayoutCommitFrame !== null) {
 			window.cancelAnimationFrame(freeLayoutCommitFrame);
+		}
+		if (typeof window !== 'undefined' && pageViewportResizeFrame !== null) {
+			window.cancelAnimationFrame(pageViewportResizeFrame);
 		}
 		void finishFreeLayoutEditSession();
 	});
@@ -2300,6 +2347,11 @@
 		onwheel={handlePageViewportWheel}
 		onpointerdown={handlePageViewportPointerDown}>
 		<div class="dashboard-page-scene" style={pageSceneStyle}>
+			<div
+				class="dashboard-page-scene-hitbox"
+				role="presentation"
+				aria-hidden="true"
+				onpointerdown={handlePageScenePointerDown}></div>
 			<div class="dashboard-page-frame" style={pageFrameStyle}>
 				<div
 					class="dashboard-surface dashboard-page {layoutKind}"
@@ -2839,6 +2891,12 @@
 		min-block-size: 0;
 		overflow: visible;
 		box-sizing: border-box;
+	}
+
+	.dashboard-page-scene-hitbox {
+		position: absolute;
+		inset: 0;
+		z-index: 0;
 	}
 
 	.dashboard-page-frame {

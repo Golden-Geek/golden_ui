@@ -218,8 +218,8 @@
 	.slider-wrapper {
 		display: flex;
 		flex-grow: 1;
-		justify-content: right;
-		height: 70%;
+		align-items: stretch;
+		height: 100%;
 		min-width: 0;
 	}
 
@@ -233,12 +233,15 @@
 	}
 
 	.number-property-container.widget-layout {
+		inline-size: 100%;
+		block-size: 100%;
 		height: 100%;
 		align-items: stretch;
-		gap: 0.5rem;
+		gap: 0.4rem;
 	}
 
 	.number-property-container.widget-layout .slider-wrapper {
+		flex: 1 1 auto;
 		height: 100%;
 	}
 
@@ -255,9 +258,23 @@
 	}
 
 	.number-property-container.widget-layout .number-field {
-		width: clamp(4.5rem, 28%, 8rem);
+		flex: 0 0 auto;
+		inline-size: clamp(4rem, 18%, 6rem);
+		min-inline-size: 4rem;
+		width: auto;
 		max-width: none;
 		margin-left: 0;
+	}
+
+	.number-property-container.widget-layout.infinite .slider-wrapper {
+		flex: 0 0 2rem;
+		justify-content: center;
+	}
+
+	.number-property-container.widget-layout.infinite .number-field {
+		flex: 1 1 auto;
+		inline-size: auto;
+		min-inline-size: 4rem;
 	}
 
 	input::-webkit-outer-spin-button,

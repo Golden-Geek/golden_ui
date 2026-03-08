@@ -3,10 +3,10 @@
 	import { appState } from '$lib/golden_ui/store/workbench.svelte';
 	import { sendSetParamIntent } from '$lib/golden_ui/store/ui-intents';
 	import type { UiNodeDto } from '$lib/golden_ui/types';
-	import { read } from '$app/server';
 
-	let { node } = $props<{
+	let { node, layoutMode = 'default' } = $props<{
 		node: UiNodeDto;
+		layoutMode?: 'default' | 'widget';
 	}>();
 
 	let session = $derived(appState.session);
@@ -41,6 +41,7 @@
 <button
 	type="button"
 	class="trigger"
+	class:widget-layout={layoutMode === 'widget'}
 	class:active={isHit}
 	disabled={!enabled}
 	class:readonly={readOnly}
@@ -80,6 +81,12 @@
 		filter: brightness(120%);
 	}
 
+	.trigger.widget-layout {
+		inline-size: 100%;
+		block-size: 100%;
+		min-block-size: 0;
+	}
+
 	.trigger:disabled {
 		opacity: 0.5;
 		cursor: default;
@@ -100,6 +107,11 @@
 		padding: 0.25rem;
 		width: 0.8rem;
 		height: 0.8rem;
+	}
+
+	.trigger.widget-layout img {
+		width: 1.2rem;
+		height: 1.2rem;
 	}
 
 	.trigger.trigger.readonly img {

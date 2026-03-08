@@ -6,8 +6,9 @@
 	import { CSS_UNIT_OPTIONS } from '$lib/golden_ui/css-value';
 	import type { CssUnit, UiNodeDto } from '$lib/golden_ui/types';
 
-	let { node } = $props<{
+	let { node, layoutMode = 'default' } = $props<{
 		node: UiNodeDto;
+		layoutMode?: 'default' | 'widget';
 	}>();
 
 	let session = $derived(appState.session);
@@ -140,7 +141,7 @@
 	};
 </script>
 
-<div class="css-value-editor">
+<div class="css-value-editor" class:widget-layout={layoutMode === 'widget'}>
 	<div class="slider-wrapper">
 		<Slider
 			bind:value={draftValue}
@@ -200,6 +201,11 @@
 		height: 1.2rem;
 	}
 
+	.css-value-editor.widget-layout {
+		height: 100%;
+		align-items: stretch;
+	}
+
 	.slider-wrapper {
 		display: flex;
 		flex: 1 1 auto;
@@ -208,11 +214,19 @@
 		height: 70%;
 	}
 
+	.css-value-editor.widget-layout .slider-wrapper {
+		height: 100%;
+	}
+
 	.css-value-number {
 		flex: 0 0 4.25rem;
 		height: 100%;
 		box-sizing: border-box;
 		font-size: 0.75rem;
+	}
+
+	.css-value-editor.widget-layout .css-value-number {
+		flex-basis: clamp(4rem, 18%, 6rem);
 	}
 
 	.css-value-unit {
