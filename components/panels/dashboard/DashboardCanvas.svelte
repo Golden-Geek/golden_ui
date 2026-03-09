@@ -251,6 +251,8 @@
 	let lastCommittedFreeLayoutPreview: FreeLayoutPreviewSet | null = null;
 	let freeLayoutEditSession: ReturnType<typeof createUiEditSession> | null = null;
 	let observedAnchorPlacementCache: ObservedAnchorPlacement | null = null;
+	let pageViewAnimationFrame = $state<number | null>(null);
+	let pageViewAnimationTarget = $state<DashboardPersistedPageView | null>(null);
 
 	const getGraph = () => appState.session?.graph.state ?? null;
 
@@ -337,6 +339,16 @@
 				'button, input, textarea, select, option, label, a, [contenteditable="true"], [role="button"]'
 			)
 		);
+	};
+
+	const focusClosestPageViewport = (target: EventTarget | null): void => {
+		if (!(target instanceof Element)) {
+			return;
+		}
+		const viewport = target.closest('.dashboard-page-viewport');
+		if (viewport instanceof HTMLElement) {
+			viewport.focus();
+		}
 	};
 
 	const normalizeClientRect = (
@@ -928,14 +940,64 @@
 		zoom: clampPageZoom(pageView.zoom)
 	});
 
-	const homePageView = (): void => {
+	const setPageViewInstantly = (candidate: DashboardPersistedPageView): void => {
+		const nextPageView = sanitizePersistedPageView(candidate);
 		pageView = {
 			pointerId: null,
 			lastClient: null,
+			panX: nextPageView.panX,
+			panY: nextPageView.panY,
+			zoom: nextPageView.zoom
+		};
+	};
+
+	const cancelPageViewAnimation = (): void => {
+		if (pageViewAnimationFrame !== null && typeof window !== 'undefined') {
+			window.cancelAnimationFrame(pageViewAnimationFrame);
+		}
+		pageViewAnimationFrame = null;
+		pageViewAnimationTarget = null;
+	};
+
+	const animatePageViewTo = (candidate: DashboardPersistedPageView): void => {
+		const targetPageView = sanitizePersistedPageView(candidate);
+		const currentPageView = currentPersistedPageView();
+		cancelPageViewAnimation();
+		if (samePersistedPageView(currentPageView, targetPageView) || typeof window === 'undefined') {
+			setPageViewInstantly(targetPageView);
+			return;
+		}
+		const animationDurationMs = 220;
+		const startedAtMs = typeof performance !== 'undefined' ? performance.now() : Date.now();
+		const interpolate = (start: number, end: number, progress: number): number =>
+			start + (end - start) * progress;
+		pageViewAnimationTarget = targetPageView;
+		const step = (nowMs: number): void => {
+			const elapsedMs = Math.max(0, nowMs - startedAtMs);
+			const progress = Math.min(1, elapsedMs / animationDurationMs);
+			const easedProgress = 1 - Math.pow(1 - progress, 3);
+			setPageViewInstantly({
+				panX: interpolate(currentPageView.panX, targetPageView.panX, easedProgress),
+				panY: interpolate(currentPageView.panY, targetPageView.panY, easedProgress),
+				zoom: interpolate(currentPageView.zoom, targetPageView.zoom, easedProgress)
+			});
+			if (progress >= 1) {
+				pageViewAnimationFrame = null;
+				pageViewAnimationTarget = null;
+				setPageViewInstantly(targetPageView);
+				return;
+			}
+			pageViewAnimationFrame = window.requestAnimationFrame(step);
+		};
+		pageViewAnimationFrame = window.requestAnimationFrame(step);
+	};
+
+	const homePageView = (): void => {
+		animatePageViewTo({
 			panX: 0,
 			panY: 0,
 			zoom: 1
-		};
+		});
 	};
 
 	$effect(() => {
@@ -991,20 +1053,20 @@
 			pendingPersistedPageView = null;
 			return;
 		}
-		if (pageView.pointerId !== null || pendingPersistedPageView) {
+		if (pageView.pointerId !== null || pendingPersistedPageView || pageViewAnimationTarget) {
 			return;
 		}
-		pageView = {
-			pointerId: null,
-			lastClient: null,
-			panX: nextPageView.panX,
-			panY: nextPageView.panY,
-			zoom: nextPageView.zoom
-		};
+		cancelPageViewAnimation();
+		setPageViewInstantly(nextPageView);
 	});
 
 	$effect(() => {
-		if (!isPage || !onPersistedPageViewChange || pageView.pointerId !== null) {
+		if (
+			!isPage ||
+			!onPersistedPageViewChange ||
+			pageView.pointerId !== null ||
+			pageViewAnimationTarget
+		) {
 			return;
 		}
 		const nextPageView = currentPersistedPageView();
@@ -1534,6 +1596,7 @@
 	};
 
 	const handleWidgetPointerDown = (event: PointerEvent): void => {
+		focusClosestPageViewport(event.currentTarget);
 		if (!editMode || event.button !== 0) {
 			return;
 		}
@@ -1555,6 +1618,7 @@
 	};
 
 	const handleSurfacePointerDown = (event: PointerEvent): void => {
+		focusClosestPageViewport(event.currentTarget);
 		if (!editMode || !isLayoutSurface || event.button !== 0) {
 			return;
 		}
@@ -1764,6 +1828,7 @@
 		if (typeof window !== 'undefined' && pageViewportResizeFrame !== null) {
 			window.cancelAnimationFrame(pageViewportResizeFrame);
 		}
+		cancelPageViewAnimation();
 		void finishFreeLayoutEditSession();
 	});
 
@@ -2139,9 +2204,7 @@
 		widgetWrapperLabelPlacement !== null && widgetLabelText.length > 0
 	);
 	const hasInsideWidgetLabel = $derived(
-		widgetUsesLabelPlacement &&
-			widgetLabelPlacement === 'inside' &&
-			widgetLabelText.length > 0
+		widgetUsesLabelPlacement && widgetLabelPlacement === 'inside' && widgetLabelText.length > 0
 	);
 
 	const genericDisplayValue = $derived.by(() => {
@@ -2310,6 +2373,7 @@
 		if (!pageViewportElement) {
 			return;
 		}
+		cancelPageViewAnimation();
 		const rect = pageViewportElement.getBoundingClientRect();
 		const nextZoom = clampPageZoom(pageView.zoom * factor);
 		if (Math.abs(nextZoom - pageView.zoom) <= 1e-9) {
@@ -2374,13 +2438,11 @@
 		);
 		const localCenterX = (localLeft + localRight) * 0.5;
 		const localCenterY = (localTop + localBottom) * 0.5;
-		pageView = {
-			pointerId: null,
-			lastClient: null,
+		animatePageViewTo({
 			zoom: nextZoom,
 			panX: -localCenterX * nextZoom,
 			panY: -localCenterY * nextZoom
-		};
+		});
 		return true;
 	};
 
@@ -2389,6 +2451,7 @@
 		if (event.button !== 1) {
 			return;
 		}
+		cancelPageViewAnimation();
 		event.preventDefault();
 		event.stopPropagation();
 		pageView = {
@@ -2454,7 +2517,11 @@
 		onfocusin={() => {
 			isPageViewportFocused = true;
 		}}
-		onfocusout={() => {
+		onfocusout={(event) => {
+			const nextTarget = event.relatedTarget;
+			if (nextTarget instanceof Node && (event.currentTarget as HTMLElement).contains(nextTarget)) {
+				return;
+			}
 			isPageViewportFocused = false;
 		}}
 		onwheel={handlePageViewportWheel}
@@ -2470,7 +2537,7 @@
 				<div
 					class="dashboard-surface dashboard-page {layoutKind}"
 					class:surface-target-active={surfaceDragDepth > 0}
-					class:edit-bleed-visible={editMode && pageSize.enabled}
+					class:edit-bleed-visible={editMode}
 					class:snap-grid-visible={snapGridVisible}
 					role="region"
 					aria-label="Dashboard page surface"
@@ -3116,18 +3183,6 @@
 		z-index: 0;
 	}
 
-	.dashboard-page.edit-bleed-visible,
-	.dashboard-page.edit-bleed-visible .dashboard-layout {
-		overflow: visible;
-	}
-
-	.dashboard-page {
-		box-sizing: border-box;
-		block-size: 100%;
-		min-block-size: 100%;
-		padding: 0;
-	}
-
 	.dashboard-container-surface {
 		box-sizing: border-box;
 		block-size: 100%;
@@ -3157,7 +3212,7 @@
 		block-size: 100%;
 		min-inline-size: 0;
 		min-block-size: 0;
-		overflow: visible;
+		overflow: hidden;
 		box-sizing: border-box;
 	}
 
@@ -3177,6 +3232,19 @@
 		z-index: 1;
 		transform-origin: center center;
 		transition: box-shadow 120ms ease;
+	}
+
+	.dashboard-page {
+		box-sizing: border-box;
+		block-size: 100%;
+		min-block-size: 100%;
+		padding: 0;
+		overflow: hidden;
+	}
+
+	.dashboard-page.edit-bleed-visible,
+	.dashboard-page.edit-bleed-visible .dashboard-layout {
+		overflow: visible;
 	}
 
 	.dashboard-page-visibility-overlay {
