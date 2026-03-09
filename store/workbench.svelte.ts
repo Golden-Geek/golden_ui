@@ -29,6 +29,7 @@ import {
 	type CommandId
 } from './commands.svelte';
 import {
+	createNewProjectFile,
 	openProjectFile,
 	reopenLastProjectFile,
 	saveProjectFile,
@@ -1760,6 +1761,7 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 		bind('edit.cut', () => cutSelectedNodesCommand(), 10);
 		bind('edit.duplicate', () => duplicateSelectedNodesCommand(), 10);
 		bind('edit.paste', () => pasteNodesCommand(), 10);
+		bind('file.new', () => createNewProjectFile(), 15);
 		bind('file.save', () => saveProjectFile(), 15);
 		bind('file.saveAs', () => saveProjectFileAs(), 15);
 		bind('file.open', () => openProjectFile(), 15);

@@ -485,6 +485,7 @@ export interface UiClient {
 	scriptState(nodeId: NodeId): Promise<UiScriptState>;
 	setScriptConfig(nodeId: NodeId, config: UiScriptConfig, forceReload?: boolean): Promise<void>;
 	reloadScript(nodeId: NodeId): Promise<void>;
+	projectNew(): Promise<void>;
 	projectSave(path: string): Promise<void>;
 	projectLoad(path: string): Promise<void>;
 }

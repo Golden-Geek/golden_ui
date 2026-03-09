@@ -1425,6 +1425,10 @@ export const createHttpUiClient = (options: HttpClientOptions = {}): UiClient =>
 			await postJson<{ ok?: boolean }>('/script-reload', request);
 		},
 
+		async projectNew(): Promise<void> {
+			await postJson<{ ok?: boolean }>('/project-new', {});
+		},
+
 		async projectSave(path: string): Promise<void> {
 			const request: RustProjectPathRequest = { path };
 			await postJson<{ ok?: boolean }>('/project-save', request);

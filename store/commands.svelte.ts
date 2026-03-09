@@ -12,6 +12,7 @@ export type CommandId =
 	| 'edit.paste'
 	| 'edit.undo'
 	| 'edit.redo'
+	| 'file.new'
 	| 'file.save'
 	| 'file.saveAs'
 	| 'file.open'
@@ -102,6 +103,11 @@ const commandDefinitions: CommandDefinition[] = [
 			{ key: 'z', mod: true, shift: true },
 			{ key: 'y', mod: true }
 		]
+	},
+	{
+		id: 'file.new',
+		label: 'New',
+		shortcuts: [{ key: 'n', mod: true }]
 	},
 	{
 		id: 'file.save',

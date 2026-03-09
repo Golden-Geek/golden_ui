@@ -84,6 +84,24 @@ const loadProjectAtPath = async (path: string): Promise<boolean> => {
 	}
 };
 
+export const createNewProjectFile = async (): Promise<boolean> => {
+	const session = appState.session;
+	if (!session || projectFileState.busy) {
+		return false;
+	}
+	projectFileState.busy = true;
+	try {
+		await session.client.projectNew();
+		projectFileState.currentPath = null;
+		return true;
+	} catch (error) {
+		console.error('[project-files] new project failed', error);
+		return false;
+	} finally {
+		projectFileState.busy = false;
+	}
+};
+
 export const saveProjectFile = async (): Promise<boolean> => {
 	if (projectFileState.currentPath) {
 		return saveProjectAtPath(projectFileState.currentPath);
