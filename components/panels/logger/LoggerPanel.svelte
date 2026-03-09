@@ -10,6 +10,9 @@
 		normalizeLogUiUpdateHz
 	} from '../../../store/logger-ui-config';
 	import { sendClearLogsIntent, sendSetLogMaxEntriesIntent } from '../../../store/ui-intents';
+	import { copyTextToClipboard } from '../../../utils/clipboard';
+	import { text } from '@sveltejs/kit';
+	import { fade, slide } from 'svelte/transition';
 
 	let { panelId, panelType, title, params }: PanelProps = $props();
 
@@ -125,6 +128,9 @@
 	let superCollapseStatsVersion = $state(0);
 	let lastSessionRef: typeof session = null;
 
+	let copyButtonText = $state<string | null>(null);
+	let overRecordKey = $state<string | null>(null);
+
 	const resolveSourceLabel = (record: UiLogRecord): string => {
 		if (record.origin === undefined) {
 			return ENGINE_SOURCE_LABEL;
@@ -202,6 +208,37 @@
 
 	const collapseSignatureForRecord = (record: UiLogRecord): string => {
 		return JSON.stringify([record.level, record.tag, record.origin ?? null, record.message]);
+	};
+
+	const formatLogEntryForClipboard = (entry: LoggerEntry): string => {
+		const record = entry.record;
+		const headerParts = [
+			`[${entry.formattedTime}]`,
+			`[${record.level}]`,
+			`[${entry.sourceLabel}]`,
+			record.tag.trim().length > 0 ? `[${record.tag}]` : null,
+			entry.repeatCount > 1 ? `[x${entry.repeatCount}]` : null
+		].filter((part): part is string => part !== null);
+		const message = record.message;
+		const header = headerParts.join(' ');
+		return message.length > 0 ? `${header}\n${message}` : header;
+	};
+
+	const hasLoggerSelection = (): boolean => {
+		if (!loggerList || typeof window === 'undefined') {
+			return false;
+		}
+
+		const selection = window.getSelection();
+		if (!selection || selection.isCollapsed || selection.rangeCount === 0) {
+			return false;
+		}
+
+		const commonAncestor = selection.getRangeAt(0).commonAncestorContainer;
+		const selectionRoot =
+			commonAncestor.nodeType === Node.TEXT_NODE ? commonAncestor.parentNode : commonAncestor;
+
+		return selectionRoot instanceof Node && loggerList.contains(selectionRoot);
 	};
 
 	const resetSuperCollapseStats = (): void => {
@@ -357,7 +394,11 @@
 				const duplicateIndex = duplicateCountById.get(record.id) ?? 0;
 				duplicateCountById.set(record.id, duplicateIndex + 1);
 				entries.push(
-					makeEntry(record, uniqueRecordKey(record.id, duplicateIndex), repeatCountForRecord(record))
+					makeEntry(
+						record,
+						uniqueRecordKey(record.id, duplicateIndex),
+						repeatCountForRecord(record)
+					)
 				);
 			}
 			return {
@@ -495,7 +536,7 @@
 			if (listEndMarker) {
 				listEndMarker.scrollIntoView({ block: 'end' });
 			}
-			if(loggerList) loggerList.scrollTop = loggerList?.scrollHeight ?? 0;
+			if (loggerList) loggerList.scrollTop = loggerList?.scrollHeight ?? 0;
 		});
 		requestAnimationFrame(() => {
 			if (!loggerList || !followLatest || focusedRecordKey !== null || isListAtBottom()) {
@@ -505,7 +546,7 @@
 				if (listEndMarker) {
 					listEndMarker.scrollIntoView({ block: 'end' });
 				}
-				if(loggerList) loggerList.scrollTop = loggerList?.scrollHeight ?? 0;
+				if (loggerList) loggerList.scrollTop = loggerList?.scrollHeight ?? 0;
 			});
 		});
 	};
@@ -598,6 +639,27 @@
 		focusedRecordKey = entryKey;
 		followLatest = false;
 		scheduleViewportSync();
+	};
+
+	const handleRecordClick = (entryKey: string): void => {
+		if (hasLoggerSelection()) {
+			return;
+		}
+		focusRecord(entryKey);
+	};
+
+	const copyEntry = (event: MouseEvent, entry: LoggerEntry): void => {
+		event.stopPropagation();
+		void copyTextToClipboard(formatLogEntryForClipboard(entry));
+	};
+
+	const copyDisplayedLogs = (): void => {
+		if (filteredEntries.length === 0) {
+			return;
+		}
+
+		const text = filteredEntries.map((entry) => formatLogEntryForClipboard(entry)).join('\n\n');
+		void copyTextToClipboard(text);
 	};
 
 	const handleRecordKeydown = (event: KeyboardEvent, entryKey: string): void => {
@@ -768,31 +830,59 @@
 					role="button"
 					tabindex="0"
 					data-record-key={entry.key}
-					onclick={() => focusRecord(entry.key)}
-					onkeydown={(event) => handleRecordKeydown(event, entry.key)}>
+					onclick={() => handleRecordClick(entry.key)}
+					onkeydown={(event) => handleRecordKeydown(event, entry.key)}
+					onmouseenter={(e: MouseEvent) => {
+						overRecordKey = entry.key;
+						copyButtonText = null;
+					}}
+					onmouseleave={() => (overRecordKey = null)}>
 					<time class="time">{entry.formattedTime}</time>
 					<!-- <span class="level">{record.level}</span> -->
 					<!-- <span class="tag">{record.tag}</span> -->
 
 					<p class="message">{record.message}</p>
 
-					{#if record.origin !== undefined}
-						<button
-							type="button"
-							class="origin"
-							onclick={(event) => selectOrigin(event, record.origin, entry.key)}
-							title="Select source node">
-							{entry.sourceLabel}
-						</button>
-					{:else}
-						<span class="origin-label">{entry.sourceLabel}</span>
-					{/if}
+					<div class="record-actions">
+						{#if record.origin !== undefined}
+							<button
+								type="button"
+								class="origin"
+								onclick={(event) => selectOrigin(event, record.origin, entry.key)}
+								title="Select source node">
+								{entry.sourceLabel}
+							</button>
+						{:else}
+							<span class="origin-label">{entry.sourceLabel}</span>
+						{/if}
 
-					{#if entry.repeatCount > 1}
-						<span class="repeat-count" title={`${entry.repeatCount} repeated logs`}>
-							x{entry.repeatCount}
-						</span>
-					{/if}
+						{#if entry.repeatCount > 1}
+							<span class="repeat-count" title={`${entry.repeatCount} repeated logs`}>
+								x{entry.repeatCount}
+							</span>
+						{/if}
+
+						{#if overRecordKey === entry.key}
+							<button
+								transition:fade={{ duration: 150 }}
+								type="button"
+								class="copy-log-button"
+								title="Copy this log entry"
+								aria-label="Copy this log entry"
+								onclick={(event) => {
+									copyEntry(event, entry);
+									copyButtonText = 'Copied !';
+								}}
+								onmouseenter={() => (copyButtonText = 'Copy')}
+								onmouseleave={() => (copyButtonText = null)}>
+								{#if copyButtonText}
+									<div class="copy-text" transition:slide={{ duration: 200, axis: 'x' }}>
+										{copyButtonText}
+									</div>
+								{/if}
+							</button>
+						{/if}
+					</div>
 				</div>
 			{/each}
 		{/if}
@@ -827,6 +917,14 @@
 			</span>
 		{/if} -->
 		<div class="spacer"></div>
+		<button
+			type="button"
+			class="toolbar-button"
+			title="Copy the logs currently displayed in this panel"
+			onclick={copyDisplayedLogs}
+			disabled={filteredEntries.length === 0}>
+			Copy logs
+		</button>
 		<button type="button" class="toolbar-button clear-logs" onclick={clearLogs}>Clear logs</button>
 	</footer>
 </section>
@@ -837,7 +935,7 @@
 		flex-direction: column;
 		block-size: 100%;
 		min-block-size: 0;
-		gap:.25rem;
+		gap: 0.25rem;
 	}
 
 	.logger-toolbar {
@@ -852,15 +950,12 @@
 	header input {
 		font-size: 0.6rem;
 		text-transform: uppercase;
-		width:5rem;
+		width: 5rem;
 	}
 
-
-	footer 
-	{
+	footer {
 		display: flex;
 	}
-	
 
 	.toolbar-button {
 		block-size: 1.7rem;
@@ -873,6 +968,8 @@
 		text-transform: uppercase;
 		letter-spacing: 0.04em;
 		cursor: pointer;
+		user-select: none;
+		-webkit-user-select: none;
 	}
 
 	.toolbar-button:disabled {
@@ -912,6 +1009,8 @@
 		flex-direction: column;
 		font-family: ui-monospace, 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace;
 		font-variant-ligatures: none;
+		user-select: text;
+		-webkit-user-select: text;
 	}
 
 	.logger-list.is-filtered {
@@ -948,6 +1047,8 @@
 		contain: layout style paint;
 		content-visibility: auto;
 		contain-intrinsic-size: 1.4rem;
+		user-select: text;
+		-webkit-user-select: text;
 	}
 
 	.record:hover {
@@ -964,10 +1065,19 @@
 	}
 
 	.record {
+		.record-actions {
+			display: flex;
+			align-items: flex-start;
+			gap: 0.35rem;
+			flex: 0 0 auto;
+			min-inline-size: 0;
+		}
+
 		.time,
 		.level,
 		.tag,
 		.repeat-count,
+		.copy-log-button,
 		.origin,
 		.origin-label {
 			flex: 0 0 auto;
@@ -1027,6 +1137,37 @@
 
 		.origin-label {
 			opacity: 0.78;
+		}
+
+		.copy-log-button {
+			border: 0;
+			color: color-mix(in srgb, var(--gc-color-panel-outline) 60%, white 40%);
+			cursor: pointer;
+			user-select: none;
+			-webkit-user-select: none;
+			min-width: 1rem;
+			height: 1rem;
+			background-color: var(--gc-color-background);
+			background-image: url('../../../style/icons/clipboard.svg');
+			background-repeat: no-repeat;
+			background-size: contain;
+			position: absolute;
+			right: 0;
+			background-position: center right;
+			border-radius: 1rem;
+			padding: 0;
+		}
+
+		.copy-log-button:hover {
+			background-color: color-mix(
+				in srgb,
+				var(--gc-color-focus) 10%,
+				var(--gc-color-background) 90%
+			);
+		}
+
+		.copy-log-button .copy-text {
+			padding: 0rem 1.5rem 0rem 1rem;
 		}
 
 		.message {

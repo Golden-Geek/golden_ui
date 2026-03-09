@@ -15,6 +15,7 @@
 	import { getMainViewportBounds, remToPx } from '$lib/golden_ui/components/common/floating-panel';
 	import { getPanelByType, showPanel } from '$lib/golden_ui/store/ui-panels';
 	import { PERSISTED_PANEL_STATE_KEY } from '$lib/golden_ui/dockview/panel-persistence';
+	import { copyTextToClipboard } from '$lib/golden_ui/utils/clipboard';
 	import copyPathIcon from '../../style/icons/copy.svg';
 	import colorIcon from '../../style/icons/parameter/color.svg';
 	import settingsIcon from '../../style/icons/settings.svg';
@@ -336,39 +337,6 @@
 	};
 
 	let scriptControlPath = $derived(activeNode ? relativeDeclPath(activeNode.node_id) : '');
-
-	const copyTextToClipboard = async (text: string): Promise<void> => {
-		const trimmed = String(text ?? '');
-		if (trimmed.length === 0) {
-			return;
-		}
-
-		try {
-			if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
-				await navigator.clipboard.writeText(trimmed);
-				return;
-			}
-		} catch (error) {
-			console.warn('[ui] navigator clipboard write failed', error);
-		}
-
-		if (typeof document === 'undefined') {
-			return;
-		}
-
-		const textarea = document.createElement('textarea');
-		textarea.value = trimmed;
-		textarea.setAttribute('readonly', 'readonly');
-		textarea.style.position = 'fixed';
-		textarea.style.opacity = '0';
-		document.body.appendChild(textarea);
-		textarea.select();
-		try {
-			document.execCommand('copy');
-		} finally {
-			document.body.removeChild(textarea);
-		}
-	};
 
 	const copyScriptControlPath = (): void => {
 		const value = scriptControlPath.length > 0 ? scriptControlPath : '.';

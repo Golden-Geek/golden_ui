@@ -37,6 +37,7 @@ import type {
 } from '../types';
 import { isCssUnit } from '../css-value';
 import { wholeGraphScope } from '../types';
+import { getUiClientInstanceId } from './client-instance';
 
 const DEFAULT_BASE_URL = 'http://localhost:7010/api/ui';
 const DEFAULT_POLL_INTERVAL_MS = 150;
@@ -51,6 +52,7 @@ export type RustScope = string | { subtree: { root: number; max_depth: number } 
 
 export interface RustSnapshotRequest {
 	scope: RustScope;
+	cancel_active_edit_session?: boolean;
 }
 
 export interface RustReplayRequest {
@@ -1219,12 +1221,14 @@ export const createHttpUiClient = (options: HttpClientOptions = {}): UiClient =>
 	const fetchImpl = options.fetchImpl ?? fetch;
 	const baseUrl = (options.baseUrl ?? DEFAULT_BASE_URL).replace(/\/+$/, '');
 	const pollIntervalMs = Math.max(50, options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS);
+	const clientInstanceId = getUiClientInstanceId();
 
 	const postJson = async <TResponse>(path: string, payload: unknown): Promise<TResponse> => {
 		const response = await fetchImpl(`${baseUrl}${path}`, {
 			method: 'POST',
 			headers: {
-				'content-type': 'application/json'
+				'content-type': 'application/json',
+				'x-gc-ui-client-instance': clientInstanceId
 			},
 			body: JSON.stringify(payload)
 		});
@@ -1248,7 +1252,10 @@ export const createHttpUiClient = (options: HttpClientOptions = {}): UiClient =>
 
 	const client: UiClient = {
 		async snapshot(scope: UiSubscriptionScope = wholeGraphScope): Promise<UiSnapshot> {
-			const request: RustSnapshotRequest = { scope: toRustScope(scope) };
+			const request: RustSnapshotRequest = {
+				scope: toRustScope(scope),
+				cancel_active_edit_session: true
+			};
 			const snapshot = await postJson<RustUiSnapshot>('/snapshot', request);
 			return fromRustSnapshot(snapshot);
 		},

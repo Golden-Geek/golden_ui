@@ -15,6 +15,7 @@ import {
 	type RustScope,
 	type RustUiEventBatch
 } from './http';
+import { getUiClientInstanceId } from './client-instance';
 
 const DEFAULT_WS_URL = 'ws://localhost:7010/api/ui/ws';
 const UI_PROTOCOL_VERSION = '0.1.0';
@@ -40,7 +41,7 @@ interface WebSocketUiClientOptions {
 }
 
 type WsClientMessage =
-	| { kind: 'hello'; protocol_version: string }
+	| { kind: 'hello'; protocol_version: string; client_instance_id?: string }
 	| { kind: 'subscribe'; subscription_id: string; scope: RustScope; from?: EventTime }
 	| { kind: 'unsubscribe'; subscription_id: string }
 	| {
@@ -103,6 +104,7 @@ export const createWebSocketUiClient = (options: WebSocketUiClientOptions = {}):
 	);
 	const WebSocketImpl =
 		options.webSocketImpl ?? (typeof WebSocket !== 'undefined' ? WebSocket : null);
+	const clientInstanceId = getUiClientInstanceId();
 	const httpClient = createHttpUiClient({
 		baseUrl: options.httpBaseUrl,
 		pollIntervalMs: options.pollIntervalMs,
@@ -418,7 +420,8 @@ export const createWebSocketUiClient = (options: WebSocketUiClientOptions = {}):
 		currentSocket.onopen = () => {
 			sendRawOnOpenSocket({
 				kind: 'hello',
-				protocol_version: UI_PROTOCOL_VERSION
+				protocol_version: UI_PROTOCOL_VERSION,
+				client_instance_id: clientInstanceId
 			});
 			reconnectAttempts = 0;
 			emitConnectionState('connected', undefined, true);
