@@ -442,7 +442,7 @@ const buildDashboardNodeWidgetInitialParams = (
 	targetNode: UiNodeDto,
 	placement: DashboardWidgetCreationPlacement
 ): UiCreateUserItemInitialParam[] => [
-	createInitialParam('binding/target_node', createReferenceValue(graph, targetNode)),
+	createInitialParam('widget/target_node', createReferenceValue(graph, targetNode)),
 	...buildDashboardWidgetPlacementInitialParams(graph, parentId, placement)
 ];
 

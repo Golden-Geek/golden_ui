@@ -3,7 +3,7 @@
 	import Slider from '$lib/golden_ui/components/common/Slider.svelte';
 	import { appState } from '$lib/golden_ui/store/workbench.svelte';
 	import { createUiEditSession, sendSetParamIntent } from '$lib/golden_ui/store/ui-intents';
-	import type { UiNodeDto } from '$lib/golden_ui/types';
+	import type { UiNodeDto, UiRangeConstraint } from '$lib/golden_ui/types';
 
 	interface VectorEditorPresentation {
 		layout?: 'inline' | 'column';
@@ -11,10 +11,16 @@
 		max_decimals?: number;
 	}
 
-	let { node, layoutMode = 'default', presentation = {} } = $props<{
+	let {
+		node,
+		layoutMode = 'default',
+		presentation = {},
+		rangeOverride = null
+	} = $props<{
 		node: UiNodeDto;
 		layoutMode?: 'default' | 'widget';
 		presentation?: VectorEditorPresentation;
+		rangeOverride?: UiRangeConstraint | null;
 	}>();
 
 	let session = $derived(appState.session);
@@ -25,16 +31,18 @@
 	let value = $derived(
 		param && (param.value.kind === 'vec2' || param.value.kind === 'vec3') ? param.value.value : []
 	);
+	let viewRange = $derived(rangeOverride ?? param?.constraints.range ?? null);
 
 	let draftValue = $state<number[]>([]);
 	let isEditing = $state(false);
 	let editSession = createUiEditSession('Edit vector', 'param-vector');
 	const NUMERIC_EPSILON = 1e-9;
 	let showValueFields = $derived(presentation.show_value_fields !== false);
-	let fractionDigits = $derived(Math.max(0, Math.min(8, Math.round(presentation.max_decimals ?? 2))));
+	let fractionDigits = $derived(
+		Math.max(0, Math.min(8, Math.round(presentation.max_decimals ?? 2)))
+	);
 	let widgetLayoutKind = $derived(presentation.layout === 'column' ? 'column' : 'inline');
 
-	
 	$effect(() => {
 		if (isEditing) {
 			return;
@@ -92,13 +100,10 @@
 	};
 
 	const componentMin = (index: number): number | undefined => {
-		if (!param) {
+		if (!viewRange) {
 			return undefined;
 		}
-		const range = param.constraints.range;
-		if (!range) {
-			return undefined;
-		}
+		const range = viewRange;
 		if (range.kind === 'uniform') {
 			return range.min;
 		}
@@ -109,13 +114,10 @@
 	};
 
 	const componentMax = (index: number): number | undefined => {
-		if (!param) {
+		if (!viewRange) {
 			return undefined;
 		}
-		const range = param.constraints.range;
-		if (!range) {
-			return undefined;
-		}
+		const range = viewRange;
 		if (range.kind === 'uniform') {
 			return range.max;
 		}
@@ -184,6 +186,19 @@
 
 		return nextValue;
 	};
+
+	const displayedSliderValue = (index: number): number => {
+		const min = componentMin(index);
+		const max = componentMax(index);
+		const currentValue = draftValue[index] ?? 0;
+		if (min !== undefined && currentValue < min) {
+			return min;
+		}
+		if (max !== undefined && currentValue > max) {
+			return max;
+		}
+		return currentValue;
+	};
 </script>
 
 <div
@@ -195,7 +210,7 @@
 			<div class="single-number-editor">
 				<div class="slider-wrapper">
 					<Slider
-						value={draftValue[index]}
+						value={displayedSliderValue(index)}
 						min={componentMin(index)}
 						max={componentMax(index)}
 						step={param?.constraints.step}

@@ -1,19 +1,38 @@
 <script lang="ts">
+	import { appState } from '$lib/golden_ui/store/workbench.svelte';
 	import type { UiNodeDto } from '$lib/golden_ui/types';
 	import Vec2PadEditor from '$lib/golden_ui/components/panels/inspector/parameters/Vec2PadEditor.svelte';
+	import { getEffectiveWidgetVectorRange } from './dashboard-node-widget-options';
 
 	let {
 		targetNode,
+		widgetNode = null,
 		insideLabel = null
-	} = $props<{ targetNode: UiNodeDto; insideLabel?: string | null }>();
+	} = $props<{
+		targetNode: UiNodeDto;
+		widgetNode?: UiNodeDto | null;
+		insideLabel?: string | null;
+		includeChildren?: boolean;
+		editMode?: boolean;
+	}>();
+
+	let session = $derived(appState.session);
+	let graph = $derived(session?.graph.state ?? null);
+	let liveWidgetNode = $derived(
+		widgetNode ? (graph?.nodesById.get(widgetNode.node_id) ?? widgetNode) : null
+	);
+	let liveTargetNode = $derived(graph?.nodesById.get(targetNode.node_id) ?? targetNode);
+	let effectiveRange = $derived(
+		getEffectiveWidgetVectorRange(graph, liveWidgetNode, liveTargetNode, 2)
+	);
 </script>
 
 <div class="dashboard-node-widget-vec2-pad">
-	{#if targetNode.data.kind === 'parameter' && targetNode.data.param.value.kind === 'vec2'}
+	{#if liveTargetNode.data.kind === 'parameter' && liveTargetNode.data.param.value.kind === 'vec2'}
 		{#if typeof insideLabel === 'string' && insideLabel.trim().length > 0}
 			<div class="dashboard-node-widget-vec2-pad-label">{insideLabel.trim()}</div>
 		{/if}
-		<Vec2PadEditor node={targetNode} layoutMode="widget" />
+		<Vec2PadEditor node={liveTargetNode} layoutMode="widget" rangeOverride={effectiveRange} />
 	{:else}
 		<div class="dashboard-node-widget-mode-empty">2D Pad mode only applies to vec2 parameters.</div>
 	{/if}

@@ -322,8 +322,13 @@ export interface UiCreatableUserItem {
 	label: string;
 }
 
+export interface UiNodeTypeDescriptor {
+	node_type: string;
+	description?: string;
+}
+
 export interface UiSchemaView {
-	node_types: Array<{ node_type: string }>;
+	node_types: UiNodeTypeDescriptor[];
 	enums: Array<{
 		enum_id: string;
 		variants: Array<{

@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onDestroy } from 'svelte';
+	import { registerCommandHandler } from '$lib/golden_ui/store/commands.svelte';
 	import { appState } from '$lib/golden_ui/store/workbench.svelte';
 	import { createUiEditSession, sendSetParamIntent } from '$lib/golden_ui/store/ui-intents';
 	import type { UiNodeDto, UiRangeConstraint } from '$lib/golden_ui/types';
@@ -51,9 +52,14 @@
 				bounds: Bounds;
 		  };
 
-	let { node, layoutMode = 'default' } = $props<{
+	let {
+		node,
+		layoutMode = 'default',
+		rangeOverride = null
+	} = $props<{
 		node: UiNodeDto;
 		layoutMode?: 'default' | 'widget';
+		rangeOverride?: UiRangeConstraint | null;
 	}>();
 
 	const EPSILON = 1e-9;
@@ -78,7 +84,7 @@
 		}
 		return [Number(param.value.value[0] ?? 0), Number(param.value.value[1] ?? 0)];
 	});
-	let rangedBounds = $derived(parseVec2Bounds(param?.constraints.range));
+	let rangedBounds = $derived(parseVec2Bounds(rangeOverride ?? param?.constraints.range));
 	let isRanged = $derived(rangedBounds !== null);
 	let safeViewSpan = $derived(Math.max(0.25, DEFAULT_VIEW_SPAN));
 	let plotAspectRatio = $derived.by((): number => {
@@ -89,17 +95,18 @@
 		const height = Math.max(EPSILON, rangedBounds.yMax - rangedBounds.yMin);
 		return width / height;
 	});
+	let effectivePlotAspectRatio = $derived(Math.max(EPSILON, plotAspectRatio));
 
 	let stageElement = $state<HTMLDivElement | null>(null);
 	let cameraCenterX = $state(0);
 	let cameraCenterY = $state(0);
-	let cameraSpan = $state(8);
-	let navigationPinned = $state(false);
+	let cameraHeightSpan = $state(DEFAULT_VIEW_SPAN);
 	let draftValue = $state<[number, number]>([0, 0]);
 	let tickNowMs = $state(Date.now());
 	let dragState = $state<DragState | null>(null);
 	let trailPoints = $state<TrailPoint[]>([]);
 	let lastTrailSignature = $state('');
+	let isStageFocused = $state(false);
 	let editSession = createUiEditSession('Edit vec2 in 2D', 'param-vec2-2d');
 
 	function normalizeBounds(bounds: Bounds): Bounds {
@@ -171,15 +178,13 @@
 	}
 
 	const visibleBounds = $derived.by((): Bounds => {
-		if (rangedBounds) {
-			return rangedBounds;
-		}
-		const halfSpan = Math.max(EPSILON, cameraSpan) * 0.5;
+		const halfHeight = Math.max(EPSILON, cameraHeightSpan) * 0.5;
+		const halfWidth = halfHeight * effectivePlotAspectRatio;
 		return {
-			xMin: cameraCenterX - halfSpan,
-			xMax: cameraCenterX + halfSpan,
-			yMin: cameraCenterY - halfSpan,
-			yMax: cameraCenterY + halfSpan
+			xMin: cameraCenterX - halfWidth,
+			xMax: cameraCenterX + halfWidth,
+			yMin: cameraCenterY - halfHeight,
+			yMax: cameraCenterY + halfHeight
 		};
 	});
 
@@ -289,7 +294,9 @@
 		return segments;
 	});
 
-	const displayedValue = $derived.by((): [number, number] => draftValue);
+	const displayedValue = $derived.by((): [number, number] =>
+		clampPointToBounds(draftValue, rangedBounds)
+	);
 	const handleX = $derived.by(() => toPlotX(displayedValue[0], visibleBounds));
 	const handleY = $derived.by(() => toPlotY(displayedValue[1], visibleBounds));
 	const zeroAxisX = $derived.by(() =>
@@ -327,12 +334,21 @@
 		);
 	};
 
+	const focusStage = (): void => {
+		stageElement?.focus();
+	};
+
 	const resetCamera = (): void => {
-		const [x, y] = currentValue;
+		if (rangedBounds) {
+			cameraCenterX = (rangedBounds.xMin + rangedBounds.xMax) * 0.5;
+			cameraCenterY = (rangedBounds.yMin + rangedBounds.yMax) * 0.5;
+			cameraHeightSpan = Math.max(EPSILON, rangedBounds.yMax - rangedBounds.yMin);
+			return;
+		}
+		const [x, y] = displayedValue;
 		cameraCenterX = x;
 		cameraCenterY = y;
-		cameraSpan = safeViewSpan;
-		navigationPinned = false;
+		cameraHeightSpan = safeViewSpan;
 	};
 
 	const stopInteraction = (pointerId: number | null = null): void => {
@@ -364,12 +380,11 @@
 	};
 
 	const beginPan = (event: PointerEvent): void => {
-		if (!stageElement || isRanged) {
+		if (!stageElement || !isRanged) {
 			return;
 		}
 
 		event.preventDefault();
-		navigationPinned = true;
 		dragState = {
 			kind: 'pan',
 			pointerId: event.pointerId,
@@ -387,12 +402,16 @@
 			return;
 		}
 
-		if (!isRanged && (event.button === 1 || event.button === 2)) {
+		focusStage();
+
+		if (isRanged && (event.button === 1 || event.button === 2)) {
+			event.stopPropagation();
 			beginPan(event);
 			return;
 		}
 
 		if (event.button === 0) {
+			event.stopPropagation();
 			beginHandleDrag(event);
 		}
 	};
@@ -431,12 +450,13 @@
 	};
 
 	const handleWheel = (event: WheelEvent): void => {
-		if (isRanged || !stageElement) {
+		if (!stageElement) {
 			return;
 		}
 
+		focusStage();
 		event.preventDefault();
-		navigationPinned = true;
+		event.stopPropagation();
 
 		const rect = stageElement.getBoundingClientRect();
 		if (rect.width <= 0 || rect.height <= 0) {
@@ -452,13 +472,29 @@
 		const zoomFactor = Math.exp(event.deltaY * 0.0015);
 		const minSpan = Math.max(0.05, DEFAULT_UNIT_STEP * 0.25);
 		const maxSpan = Math.max(minSpan, 1000000);
-		const nextSpan = Math.min(maxSpan, Math.max(minSpan, cameraSpan * zoomFactor));
+		const nextHeightSpan = Math.min(maxSpan, Math.max(minSpan, cameraHeightSpan * zoomFactor));
 
-		const nextXMin = anchorX - localX * nextSpan;
-		const nextYMax = anchorY + localY * nextSpan;
-		cameraSpan = nextSpan;
-		cameraCenterX = nextXMin + nextSpan * 0.5;
-		cameraCenterY = nextYMax - nextSpan * 0.5;
+		if (!isRanged) {
+			cameraHeightSpan = nextHeightSpan;
+			const [x, y] = displayedValue;
+			cameraCenterX = x;
+			cameraCenterY = y;
+			return;
+		}
+
+		const nextWidthSpan = nextHeightSpan * effectivePlotAspectRatio;
+		const nextXMin = anchorX - localX * nextWidthSpan;
+		const nextYMax = anchorY + localY * nextHeightSpan;
+		cameraHeightSpan = nextHeightSpan;
+		cameraCenterX = nextXMin + nextWidthSpan * 0.5;
+		cameraCenterY = nextYMax - nextHeightSpan * 0.5;
+	};
+
+	const handleDoubleClick = (event: MouseEvent): void => {
+		focusStage();
+		event.preventDefault();
+		event.stopPropagation();
+		resetCamera();
 	};
 
 	$effect(() => {
@@ -477,13 +513,45 @@
 	});
 
 	$effect(() => {
-		if (isRanged || navigationPinned || isPanning) {
+		if (isRanged || isPanning) {
 			return;
 		}
-		const [x, y] = currentValue;
+		const [x, y] = displayedValue;
 		cameraCenterX = x;
 		cameraCenterY = y;
-		cameraSpan = safeViewSpan;
+	});
+
+	$effect(() => {
+		const unregisterHandlers = [
+			registerCommandHandler(
+				'view.frame',
+				() => {
+					if (!isStageFocused) {
+						return false;
+					}
+					resetCamera();
+					return true;
+				},
+				{ priority: 300 }
+			),
+			registerCommandHandler(
+				'view.home',
+				() => {
+					if (!isStageFocused) {
+						return false;
+					}
+					resetCamera();
+					return true;
+				},
+				{ priority: 300 }
+			)
+		];
+
+		return () => {
+			for (const unregister of unregisterHandlers) {
+				unregister();
+			}
+		};
 	});
 
 	$effect(() => {
@@ -539,14 +607,23 @@
 			tabindex="-1"
 			aria-label="2D vec2 editor"
 			style={`--gc-vec2-pad-aspect:${plotAspectRatio};`}
+			onfocusin={() => {
+				isStageFocused = true;
+			}}
+			onfocusout={(event) => {
+				const nextTarget = event.relatedTarget;
+				if (
+					nextTarget instanceof Node &&
+					(event.currentTarget as HTMLElement).contains(nextTarget)
+				) {
+					return;
+				}
+				isStageFocused = false;
+			}}
 			oncontextmenu={(event) => {
 				event.preventDefault();
 			}}
-			ondblclick={() => {
-				if (!isRanged) {
-					resetCamera();
-				}
-			}}
+			ondblclick={handleDoubleClick}
 			onpointerdown={handlePointerDown}
 			onpointermove={handlePointerMove}
 			onpointerup={handlePointerUp}
@@ -612,12 +689,14 @@
 			</svg>
 
 			<div class="vec2-pad-overlay top-left">
-				<span>X {formatWatcherNumber(displayedValue[0])}{unitSuffix}</span>
-				<span>Y {formatWatcherNumber(displayedValue[1])}{unitSuffix}</span>
+				<span>X {formatWatcherNumber(draftValue[0])}{unitSuffix}</span>
+				<span>Y {formatWatcherNumber(draftValue[1])}{unitSuffix}</span>
 				<span>{isRanged ? 'bounded' : 'free'}</span>
 			</div>
 
 			{#if !isRanged}
+				<div class="vec2-pad-overlay bottom-right">wheel zoom | double-click reset</div>
+			{:else}
 				<div class="vec2-pad-overlay bottom-right">
 					wheel zoom | right-drag pan | double-click reset
 				</div>
@@ -683,9 +762,12 @@
 	}
 
 	.widget-layout .vec2-pad-stage {
-		inline-size: 100%;
+		inline-size: auto;
 		block-size: 100%;
+		flex: 0 1 auto;
+		max-inline-size: 100%;
 		max-block-size: 100%;
+		min-inline-size: 0;
 		min-block-size: 0;
 	}
 

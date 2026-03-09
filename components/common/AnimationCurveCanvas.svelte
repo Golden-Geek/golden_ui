@@ -191,7 +191,7 @@ interface CurveDrawPathPoint {
 		onpointercancel,
 		onpointerleave,
 		onwheel,
-		ondblclick,
+		oncontextmenu,
 		onfocus,
 		onblur
 	}: {
@@ -224,7 +224,7 @@ interface CurveDrawPathPoint {
 		onpointercancel?: (event: PointerEvent) => void;
 		onpointerleave?: (event: PointerEvent) => void;
 		onwheel?: (event: WheelEvent) => void;
-		ondblclick?: (event: MouseEvent) => void;
+		oncontextmenu?: (event: MouseEvent) => void;
 		onfocus?: (event: FocusEvent) => void;
 		onblur?: (event: FocusEvent) => void;
 	} = $props();
@@ -1896,7 +1896,7 @@ interface CurveDrawPathPoint {
 			{onpointercancel}
 			{onpointerleave}
 			{onwheel}
-			{ondblclick}
+			{oncontextmenu}
 			{onfocus}
 			{onblur}></canvas>
 	</div>

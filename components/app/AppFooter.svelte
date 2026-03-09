@@ -4,6 +4,8 @@
 	const { session } = $props<{
 		session?: WorkbenchSession | null;
 	}>();
+
+	let hoverInfo = $derived(session?.getFooterHoverInfo() ?? null);
 </script>
 
 <footer class="gc-footer">
@@ -13,6 +15,13 @@
 				<span class="status-dot" aria-hidden="true"></span>
 				<span class="status-label">{session.status}</span>
 			</span>
+		</div>
+		<div class="footer-description" aria-hidden={hoverInfo === null}>
+			{#if hoverInfo}
+				<span class="description-label">{hoverInfo.label}</span>
+				<span class="description-separator">:</span>
+				<span class="description-copy">{hoverInfo.description}</span>
+			{/if}
 		</div>
 		<div class="footer-toaster" aria-live="polite">
 			{#each session.toasts as toast (toast.id)}
@@ -35,7 +44,7 @@
 	.gc-footer {
 		flex: 0 0 2rem;
 		display: grid;
-		grid-template-columns: auto minmax(0, 1fr);
+		grid-template-columns: auto minmax(0, 1fr) auto;
 		align-items: center;
 		gap: 0.75rem;
 		min-height: 2rem;
@@ -91,6 +100,43 @@
 
 	.status-label {
 		line-height: 1;
+	}
+
+	.footer-description {
+		display: flex;
+		align-items: center;
+		gap: 0.35rem;
+		min-width: 0;
+		overflow: hidden;
+		font-size: 0.72rem;
+		line-height: 1.15;
+		color: rgb(from var(--gc-color-text) r g b / 82%);
+	}
+
+	.description-label,
+	.description-copy {
+		min-width: 0;
+	}
+
+	.description-label {
+		flex: 0 1 auto;
+		font-weight: 600;
+		color: var(--gc-color-text);
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+
+	.description-separator {
+		flex: 0 0 auto;
+		color: rgb(from var(--gc-color-text) r g b / 48%);
+	}
+
+	.description-copy {
+		flex: 1 1 auto;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
 	}
 
 	.footer-toaster {
@@ -166,6 +212,10 @@
 		.gc-footer {
 			gap: 0.5rem;
 			padding: 0 0.75rem;
+		}
+
+		.footer-description {
+			font-size: 0.68rem;
 		}
 
 		.footer-toaster {

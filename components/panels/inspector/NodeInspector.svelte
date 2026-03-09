@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import { slide, type SlideParams } from 'svelte/transition';
 	import type { UiNodeDto } from '$lib/golden_ui/types';
 	import Self from './NodeInspector.svelte';
@@ -70,6 +71,8 @@
 
 	let creatableItems = $derived(node.creatable_user_items ?? []);
 	let showAddButton = $derived(!isRoot && showAsContainer && creatableItems.length > 0);
+	const footerHoverToken = Symbol('node-inspector-footer-hover');
+	let hoverActive = $state(false);
 
 	$effect(() => {
 		if (!renamingState.isRenaming || !renameInputElem) {
@@ -120,6 +123,31 @@
 	const setCollapsed = (nextCollapsed: boolean): void => {
 		collapsed = nextCollapsed;
 	};
+
+	const handlePointerEnter = (): void => {
+		hoverActive = true;
+	};
+
+	const handlePointerLeave = (): void => {
+		hoverActive = false;
+	};
+
+	$effect(() => {
+		if (!hoverActive || !node) {
+			untrack(() => {
+				session?.clearFooterHover(footerHoverToken);
+			});
+			return;
+		}
+		untrack(() => {
+			session?.setFooterHover(footerHoverToken, node.node_id);
+		});
+		return () => {
+			untrack(() => {
+				session?.clearFooterHover(footerHoverToken);
+			});
+		};
+	});
 </script>
 
 {#if node}
@@ -127,10 +155,13 @@
 		class="node-inspector {node.data.kind} 
 			{isRoot ? 'root' : !isFirstLevel ? 'nested' : ''}
 		{isParameter ? 'parameter' : 'container'}"
+		role="group"
 		class:custom-component={!!CustomInspectorComponent}
 		class:layout-dashboard={layoutMode === 'dashboard'}
 		data-node-id={node.node_id}
-		style="--container-color: {color}">
+		style="--container-color: {color}"
+		onpointerenter={handlePointerEnter}
+		onpointerleave={handlePointerLeave}>
 		{#snippet builtInHeader(headerExtra?: Snippet)}
 			{#if !isRoot}
 				<div class="node-header">

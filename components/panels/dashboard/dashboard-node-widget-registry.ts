@@ -1,16 +1,27 @@
 import type { UiNodeDto } from '$lib/golden_ui/types';
 import DashboardNodeWidgetInspectorContent from './DashboardNodeWidgetInspectorContent.svelte';
+import DashboardNodeWidgetNumberRotaryContent from './DashboardNodeWidgetNumberRotaryContent.svelte';
+import DashboardNodeWidgetNumberSliderContent from './DashboardNodeWidgetNumberSliderContent.svelte';
 import DashboardNodeWidgetParameterEditorContent from './DashboardNodeWidgetParameterEditorContent.svelte';
 import DashboardNodeWidgetVec2PadContent from './DashboardNodeWidgetVec2PadContent.svelte';
 
-export interface DashboardNodeWidgetDisplayModeEntry {
+export interface DashboardNodeWidgetTypeEntry {
 	id: string;
 	component: any;
 	usesLabelPlacement: boolean;
 	isCompatible?: (targetNode: UiNodeDto) => boolean;
 }
 
-const builtinDisplayModes = new Map<string, DashboardNodeWidgetDisplayModeEntry>([
+const builtinWidgetTypes = new Map<string, DashboardNodeWidgetTypeEntry>([
+	[
+		'default',
+		{
+			id: 'default',
+			component: DashboardNodeWidgetParameterEditorContent,
+			usesLabelPlacement: true,
+			isCompatible: (targetNode) => targetNode.data.kind === 'parameter'
+		}
+	],
 	[
 		'inspector',
 		{
@@ -21,12 +32,25 @@ const builtinDisplayModes = new Map<string, DashboardNodeWidgetDisplayModeEntry>
 		}
 	],
 	[
-		'editor',
+		'slider',
 		{
-			id: 'editor',
-			component: DashboardNodeWidgetParameterEditorContent,
+			id: 'slider',
+			component: DashboardNodeWidgetNumberSliderContent,
 			usesLabelPlacement: true,
-			isCompatible: (targetNode) => targetNode.data.kind === 'parameter'
+			isCompatible: (targetNode) =>
+				targetNode.data.kind === 'parameter' &&
+				(targetNode.data.param.value.kind === 'int' || targetNode.data.param.value.kind === 'float')
+		}
+	],
+	[
+		'rotary',
+		{
+			id: 'rotary',
+			component: DashboardNodeWidgetNumberRotaryContent,
+			usesLabelPlacement: true,
+			isCompatible: (targetNode) =>
+				targetNode.data.kind === 'parameter' &&
+				(targetNode.data.param.value.kind === 'int' || targetNode.data.param.value.kind === 'float')
 		}
 	],
 	[
@@ -41,52 +65,44 @@ const builtinDisplayModes = new Map<string, DashboardNodeWidgetDisplayModeEntry>
 	]
 ]);
 
-const customDisplayModes = new Map<string, DashboardNodeWidgetDisplayModeEntry>();
+const customWidgetTypes = new Map<string, DashboardNodeWidgetTypeEntry>();
 
-const getDisplayModeEntry = (modeId: string): DashboardNodeWidgetDisplayModeEntry | null =>
-	customDisplayModes.get(modeId) ?? builtinDisplayModes.get(modeId) ?? null;
+const getWidgetTypeEntry = (typeId: string): DashboardNodeWidgetTypeEntry | null =>
+	customWidgetTypes.get(typeId) ?? builtinWidgetTypes.get(typeId) ?? null;
 
-export const registerDashboardNodeWidgetDisplayMode = (
-	entry: DashboardNodeWidgetDisplayModeEntry
-): void => {
-	const modeId = entry.id.trim();
-	if (modeId.length === 0) {
-		throw new Error('Dashboard node widget display mode registration requires a non-empty id.');
+export const registerDashboardNodeWidgetType = (entry: DashboardNodeWidgetTypeEntry): void => {
+	const typeId = entry.id.trim();
+	if (typeId.length === 0) {
+		throw new Error('Dashboard node widget type registration requires a non-empty id.');
 	}
-	customDisplayModes.set(modeId, {
+	customWidgetTypes.set(typeId, {
 		...entry,
-		id: modeId
+		id: typeId
 	});
 };
 
-export const unregisterDashboardNodeWidgetDisplayMode = (modeId: string): void => {
-	customDisplayModes.delete(modeId.trim());
+export const unregisterDashboardNodeWidgetType = (typeId: string): void => {
+	customWidgetTypes.delete(typeId.trim());
 };
 
-export const clearDashboardNodeWidgetDisplayModes = (): void => {
-	customDisplayModes.clear();
+export const clearDashboardNodeWidgetTypes = (): void => {
+	customWidgetTypes.clear();
 };
 
-export const resolveDashboardNodeWidgetDisplayMode = (
+export const resolveDashboardNodeWidgetType = (
 	targetNode: UiNodeDto,
-	requestedModeId: string
-): DashboardNodeWidgetDisplayModeEntry | null => {
-	const normalizedRequestedModeId = requestedModeId.trim();
-	const requestedMode = normalizedRequestedModeId.length > 0
-		? getDisplayModeEntry(normalizedRequestedModeId)
-		: null;
-	if (requestedMode && (requestedMode.isCompatible?.(targetNode) ?? true)) {
-		return requestedMode;
+	requestedTypeId: string
+): DashboardNodeWidgetTypeEntry | null => {
+	const normalizedRequestedTypeId = requestedTypeId.trim();
+	const requestedWidgetType =
+		normalizedRequestedTypeId.length > 0 ? getWidgetTypeEntry(normalizedRequestedTypeId) : null;
+	if (requestedWidgetType && (requestedWidgetType.isCompatible?.(targetNode) ?? true)) {
+		return requestedWidgetType;
 	}
 
-	const inspectorMode = getDisplayModeEntry('inspector');
-	if (inspectorMode && (inspectorMode.isCompatible?.(targetNode) ?? true)) {
-		return inspectorMode;
-	}
-
-	for (const mode of [...customDisplayModes.values(), ...builtinDisplayModes.values()]) {
-		if (mode.isCompatible?.(targetNode) ?? true) {
-			return mode;
+	for (const widgetType of [...customWidgetTypes.values(), ...builtinWidgetTypes.values()]) {
+		if (widgetType.isCompatible?.(targetNode) ?? true) {
+			return widgetType;
 		}
 	}
 

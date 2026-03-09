@@ -11,7 +11,14 @@
 	import ReferenceEditor from '$lib/golden_ui/components/panels/inspector/parameters/ReferenceEditor.svelte';
 	import TextInputEditor from '$lib/golden_ui/components/panels/inspector/parameters/TextInputEditor.svelte';
 	import TriggerEditor from '$lib/golden_ui/components/panels/inspector/parameters/TriggerEditor.svelte';
-	import { getDirectParam } from './dashboard-model';
+	import {
+		clampWidgetMaxDecimals,
+		getEffectiveWidgetScalarRange,
+		getEffectiveWidgetVectorRange,
+		getWidgetBoolOption,
+		getWidgetEnumOption,
+		getWidgetIntOption
+	} from './dashboard-node-widget-options';
 
 	type NumberEditorOptions = {
 		show_value_field?: boolean;
@@ -39,6 +46,8 @@
 		targetNode: UiNodeDto;
 		widgetNode?: UiNodeDto | null;
 		insideLabel?: string | null;
+		includeChildren?: boolean;
+		editMode?: boolean;
 	}>();
 
 	let session = $derived(appState.session);
@@ -51,63 +60,57 @@
 		liveTargetNode.data.kind === 'parameter' ? liveTargetNode.data.param.value.kind : null
 	);
 
-	const clampMaxDecimals = (value: number | undefined, fallback: number): number | undefined => {
-		if (value === undefined || !Number.isFinite(value)) {
-			return fallback;
-		}
-		return Math.max(0, Math.min(8, Math.round(value)));
-	};
-
-	const getBoolWidgetParam = (declId: string, fallback: boolean): boolean => {
-		const value = liveWidgetNode ? getDirectParam(graph, liveWidgetNode, declId)?.value : null;
-		return value?.kind === 'bool' ? value.value : fallback;
-	};
-
-	const getIntWidgetParam = (declId: string, fallback: number): number => {
-		const value = liveWidgetNode ? getDirectParam(graph, liveWidgetNode, declId)?.value : null;
-		if (value?.kind === 'int') {
-			return value.value;
-		}
-		if (value?.kind === 'float') {
-			return value.value;
-		}
-		return fallback;
-	};
-
-	const getEnumWidgetParam = (
-		declId: string,
-		fallback: 'inline' | 'column'
-	): 'inline' | 'column' => {
-		const value = liveWidgetNode ? getDirectParam(graph, liveWidgetNode, declId)?.value : null;
-		const rawValue = value?.kind === 'enum' || value?.kind === 'str' ? value.value : null;
-		return rawValue === 'column' || rawValue === 'inline' ? rawValue : fallback;
-	};
-
 	let numberPresentation = $derived.by(
 		(): NumberEditorOptions => ({
-			show_value_field: getBoolWidgetParam('number_show_value_field', true),
-			max_decimals: clampMaxDecimals(getIntWidgetParam('number_max_decimals', 3), 3)
+			show_value_field: getWidgetBoolOption(graph, liveWidgetNode, 'slider_show_value_field', true),
+			max_decimals: clampWidgetMaxDecimals(
+				getWidgetIntOption(graph, liveWidgetNode, 'slider_max_decimals', 3),
+				3
+			)
 		})
 	);
 
 	let vectorPresentation = $derived.by(
 		(): VectorEditorOptions => ({
-			layout: getEnumWidgetParam('vector_layout', 'column'),
-			show_value_fields: getBoolWidgetParam('vector_show_value_fields', true),
-			max_decimals: clampMaxDecimals(getIntWidgetParam('vector_max_decimals', 2), 2)
+			layout: getWidgetEnumOption(graph, liveWidgetNode, 'vector_layout', 'inline', [
+				'inline',
+				'column'
+			] as const),
+			show_value_fields: getWidgetBoolOption(
+				graph,
+				liveWidgetNode,
+				'vector_show_value_fields',
+				true
+			),
+			max_decimals: clampWidgetMaxDecimals(
+				getWidgetIntOption(graph, liveWidgetNode, 'vector_max_decimals', 2),
+				2
+			)
 		})
 	);
 
 	let colorPresentation = $derived.by(
 		(): ColorEditorOptions => ({
-			force_expanded: getBoolWidgetParam('color_force_expanded', false),
-			show_hex: getBoolWidgetParam('color_show_hex', true),
-			show_rgba_fields: getBoolWidgetParam('color_show_rgba_fields', true)
+			force_expanded: getWidgetBoolOption(graph, liveWidgetNode, 'color_force_expanded', false),
+			show_hex: getWidgetBoolOption(graph, liveWidgetNode, 'color_show_hex', true),
+			show_rgba_fields: getWidgetBoolOption(graph, liveWidgetNode, 'color_show_rgba_fields', true)
 		})
 	);
 	let insideLabelText = $derived(typeof insideLabel === 'string' ? insideLabel.trim() : '');
 	let showsInsideLabel = $derived(insideLabelText.length > 0);
 	let editorInsideLabel = $derived(showsInsideLabel ? insideLabelText : null);
+	let effectiveNumberRange = $derived(
+		getEffectiveWidgetScalarRange(graph, liveWidgetNode, liveTargetNode)
+	);
+	let effectiveVectorRange = $derived.by(() => {
+		if (paramKind === 'vec2') {
+			return getEffectiveWidgetVectorRange(graph, liveWidgetNode, liveTargetNode, 2);
+		}
+		if (paramKind === 'vec3') {
+			return getEffectiveWidgetVectorRange(graph, liveWidgetNode, liveTargetNode, 3);
+		}
+		return null;
+	});
 
 	let editorEntry = $derived.by(() => {
 		if (liveTargetNode.data.kind !== 'parameter') {
@@ -121,7 +124,9 @@
 
 <div class="dashboard-node-widget-parameter-editor">
 	{#if targetNode.data.kind !== 'parameter'}
-		<div class="dashboard-node-widget-mode-empty">Editor mode only applies to parameters.</div>
+		<div class="dashboard-node-widget-mode-empty">
+			Default widget type only applies to parameters.
+		</div>
 	{:else if paramKind === 'int' || paramKind === 'float'}
 		<div class="dashboard-node-widget-parameter-editor-body widget-layout">
 			<NumberEditor
@@ -130,14 +135,16 @@
 				presentation={{
 					...numberPresentation,
 					inside_label: editorInsideLabel ?? undefined
-				}} />
+				}}
+				rangeOverride={effectiveNumberRange} />
 		</div>
 	{:else if paramKind === 'vec2' || paramKind === 'vec3'}
 		<div class="dashboard-node-widget-parameter-editor-body widget-layout">
 			<MultiNumberEditor
 				node={liveTargetNode}
 				layoutMode="widget"
-				presentation={vectorPresentation} />
+				presentation={vectorPresentation}
+				rangeOverride={effectiveVectorRange} />
 		</div>
 	{:else if paramKind === 'color'}
 		<div class="dashboard-node-widget-parameter-editor-body widget-layout color-layout">

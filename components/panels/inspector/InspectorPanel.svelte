@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import NodeDataInspector from './NodeDataInspector.svelte';
 	import NodeInspector from './NodeInspector.svelte';
 
@@ -83,6 +84,8 @@
 	let dataInspectorCollapsed = $state(true);
 	let watcherSettingsByParam = $state<Record<string, Partial<WatcherUiSettings>>>({});
 	let badgeOver = $state(false);
+	const footerHoverToken = Symbol('inspector-panel-footer-hover');
+	let headerHoverActive = $state(false);
 
 	const WATCHER_SETTINGS_CACHE_LIMIT = 256;
 
@@ -379,10 +382,40 @@
 		};
 		applyPersistedState(params);
 	});
+
+	const handleHeaderPointerEnter = (): void => {
+		headerHoverActive = true;
+	};
+
+	const handleHeaderPointerLeave = (): void => {
+		headerHoverActive = false;
+	};
+
+	$effect(() => {
+		if (!headerHoverActive || !node) {
+			untrack(() => {
+				session?.clearFooterHover(footerHoverToken);
+			});
+			return;
+		}
+		untrack(() => {
+			session?.setFooterHover(footerHoverToken, node.node_id);
+		});
+		return () => {
+			untrack(() => {
+				session?.clearFooterHover(footerHoverToken);
+			});
+		};
+	});
 </script>
 
 <div class="inspector">
-	<div class="inspector-header" data-node-id={node?.node_id}>
+	<div
+		class="inspector-header"
+		role="group"
+		data-node-id={node?.node_id}
+		onpointerenter={handleHeaderPointerEnter}
+		onpointerleave={handleHeaderPointerLeave}>
 		{#if node == null}
 			<span class="title-text">No node selected</span>
 		{:else}

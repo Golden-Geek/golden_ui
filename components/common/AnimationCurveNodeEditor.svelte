@@ -15,6 +15,8 @@
 	} from '$lib/golden_ui/store/curve-clipboard.svelte';
 	import type { NodeId, ParamValue, UiNodeDto, UiParamConstraints } from '$lib/golden_ui/types';
 	import AnimationCurveCanvas from './AnimationCurveCanvas.svelte';
+	import ContextMenu from './ContextMenu.svelte';
+	import type { ContextMenuAnchor, ContextMenuItem } from './context-menu';
 
 	type CurveEasingKind =
 		| 'linear'
@@ -63,6 +65,11 @@
 		position_param?: ParamNodeRef;
 		value_param?: ParamNodeRef;
 		easing?: ParsedEasing;
+	}
+
+	interface EasingKindOption {
+		value: CurveEasingKind;
+		label: string;
 	}
 
 	interface CubicPolynomial {
@@ -338,6 +345,11 @@ interface ActiveCurveDrag {
 		path_buckets: number[];
 	}
 
+	type CurveContextMenuTarget =
+		| { kind: 'key'; key_id: NodeId }
+		| { kind: 'curve'; key_id: NodeId }
+		| { kind: 'all' };
+
 	type SelectionMode = 'replace' | 'add' | 'toggle';
 
 	interface ActiveBoxSelection {
@@ -434,6 +446,26 @@ interface ActiveCurveDrag {
 	const KEY_HIT_RADIUS_REM = 0.7;
 	const CURVE_HIT_RADIUS_REM = 0.7;
 	const BEZIER_HANDLE_HIT_RADIUS_REM = 0.64;
+	const DEFAULT_EASING_KIND_ORDER: CurveEasingKind[] = [
+		'linear',
+		'bezier',
+		'hold',
+		'steps',
+		'shape',
+		'perlinNoise',
+		'random',
+		'script'
+	];
+	const EASING_KIND_LABELS: Record<CurveEasingKind, string> = {
+		linear: 'Linear',
+		bezier: 'Bezier',
+		hold: 'Hold',
+		steps: 'Steps',
+		shape: 'Shape',
+		perlinNoise: 'Perlin Noise',
+		random: 'Random',
+		script: 'Script'
+	};
 
 	let session = $derived(appState.session);
 	let graphNodesById = $derived(session?.graph.state.nodesById ?? null);
@@ -459,6 +491,9 @@ interface ActiveCurveDrag {
 	let drag_edit_session_begin_promise: Promise<void> | null = null;
 	let hover_curve_position = $state<{ position: number; value: number } | null>(null);
 	let is_canvas_focused = $state(false);
+	let curve_context_menu_open = $state(false);
+	let curve_context_menu_anchor = $state<ContextMenuAnchor | null>(null);
+	let curve_context_menu_target = $state<CurveContextMenuTarget | null>(null);
 
 	let interaction_transform = $state<CanvasTransform | null>(null);
 	let queued_drag_targets: Map<NodeId, DragPreview> | null = null;
@@ -546,6 +581,38 @@ interface ActiveCurveDrag {
 	};
 	const normalize_phase_mode = (value: string): CurvePhaseMode =>
 		value.trim().toLowerCase() === 'numphases' ? 'numPhases' : 'frequency';
+	const shortcut_modifier_active = (event: MouseEvent | PointerEvent): boolean =>
+		event.ctrlKey || event.metaKey;
+	const easing_kind_options_for_key = (key: ParsedCurveKey | undefined): EasingKindOption[] => {
+		const kind_param = key?.easing?.params[DECL_KIND];
+		const enum_options = kind_param?.constraints.enum_options ?? [];
+		if (enum_options.length === 0) {
+			return DEFAULT_EASING_KIND_ORDER.map((value) => ({
+				value,
+				label: EASING_KIND_LABELS[value]
+			}));
+		}
+
+		const options: EasingKindOption[] = [];
+		const seen = new Set<CurveEasingKind>();
+		for (const option of enum_options) {
+			const value = normalize_easing_kind(param_string_value(option.value, option.variant_id));
+			if (seen.has(value)) {
+				continue;
+			}
+			seen.add(value);
+			options.push({
+				value,
+				label: option.label.trim().length > 0 ? option.label : EASING_KIND_LABELS[value]
+			});
+		}
+		return options.length > 0
+			? options
+			: DEFAULT_EASING_KIND_ORDER.map((value) => ({
+					value,
+					label: EASING_KIND_LABELS[value]
+				}));
+	};
 	const normalize_bounds_pair = (
 		min_candidate: number,
 		max_candidate: number
@@ -1156,19 +1223,6 @@ interface ActiveCurveDrag {
 		}
 	};
 
-	const toggle_selected_key = (key_id: NodeId): void => {
-		if (!has_selected_key(key_id)) {
-			add_selected_key(key_id);
-			selected_key_id = key_id;
-			return;
-		}
-		const next = selected_key_ids.filter((entry) => entry !== key_id);
-		selected_key_ids = next;
-		if (selected_key_id === key_id) {
-			selected_key_id = next[0] ?? null;
-		}
-	};
-
 	const has_selected_curve_owner_key = (key_id: NodeId): boolean =>
 		selected_curve_owner_key_ids.includes(key_id);
 
@@ -1185,14 +1239,6 @@ interface ActiveCurveDrag {
 			return;
 		}
 		selected_curve_owner_key_ids = [...selected_curve_owner_key_ids, key_id];
-	};
-
-	const toggle_selected_curve_owner_key = (key_id: NodeId): void => {
-		if (!has_selected_curve_owner_key(key_id)) {
-			add_selected_curve_owner_key(key_id);
-			return;
-		}
-		selected_curve_owner_key_ids = selected_curve_owner_key_ids.filter((entry) => entry !== key_id);
 	};
 
 	const ordered_node_ids = (node_ids: Iterable<NodeId>): NodeId[] => {
@@ -2382,6 +2428,146 @@ interface ActiveCurveDrag {
 			await set_param_value(params[decl_id], value);
 		}
 	};
+
+	const easing_target_key_ids = (target: CurveContextMenuTarget | null): NodeId[] => {
+		if (!target) {
+			return [];
+		}
+		if (target.kind === 'all') {
+			return compiled_curve.keys
+				.slice(0, Math.max(0, compiled_curve.keys.length - 1))
+				.map((key) => key.node_id);
+		}
+		return parsed_key_by_id.has(target.key_id) ? [target.key_id] : [];
+	};
+
+	const shared_easing_kind_for_key_ids = (key_ids: readonly NodeId[]): CurveEasingKind | null => {
+		let shared_kind: CurveEasingKind | null = null;
+		for (const key_id of key_ids) {
+			const kind = parsed_key_by_id.get(key_id)?.easing?.kind ?? null;
+			if (kind === null) {
+				return null;
+			}
+			if (shared_kind === null) {
+				shared_kind = kind;
+				continue;
+			}
+			if (shared_kind !== kind) {
+				return null;
+			}
+		}
+		return shared_kind;
+	};
+
+	const apply_easing_kind_to_key_ids = async (
+		key_ids: readonly NodeId[],
+		easing_kind: CurveEasingKind,
+		label: string
+	): Promise<boolean> => {
+		const ordered_key_ids = ordered_node_ids(key_ids);
+		const target_keys = ordered_key_ids
+			.map((key_id) => parsed_key_by_id.get(key_id))
+			.filter(
+				(key): key is ParsedCurveKey =>
+					key !== undefined &&
+					key.easing !== undefined &&
+					key.easing.params[DECL_KIND] !== undefined &&
+					key.easing.kind !== easing_kind
+			);
+		if (target_keys.length === 0) {
+			return false;
+		}
+
+		const edit_session = createUiEditSession(label, 'curve-easing-kind');
+		await edit_session.begin();
+		try {
+			for (const key of target_keys) {
+				await apply_easing_param_values(key, {
+					[DECL_KIND]: enum_param_value(easing_kind)
+				});
+			}
+			return true;
+		} finally {
+			await edit_session.end();
+		}
+	};
+
+	const cycle_easing_kind = async (
+		key_id: NodeId,
+		direction: 1 | -1
+	): Promise<boolean> => {
+		const key = parsed_key_by_id.get(key_id);
+		if (!key?.easing || !key.easing.params[DECL_KIND]) {
+			return false;
+		}
+		const options = easing_kind_options_for_key(key);
+		if (options.length === 0) {
+			return false;
+		}
+		let current_index = options.findIndex((option) => option.value === key.easing?.kind);
+		if (current_index < 0) {
+			current_index = 0;
+		}
+		const next_index =
+			(current_index + direction + options.length) % Math.max(1, options.length);
+		const next_kind = options[next_index]?.value;
+		if (!next_kind) {
+			return false;
+		}
+		return apply_easing_kind_to_key_ids([key_id], next_kind, 'Change Curve Easing');
+	};
+
+	const open_curve_context_menu = (
+		target: CurveContextMenuTarget,
+		screen_x: number,
+		screen_y: number
+	): void => {
+		curve_context_menu_target = target;
+		curve_context_menu_anchor = {
+			kind: 'point',
+			x: screen_x,
+			y: screen_y
+		};
+		curve_context_menu_open = easing_target_key_ids(target).length > 0;
+	};
+
+	const close_curve_context_menu = (): void => {
+		curve_context_menu_open = false;
+		curve_context_menu_anchor = null;
+		curve_context_menu_target = null;
+	};
+
+	let curve_context_menu_items = $derived.by((): ContextMenuItem[] => {
+		const target = curve_context_menu_target;
+		if (!target) {
+			return [];
+		}
+		const key_ids = easing_target_key_ids(target);
+		if (key_ids.length === 0) {
+			return [];
+		}
+		const options = easing_kind_options_for_key(parsed_key_by_id.get(key_ids[0]));
+		if (options.length === 0) {
+			return [];
+		}
+		const shared_kind = shared_easing_kind_for_key_ids(key_ids);
+		const action_label =
+			target.kind === 'all' ? 'Change All Curve Easings' : 'Change Curve Easing';
+		return [
+			{
+				id: target.kind === 'all' ? 'change-all-easings' : 'change-easing',
+				label: target.kind === 'all' ? 'Change All Easings' : 'Change Easing',
+				submenu: options.map((option) => ({
+					id: `curve-easing-${target.kind}-${option.value}`,
+					label: option.label,
+					hint: shared_kind === option.value ? 'Current' : undefined,
+					action: () => {
+						void apply_easing_kind_to_key_ids(key_ids, option.value, action_label);
+					}
+				}))
+			}
+		];
+	});
 
 	const resolve_pending_create_key = (pending: PendingCreateTarget): ParsedCurveKey | null => {
 		if (pending.created_key_id !== null) {
@@ -4285,6 +4471,111 @@ interface ActiveCurveDrag {
 		return targets;
 	};
 
+	const trigger_canvas_key_add = (
+		curve_point: { position: number; value: number },
+		curve_hit: CurveSegmentHit | null
+	): void => {
+		void add_key_at(curve_point.position, curve_point.value, {
+			preserve_curve_shape: curve_hit !== null,
+			preferred_owner_key_id: curve_hit?.owner_key_id ?? null
+		});
+		hover_key_id = null;
+		hover_curve_owner_key_id = curve_hit?.owner_key_id ?? null;
+		hover_bezier_handle = null;
+	};
+
+	const handle_canvas_double_activation = (
+		key_id: NodeId | null,
+		bezier_handle: BezierHandleRef | null,
+		curve_hit: CurveSegmentHit | null,
+		curve_point: { position: number; value: number } | null
+	): boolean => {
+		if (key_id !== null) {
+			void remove_key_ids([key_id]);
+			hover_key_id = null;
+			hover_curve_owner_key_id = null;
+			hover_bezier_handle = null;
+			return true;
+		}
+		if (bezier_handle || !curve_point) {
+			return false;
+		}
+		trigger_canvas_key_add(curve_point, curve_hit);
+		return true;
+	};
+
+	const handle_canvas_shortcut_click = (
+		key_id: NodeId | null,
+		curve_hit: CurveSegmentHit | null,
+		curve_point: { position: number; value: number } | null,
+		shift_key: boolean
+	): boolean => {
+		if (key_id !== null) {
+			void remove_key_ids([key_id]);
+			hover_key_id = null;
+			hover_curve_owner_key_id = null;
+			hover_bezier_handle = null;
+			return true;
+		}
+		if (curve_hit) {
+			set_single_selected_curve_owner_key(curve_hit.owner_key_id);
+			hover_key_id = null;
+			hover_curve_owner_key_id = curve_hit.owner_key_id;
+			hover_bezier_handle = null;
+			void cycle_easing_kind(curve_hit.owner_key_id, shift_key ? -1 : 1);
+			return true;
+		}
+		if (!shift_key && curve_point) {
+			trigger_canvas_key_add(curve_point, null);
+			return true;
+		}
+		return false;
+	};
+
+	const on_canvas_context_menu = (event: MouseEvent): void => {
+		if (!interaction_transform || !canvas_element) {
+			return;
+		}
+		const point = canvas_local_point(event);
+		if (!point) {
+			return;
+		}
+		event.preventDefault();
+		blur_active_editable_element();
+		canvas_element.focus();
+		is_canvas_focused = true;
+		hover_curve_position = screen_to_curve_point(point.x, point.y);
+
+		const key_id = nearest_key(point.x, point.y, key_hit_threshold_px());
+		if (key_id !== null) {
+			set_single_selected_key(key_id);
+			hover_key_id = key_id;
+			hover_curve_owner_key_id = null;
+			hover_bezier_handle = null;
+			open_curve_context_menu({ kind: 'key', key_id }, event.clientX, event.clientY);
+			return;
+		}
+
+		const curve_hit = nearest_curve_hit(point.x, point.y, curve_hit_threshold_px());
+		if (curve_hit) {
+			set_single_selected_curve_owner_key(curve_hit.owner_key_id);
+			hover_key_id = null;
+			hover_curve_owner_key_id = curve_hit.owner_key_id;
+			hover_bezier_handle = null;
+			open_curve_context_menu(
+				{ kind: 'curve', key_id: curve_hit.owner_key_id },
+				event.clientX,
+				event.clientY
+			);
+			return;
+		}
+
+		hover_key_id = null;
+		hover_curve_owner_key_id = null;
+		hover_bezier_handle = null;
+		open_curve_context_menu({ kind: 'all' }, event.clientX, event.clientY);
+	};
+
 	const on_canvas_pointer_down = (event: PointerEvent): void => {
 		if (!interaction_transform || !canvas_element) {
 			return;
@@ -4320,8 +4611,33 @@ interface ActiveCurveDrag {
 			return;
 		}
 
-		if (event.ctrlKey && event.shiftKey) {
-			const curve_point = screen_to_curve_point(point.x, point.y);
+		const curve_point = hover_curve_position;
+		const selection = nearest_key(point.x, point.y, key_hit_threshold_px());
+		const bezier_handle = nearest_bezier_handle(point.x, point.y, bezier_handle_hit_threshold_px());
+		const curve_hit = nearest_curve_hit(point.x, point.y, curve_hit_threshold_px());
+
+		if (
+			event.detail >= 2 &&
+			handle_canvas_double_activation(
+				selection,
+				bezier_handle,
+				curve_hit,
+				curve_point
+			)
+		) {
+			event.preventDefault();
+			return;
+		}
+
+		if (
+			shortcut_modifier_active(event) &&
+			handle_canvas_shortcut_click(selection, curve_hit, curve_point, event.shiftKey)
+		) {
+			event.preventDefault();
+			return;
+		}
+
+		if (event.ctrlKey && event.shiftKey && selection === null && !bezier_handle && !curve_hit) {
 			if (!curve_point) {
 				return;
 			}
@@ -4343,16 +4659,8 @@ interface ActiveCurveDrag {
 			return;
 		}
 
-		const toggle_selection = event.ctrlKey || event.metaKey;
 		const additive_selection = event.shiftKey;
-		const selection = nearest_key(point.x, point.y, key_hit_threshold_px());
 		if (selection !== null) {
-			if (toggle_selection) {
-				toggle_selected_key(selection);
-				hover_curve_owner_key_id = null;
-				event.preventDefault();
-				return;
-			}
 			if (additive_selection) {
 				add_selected_key(selection);
 				selected_key_id = selection;
@@ -4407,7 +4715,6 @@ interface ActiveCurveDrag {
 			return;
 		}
 
-		const bezier_handle = nearest_bezier_handle(point.x, point.y, bezier_handle_hit_threshold_px());
 		if (bezier_handle) {
 			const control = all_bezier_handle_control_by_id.get(bezier_handle_control_id(bezier_handle));
 			if (!control) {
@@ -4453,18 +4760,8 @@ interface ActiveCurveDrag {
 			return;
 		}
 
-		const curve_hit = nearest_curve_hit(
-			point.x,
-			point.y,
-			curve_hit_threshold_px()
-		);
 		if (curve_hit) {
 			const curve_selection = curve_hit.owner_key_id;
-			if (toggle_selection) {
-				toggle_selected_curve_owner_key(curve_selection);
-				event.preventDefault();
-				return;
-			}
 			if (additive_selection) {
 				add_selected_curve_owner_key(curve_selection);
 			} else if (
@@ -4527,11 +4824,7 @@ interface ActiveCurveDrag {
 			return;
 		}
 
-		const mode: SelectionMode = toggle_selection
-			? 'toggle'
-			: additive_selection
-				? 'add'
-				: 'replace';
+		const mode: SelectionMode = additive_selection ? 'add' : 'replace';
 		active_box_selection = {
 			pointer_id: event.pointerId,
 			start_screen_x: point.x,
@@ -4872,24 +5165,6 @@ interface ActiveCurveDrag {
 		}
 	};
 
-	const on_canvas_double_click = (event: MouseEvent): void => {
-		const point = canvas_local_point(event);
-		if (!point) {
-			return;
-		}
-		const curve_point = screen_to_curve_point(point.x, point.y);
-		if (!curve_point) {
-			return;
-		}
-		const curve_hit = nearest_curve_hit(point.x, point.y, curve_hit_threshold_px());
-		const curve_owner = curve_hit?.owner_key_id ?? null;
-		const add_on_curve = curve_hit !== null;
-		void add_key_at(curve_point.position, curve_point.value, {
-			preserve_curve_shape: add_on_curve,
-			preferred_owner_key_id: curve_owner
-		});
-	};
-
 	const clone_param_value = (value: ParamValue): ParamValue => {
 		return JSON.parse(JSON.stringify(value)) as ParamValue;
 	};
@@ -4913,8 +5188,8 @@ interface ActiveCurveDrag {
 		}
 	};
 
-	const remove_selected_keys = async (): Promise<boolean> => {
-		const ids = selected_key_ids_ordered();
+	const remove_key_ids = async (key_ids: readonly NodeId[]): Promise<boolean> => {
+		const ids = ordered_node_ids(key_ids);
 		if (ids.length === 0) {
 			return false;
 		}
@@ -4923,15 +5198,28 @@ interface ActiveCurveDrag {
 		if (!removed) {
 			return false;
 		}
-		const remaining = selected_key_ids.filter((key_id) => !id_set.has(key_id));
-		if (remaining.length > 0) {
-			selected_key_ids = remaining;
-			selected_key_id = remaining[0] ?? null;
+		selected_curve_owner_key_ids = selected_curve_owner_key_ids.filter(
+			(key_id) => !id_set.has(key_id)
+		);
+		const remaining_selected_keys = selected_key_ids.filter((key_id) => !id_set.has(key_id));
+		if (remaining_selected_keys.length > 0) {
+			selected_key_ids = remaining_selected_keys;
+			if (selected_key_id === null || id_set.has(selected_key_id)) {
+				selected_key_id = remaining_selected_keys[0] ?? null;
+			}
+			return true;
+		}
+		if (selected_key_id !== null && !id_set.has(selected_key_id)) {
+			selected_key_ids = [selected_key_id];
 			return true;
 		}
 		const fallback = parsed_keys.find((entry) => !id_set.has(entry.node_id))?.node_id ?? null;
 		set_single_selected_key(fallback);
 		return true;
+	};
+
+	const remove_selected_keys = async (): Promise<boolean> => {
+		return remove_key_ids(selected_key_ids_ordered());
 	};
 
 	const set_all_keys_selected = (): void => {
@@ -5097,6 +5385,16 @@ interface ActiveCurveDrag {
 	};
 
 	$effect(() => {
+		if (!curve_context_menu_open) {
+			return;
+		}
+		if (curve_context_menu_anchor && curve_context_menu_items.length > 0) {
+			return;
+		}
+		close_curve_context_menu();
+	});
+
+	$effect(() => {
 		const unregisterHandlers = [
 			registerCommandHandler(
 				'edit.deleteSelection',
@@ -5242,10 +5540,19 @@ interface ActiveCurveDrag {
 				onpointercancel={on_canvas_pointer_cancel}
 				onpointerleave={on_canvas_pointer_leave}
 				onwheel={on_canvas_wheel}
-				ondblclick={on_canvas_double_click}
+				oncontextmenu={on_canvas_context_menu}
 				onfocus={on_canvas_focus}
 				onblur={on_canvas_blur} />
 		</div>
+		<ContextMenu
+			bind:open={curve_context_menu_open}
+			items={curve_context_menu_items}
+			anchor={curve_context_menu_anchor}
+			insideElements={[canvas_element]}
+			minWidthRem={10}
+			maxWidthCss="min(18rem, calc(100vw - 2rem))"
+			zIndex={60}
+			onClose={close_curve_context_menu} />
 	</div>
 {/if}
 

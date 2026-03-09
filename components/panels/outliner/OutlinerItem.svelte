@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import { appState } from '$lib/golden_ui/store/workbench.svelte';
 	import type { NodeId, UiNodeDto } from '$lib/golden_ui/types';
 	import Self from './OutlinerItem.svelte';
@@ -136,6 +137,33 @@
 	let isCurrentReference = $derived(
 		focusedNodeId !== null && node !== null && node.node_id === focusedNodeId
 	);
+	const footerHoverToken = Symbol('outliner-item-footer-hover');
+	let rowHovered = $state(false);
+
+	const handlePointerEnter = (): void => {
+		rowHovered = true;
+	};
+
+	const handlePointerLeave = (): void => {
+		rowHovered = false;
+	};
+
+	$effect(() => {
+		if (!rowHovered || !node) {
+			untrack(() => {
+				session?.clearFooterHover(footerHoverToken);
+			});
+			return;
+		}
+		untrack(() => {
+			session?.setFooterHover(footerHoverToken, node.node_id);
+		});
+		return () => {
+			untrack(() => {
+				session?.clearFooterHover(footerHoverToken);
+			});
+		};
+	});
 </script>
 
 {#if node && isVisible}
@@ -143,11 +171,14 @@
 		{#if showRow}
 			<div
 				class="outliner-item-content"
+				role="group"
 				class:selected={!onSelectNode && isSelected}
 				class:has-arrow={hasArrow}
 				class:current-reference={isCurrentReference}
 				data-node-id={node.node_id}
-				class:non-selectable={!rowSelectable}>
+				class:non-selectable={!rowSelectable}
+				onpointerenter={handlePointerEnter}
+				onpointerleave={handlePointerLeave}>
 				{#if hasArrow}
 					<div
 						class="outliner-expand arrow {isExpanded ? 'down' : ''}"

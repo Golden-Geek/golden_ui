@@ -13,8 +13,7 @@
 		type CssValueData
 	} from '$lib/golden_ui/css-value';
 	import DashboardCanvasSelf from './DashboardCanvas.svelte';
-	import { resolveDashboardNodeWidgetDisplayMode } from './dashboard-node-widget-registry';
-	import DashboardNodeWidgetParameterEditorContent from './DashboardNodeWidgetParameterEditorContent.svelte';
+	import { resolveDashboardNodeWidgetType } from './dashboard-node-widget-registry';
 	import Slider from '$lib/golden_ui/components/common/Slider.svelte';
 
 	import {
@@ -2145,7 +2144,7 @@
 	let defaultCheckedParam = $derived(getDirectParam(graph, liveNode, 'default_checked'));
 	let targetNodeParam = $derived(getDirectParam(graph, liveNode, 'target_node'));
 	let targetParamParam = $derived(getDirectParam(graph, liveNode, 'target_param'));
-	let displayModeParam = $derived(getDirectParam(graph, liveNode, 'display_mode'));
+	let widgetTypeParam = $derived(getDirectParam(graph, liveNode, 'widget_type'));
 	let includeChildrenParam = $derived(getDirectParam(graph, liveNode, 'include_children'));
 
 	let boundNode = $derived(resolveReferenceTarget(graph, targetNodeParam?.value ?? null));
@@ -2168,25 +2167,22 @@
 	const defaultChecked = $derived(
 		defaultCheckedParam?.value.kind === 'bool' ? defaultCheckedParam.value.value : false
 	);
-	const requestedDisplayMode = $derived.by(() => {
-		if (displayModeParam?.value.kind === 'enum' || displayModeParam?.value.kind === 'str') {
-			return displayModeParam.value.value;
+	const requestedWidgetType = $derived.by(() => {
+		if (widgetTypeParam?.value.kind === 'enum' || widgetTypeParam?.value.kind === 'str') {
+			return widgetTypeParam.value.value;
 		}
 		return 'auto';
 	});
 	const includeChildren = $derived(
 		includeChildrenParam?.value.kind === 'bool' ? includeChildrenParam.value.value : true
 	);
-	const resolvedNodeWidgetDisplayMode = $derived.by(() =>
-		boundNode ? resolveDashboardNodeWidgetDisplayMode(boundNode, requestedDisplayMode) : null
+	const resolvedNodeWidgetType = $derived.by(() =>
+		boundNode ? resolveDashboardNodeWidgetType(boundNode, requestedWidgetType) : null
 	);
-	const NodeWidgetDisplayComponent = $derived(resolvedNodeWidgetDisplayMode?.component ?? null);
-	const showsNodeWidgetEditor = $derived(
-		resolvedNodeWidgetDisplayMode?.id === 'editor' && boundNode?.data.kind === 'parameter'
-	);
+	const NodeWidgetDisplayComponent = $derived(resolvedNodeWidgetType?.component ?? null);
 	const widgetUsesLabelPlacement = $derived.by(() => {
 		if (isNodeWidget) {
-			return resolvedNodeWidgetDisplayMode?.usesLabelPlacement ?? false;
+			return resolvedNodeWidgetType?.usesLabelPlacement ?? false;
 		}
 		return true;
 	});
@@ -2462,6 +2458,9 @@
 	};
 
 	const handlePageViewportWheel = (event: WheelEvent): void => {
+		if (event.defaultPrevented) {
+			return;
+		}
 		if (wheelTargetsScrollableContent(event)) {
 			return;
 		}
@@ -2944,20 +2943,16 @@
 				<div class="dashboard-widget-content inspector-body">
 					{#if boundNode}
 						<div class="dashboard-live-content" class:inert-mode={editMode} inert={editMode}>
-							{#if showsNodeWidgetEditor}
-								<DashboardNodeWidgetParameterEditorContent
+							{#if NodeWidgetDisplayComponent}
+								<NodeWidgetDisplayComponent
 									widgetNode={liveNode}
 									targetNode={boundNode}
-									insideLabel={hasInsideWidgetLabel ? widgetLabelText : null} />
-							{:else if resolvedNodeWidgetDisplayMode?.id === 'vec2Pad' && NodeWidgetDisplayComponent}
-								<NodeWidgetDisplayComponent
-									targetNode={boundNode}
-									insideLabel={hasInsideWidgetLabel ? widgetLabelText : null} />
-							{:else if NodeWidgetDisplayComponent}
-								<NodeWidgetDisplayComponent targetNode={boundNode} {includeChildren} {editMode} />
+									insideLabel={hasInsideWidgetLabel ? widgetLabelText : null}
+								{includeChildren}
+								{editMode} />
 							{:else}
 								<div class="dashboard-empty-inline">
-									No display mode is available for this node.
+									No widget type is available for this node.
 								</div>
 							{/if}
 						</div>

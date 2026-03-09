@@ -215,13 +215,18 @@ interface RustUiSchemaEnumDefinition {
 	variants?: RustUiSchemaEnumVariantDefinition[];
 }
 
+interface RustUiNodeTypeDescriptor {
+	node_type?: string;
+	description?: string;
+}
+
 export interface RustUiSnapshot {
 	protocol_version: string;
 	scope: RustScope;
 	at: EventTime;
 	nodes: RustUiNodeDto[];
 	schema: {
-		node_types?: Array<{ node_type: string }>;
+		node_types?: RustUiNodeTypeDescriptor[];
 		enums?: RustUiSchemaEnumDefinition[];
 	};
 	history?: UiHistoryState;
@@ -966,6 +971,27 @@ const parseRustSchemaEnums = (
 	return { enums, enumOptionsById };
 };
 
+const parseRustNodeTypeDescriptors = (
+	descriptors: RustUiNodeTypeDescriptor[] | undefined
+): UiSnapshot['schema']['node_types'] => {
+	const parsed: UiSnapshot['schema']['node_types'] = [];
+	for (const descriptor of descriptors ?? []) {
+		const nodeType = typeof descriptor.node_type === 'string' ? descriptor.node_type.trim() : '';
+		if (nodeType.length === 0) {
+			continue;
+		}
+		const description =
+			typeof descriptor.description === 'string' && descriptor.description.trim().length > 0
+				? descriptor.description
+				: undefined;
+		parsed.push({
+			node_type: nodeType,
+			description
+		});
+	}
+	return parsed;
+};
+
 const fromRustParam = (param: RustUiParamDto, enumOptionsById: EnumOptionsById): UiParamDto => {
 	const sharedEnumOptions =
 		typeof param.enum_options_id === 'string'
@@ -1099,7 +1125,7 @@ export const fromRustSnapshot = (snapshot: RustUiSnapshot): UiSnapshot => {
 		at: snapshot.at,
 		nodes: snapshot.nodes.map((node) => fromRustNode(node, parsedSchemaEnums.enumOptionsById)),
 		schema: {
-			node_types: snapshot.schema.node_types ?? [],
+			node_types: parseRustNodeTypeDescriptors(snapshot.schema.node_types),
 			enums: parsedSchemaEnums.enums
 		},
 		history: snapshot.history ?? {

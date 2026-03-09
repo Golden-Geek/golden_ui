@@ -3,7 +3,7 @@
 	import Slider from '../../../common/Slider.svelte';
 	import { appState } from '$lib/golden_ui/store/workbench.svelte';
 	import { createUiEditSession, sendSetParamIntent } from '$lib/golden_ui/store/ui-intents';
-	import type { UiNodeDto } from '$lib/golden_ui/types';
+	import type { UiNodeDto, UiRangeConstraint } from '$lib/golden_ui/types';
 
 	interface NumberEditorPresentation {
 		show_value_field?: boolean;
@@ -11,10 +11,16 @@
 		inside_label?: string;
 	}
 
-	let { node, layoutMode = 'default', presentation = {} } = $props<{
+	let {
+		node,
+		layoutMode = 'default',
+		presentation = {},
+		rangeOverride = null
+	} = $props<{
 		node: UiNodeDto;
 		layoutMode?: 'default' | 'widget';
 		presentation?: NumberEditorPresentation;
+		rangeOverride?: UiRangeConstraint | null;
 	}>();
 
 	let session = $derived(appState.session);
@@ -30,12 +36,9 @@
 		param && (param.value.kind === 'int' || param.value.kind === 'float') ? param.value.value : 0
 	);
 
-	let min = $derived(
-		constraints?.range?.kind === 'uniform' ? constraints.range.min : undefined
-	);
-	let max = $derived(
-		constraints?.range?.kind === 'uniform' ? constraints.range.max : undefined
-	);
+	let viewRange = $derived(rangeOverride ?? constraints?.range ?? null);
+	let min = $derived(viewRange?.kind === 'uniform' ? viewRange.min : undefined);
+	let max = $derived(viewRange?.kind === 'uniform' ? viewRange.max : undefined);
 	let step = $derived(constraints?.step);
 	let stepBase = $derived(constraints?.step_base);
 	let hasRange = $derived(min !== undefined && max !== undefined);
@@ -46,7 +49,9 @@
 	let editSession = createUiEditSession('Edit number', 'param-number');
 	const NUMERIC_EPSILON = 1e-9;
 	let showValueField = $derived(presentation.show_value_field !== false);
-	let fractionDigits = $derived(isInteger ? 0 : Math.max(0, Math.min(8, Math.round(presentation.max_decimals ?? 3))));
+	let fractionDigits = $derived(
+		isInteger ? 0 : Math.max(0, Math.min(8, Math.round(presentation.max_decimals ?? 3)))
+	);
 	let fieldStep = $derived(
 		isInteger ? 1 : fractionDigits <= 0 ? 1 : Number(`1e-${fractionDigits}`)
 	);
@@ -58,6 +63,15 @@
 	let showsInlineFieldLabel = $derived(!hasRange && showValueField && sliderLabel.length > 0);
 	let formattedDraftValue = $derived(draftValue.toFixed(fractionDigits));
 	let formattedValue = $derived(value.toFixed(fractionDigits));
+	let displayedSliderValue = $derived.by(() => {
+		if (min !== undefined && draftValue < min) {
+			return min;
+		}
+		if (max !== undefined && draftValue > max) {
+			return max;
+		}
+		return draftValue;
+	});
 
 	$effect(() => {
 		if (isEditing) {
@@ -181,10 +195,13 @@
 	};
 </script>
 
-<div class="number-property-container" class:infinite={!hasRange} class:widget-layout={layoutMode === 'widget'}>
+<div
+	class="number-property-container"
+	class:infinite={!hasRange}
+	class:widget-layout={layoutMode === 'widget'}>
 	<div class="slider-wrapper">
 		<Slider
-			bind:value={draftValue}
+			value={displayedSliderValue}
 			{min}
 			{max}
 			{step}

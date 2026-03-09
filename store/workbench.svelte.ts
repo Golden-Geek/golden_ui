@@ -55,6 +55,13 @@ export interface WorkbenchToast {
 	message: string;
 }
 
+export interface FooterHoverInfo {
+	node_id: NodeId;
+	label: string;
+	node_type: string;
+	description: string;
+}
+
 export interface NodeWarningRecord {
 	targetNodeId: NodeId;
 	targetNodeLabel: string;
@@ -82,11 +89,15 @@ export interface WorkbenchSession {
 	getNodeData(nodeId: NodeId): UiNodeDto | null;
 	getSelectedNodes(): UiNodeDto[];
 	getFirstSelectedNode(): UiNodeDto | null;
+	getNodeDescription(node: UiNodeDto | null | undefined): string | null;
+	getFooterHoverInfo(): FooterHoverInfo | null;
 	getNodeVisibleWarnings(nodeId: NodeId): NodeWarningRecord[];
 	getActiveWarnings(): NodeWarningRecord[];
 	hasNodeWarnings(nodeId: NodeId): boolean;
 	isNodeEnabledInHierarchy(nodeId: NodeId): boolean;
 	isNodeSelected(nodeId: NodeId): boolean;
+	setFooterHover(token: symbol, nodeId: NodeId): void;
+	clearFooterHover(token: symbol): void;
 	selectNode(nodeId: NodeId | null, selectionMode?: SelectionMode): void;
 	selectNodes(nodeIds: NodeId[], selectionMode?: SelectionMode): void;
 	clearSelection(): void;
@@ -123,6 +134,11 @@ type PendingLogMutation =
 interface NodeClipboardEntry {
 	node_type: string;
 	label: string;
+}
+
+interface FooterHoverEntry {
+	token: symbol;
+	nodeId: NodeId;
 }
 
 const defaultEventTime: EventTime = { tick: 0, micro: 0, seq: 0 };
@@ -282,6 +298,8 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 	let logRecords = $state<UiLogRecord[]>([]);
 	let logMaxEntries = $state(0);
 	let logUiUpdateHz = $state(DEFAULT_LOG_UI_UPDATE_HZ);
+	let nodeTypeDescriptions = $state<Map<string, string>>(new Map());
+	let footerHoverStack = $state<FooterHoverEntry[]>([]);
 	const pendingLogMutations: PendingLogMutation[] = [];
 	let logFlushTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -299,6 +317,79 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 	let intentQueueProcessing = false;
 	// Keep batch payloads bounded while still reducing setParam fan-out.
 	const MAX_SET_PARAM_BATCH_SIZE = 512;
+
+	const normalizeDescription = (value: string | null | undefined): string | null => {
+		const text = typeof value === 'string' ? value.trim() : '';
+		return text.length > 0 ? text : null;
+	};
+
+	const rebuildNodeTypeDescriptions = (descriptors: UiSnapshot['schema']['node_types']): void => {
+		const nextDescriptions = new Map<string, string>();
+		for (const descriptor of descriptors) {
+			const nodeType = descriptor.node_type.trim();
+			const description = normalizeDescription(descriptor.description);
+			if (nodeType.length === 0 || description === null) {
+				continue;
+			}
+			nextDescriptions.set(nodeType, description);
+		}
+		nodeTypeDescriptions = nextDescriptions;
+	};
+
+	const getNodeDescription = (node: UiNodeDto | null | undefined): string | null => {
+		if (!node) {
+			return null;
+		}
+		return normalizeDescription(node.meta.description) ?? nodeTypeDescriptions.get(node.node_type) ?? null;
+	};
+
+	const clearFooterHover = (token: symbol): void => {
+		const nextStack = footerHoverStack.filter((entry) => entry.token !== token);
+		if (nextStack.length !== footerHoverStack.length) {
+			footerHoverStack = nextStack;
+		}
+	};
+
+	const setFooterHover = (token: symbol, nodeId: NodeId): void => {
+		if (!graph.state.nodesById.has(nodeId)) {
+			clearFooterHover(token);
+			return;
+		}
+		footerHoverStack = [
+			...footerHoverStack.filter((entry) => entry.token !== token),
+			{ token, nodeId }
+		];
+	};
+
+	const pruneFooterHoverStack = (): void => {
+		if (footerHoverStack.length === 0) {
+			return;
+		}
+		const nextStack = footerHoverStack.filter((entry) => graph.state.nodesById.has(entry.nodeId));
+		if (nextStack.length !== footerHoverStack.length) {
+			footerHoverStack = nextStack;
+		}
+	};
+
+	const getFooterHoverInfo = (): FooterHoverInfo | null => {
+		for (let index = footerHoverStack.length - 1; index >= 0; index -= 1) {
+			const node = graph.state.nodesById.get(footerHoverStack[index]?.nodeId ?? -1);
+			if (!node) {
+				continue;
+			}
+			const description = getNodeDescription(node);
+			if (description === null) {
+				return null;
+			}
+			return {
+				node_id: node.node_id,
+				label: node.meta.label,
+				node_type: node.node_type,
+				description
+			};
+		}
+		return null;
+	};
 
 	const clearToastTimer = (toastId: number): void => {
 		const timer = toastTimers.get(toastId);
@@ -1216,6 +1307,8 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 	const applySnapshotToState = (snapshot: UiSnapshot): void => {
 		const retainedUiLogRecords = logRecords.filter((record) => uiGeneratedLogIds.has(record.id));
 		graph.loadSnapshot(snapshot);
+		rebuildNodeTypeDescriptions(snapshot.schema.node_types);
+		pruneFooterHoverStack();
 		hasLoadedSnapshot = true;
 		invalidateWarningCaches();
 		restorePersistedSelection();
@@ -1357,6 +1450,7 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 				to: graphEvents[graphEvents.length - 1]?.time ?? batch.to,
 				events: graphEvents
 			});
+			pruneFooterHoverStack();
 			if (warningDataChanged) {
 				invalidateWarningCaches();
 			}
@@ -1734,6 +1828,8 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 			graph.reset();
 			invalidateWarningCaches();
 			resetPendingLogMutations();
+			nodeTypeDescriptions = new Map();
+			footerHoverStack = [];
 			selectedNodeIds = [];
 			nodeClipboard = [];
 			uiGeneratedLogIds.clear();
@@ -1790,11 +1886,15 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 		getNodeData,
 		getSelectedNodes,
 		getFirstSelectedNode,
+		getNodeDescription,
+		getFooterHoverInfo,
 		getNodeVisibleWarnings,
 		getActiveWarnings,
 		hasNodeWarnings,
 		isNodeEnabledInHierarchy,
 		isNodeSelected,
+		setFooterHover,
+		clearFooterHover,
 		selectNode,
 		selectNodes,
 		clearSelection,

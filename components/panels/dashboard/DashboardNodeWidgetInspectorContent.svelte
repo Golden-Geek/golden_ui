@@ -4,7 +4,10 @@
 
 	let { targetNode, includeChildren = true } = $props<{
 		targetNode: UiNodeDto;
+		widgetNode?: UiNodeDto | null;
+		insideLabel?: string | null;
 		includeChildren?: boolean;
+		editMode?: boolean;
 	}>();
 </script>
 
