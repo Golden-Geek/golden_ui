@@ -209,6 +209,7 @@
 	.slider-wrapper {
 		display: flex;
 		flex: 1 1 auto;
+		justify-content: right;
 		align-items: center;
 		min-inline-size: 0;
 		height: 70%;
@@ -219,10 +220,10 @@
 	}
 
 	.css-value-number {
-		flex: 0 0 4.25rem;
 		height: 100%;
 		box-sizing: border-box;
 		font-size: 0.75rem;
+		width:30%;
 	}
 
 	.css-value-editor.widget-layout .css-value-number {

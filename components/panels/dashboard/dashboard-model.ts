@@ -49,8 +49,8 @@ export interface DashboardGap {
 
 export interface DashboardPageSize {
 	enabled: boolean;
-	width: CssValueData;
-	height: CssValueData;
+	widthPx: number;
+	heightPx: number;
 }
 
 export interface DashboardSnapGrid {
@@ -258,23 +258,15 @@ export const getGap = (
 export const getDashboardPageSize = (
 	graph: GraphState | null,
 	node: UiNodeDto | null,
-	fallback: { width: CssValueData; height: CssValueData } = {
-		width: { value: 1920, unit: 'px' },
-		height: { value: 1080, unit: 'px' }
-	}
+	fallback: [number, number] = [1920, 1080]
 ): DashboardPageSize => {
-	const widthNode = getDirectParamNode(graph, node, 'page_width');
-	const heightNode = getDirectParamNode(graph, node, 'page_height');
+	const pageSizeNode = getDirectParamNode(graph, node, 'page_size');
+	const pageSizeParam = pageSizeNode?.data.kind === 'parameter' ? pageSizeNode.data.param : null;
+	const pageSizeValue = pageSizeParam?.value.kind === 'vec2' ? pageSizeParam.value.value : fallback;
 	return {
-		enabled: (widthNode?.meta.enabled ?? false) || (heightNode?.meta.enabled ?? false),
-		width:
-			widthNode?.data.kind === 'parameter'
-				? cssValueFromParamValue(widthNode.data.param.value, fallback.width)
-				: fallback.width,
-		height:
-			heightNode?.data.kind === 'parameter'
-				? cssValueFromParamValue(heightNode.data.param.value, fallback.height)
-				: fallback.height
+		enabled: pageSizeNode?.meta.enabled ?? false,
+		widthPx: Math.max(1, Math.round(Number(pageSizeValue[0] ?? fallback[0]))),
+		heightPx: Math.max(1, Math.round(Number(pageSizeValue[1] ?? fallback[1])))
 	};
 };
 

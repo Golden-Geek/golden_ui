@@ -115,6 +115,7 @@
 	let bindingDragDepth = $state(0);
 	let isPageViewportFocused = $state(false);
 	let pageViewportElement = $state<HTMLDivElement | null>(null);
+	let pageFrameElement = $state<HTMLDivElement | null>(null);
 	let widgetShellElement = $state<HTMLElement | null>(null);
 	let pageViewportSize = $state({ width: 0, height: 0 });
 	let pageViewportResizeFrame = $state<number | null>(null);
@@ -252,6 +253,8 @@
 	let observedAnchorPlacementCache: ObservedAnchorPlacement | null = null;
 	let pageViewAnimationFrame = $state<number | null>(null);
 	let pageViewAnimationTarget = $state<DashboardPersistedPageView | null>(null);
+	let previousPageFitScale = $state<number | null>(null);
+	let previousPageFitScaleEditMode = $state<boolean | null>(null);
 
 	const getGraph = () => appState.session?.graph.state ?? null;
 
@@ -992,11 +995,54 @@
 	};
 
 	const homePageView = (): void => {
+		const geometry = getPageFrameGeometry();
+		if (!geometry) {
+			animatePageViewTo({
+				panX: 0,
+				panY: 0,
+				zoom: 1
+			});
+			return;
+		}
 		animatePageViewTo({
-			panX: 0,
-			panY: 0,
+			panX: geometry.viewportCenterX - geometry.baseCenterX,
+			panY: geometry.viewportCenterY - geometry.baseCenterY,
 			zoom: 1
 		});
+	};
+
+	const getPageFrameGeometry = (): {
+		viewportRect: DOMRect;
+		frameRect: DOMRect;
+		viewportCenterX: number;
+		viewportCenterY: number;
+		frameCenterX: number;
+		frameCenterY: number;
+		baseCenterX: number;
+		baseCenterY: number;
+		currentScale: number;
+	} | null => {
+		if (!pageViewportElement || !pageFrameElement) {
+			return null;
+		}
+		const viewportRect = pageViewportElement.getBoundingClientRect();
+		const frameRect = pageFrameElement.getBoundingClientRect();
+		const frameCenterX = frameRect.left + frameRect.width * 0.5;
+		const frameCenterY = frameRect.top + frameRect.height * 0.5;
+		const currentScaleX = Math.max(frameRect.width / Math.max(pageLogicalWidthPx, 1), 1e-6);
+		const currentScaleY = Math.max(frameRect.height / Math.max(pageLogicalHeightPx, 1), 1e-6);
+		const currentScale = Math.max(Math.min(currentScaleX, currentScaleY), 1e-6);
+		return {
+			viewportRect,
+			frameRect,
+			viewportCenterX: viewportRect.left + viewportRect.width * 0.5,
+			viewportCenterY: viewportRect.top + viewportRect.height * 0.5,
+			frameCenterX,
+			frameCenterY,
+			baseCenterX: frameCenterX - pageView.panX,
+			baseCenterY: frameCenterY - pageView.panY,
+			currentScale
+		};
 	};
 
 	$effect(() => {
@@ -1116,6 +1162,33 @@
 			}
 			observer.disconnect();
 		};
+	});
+
+	$effect(() => {
+		if (!isPage) {
+			previousPageFitScale = null;
+			previousPageFitScaleEditMode = null;
+			return;
+		}
+		const nextFitScale = pageFitScale;
+		if (previousPageFitScale === null || previousPageFitScaleEditMode === null) {
+			previousPageFitScale = nextFitScale;
+			previousPageFitScaleEditMode = editMode;
+			return;
+		}
+		if (pageSize.enabled && previousPageFitScaleEditMode !== editMode && nextFitScale > 1e-6) {
+			const preservedEffectiveScale = previousPageFitScale * pageView.zoom;
+			const nextZoom = clampPageZoom(preservedEffectiveScale / nextFitScale);
+			if (Math.abs(nextZoom - pageView.zoom) > 1e-9) {
+				cancelPageViewAnimation();
+				pageView = {
+					...pageView,
+					zoom: nextZoom
+				};
+			}
+		}
+		previousPageFitScale = nextFitScale;
+		previousPageFitScaleEditMode = editMode;
 	});
 
 	const selectWidgetNode = (selectionMode: SelectionMode = 'REPLACE'): void => {
@@ -1992,23 +2065,11 @@
 		return Math.max(minFreeWidgetWidthRem * rootRemPx, 2 * rootRemPx);
 	});
 	const pageSceneStyle = $derived.by(() => `padding: ${pageEditBleedPx}px;`);
-	const pageSizeContext = $derived.by(
-		(): Pick<
-			FreeLayoutInteraction,
-			'rootRemPx' | 'surfaceWidthPx' | 'surfaceHeightPx' | 'viewportWidthPx' | 'viewportHeightPx'
-		> => ({
-			rootRemPx: getRootRemPixels(),
-			surfaceWidthPx: pageViewportWidthPx,
-			surfaceHeightPx: pageViewportHeightPx,
-			viewportWidthPx: getViewportWidthPx(),
-			viewportHeightPx: getViewportHeightPx()
-		})
-	);
 	const pageLogicalWidthPx = $derived.by(() =>
-		Math.max(1, cssValueToPx(pageSize.width, 'x', createCssUnitContext(pageSizeContext, 'x')))
+		pageSize.enabled ? pageSize.widthPx : pageViewportWidthPx
 	);
 	const pageLogicalHeightPx = $derived.by(() =>
-		Math.max(1, cssValueToPx(pageSize.height, 'y', createCssUnitContext(pageSizeContext, 'y')))
+		pageSize.enabled ? pageSize.heightPx : pageViewportHeightPx
 	);
 	const pageFitScale = $derived.by(() => {
 		if (!pageSize.enabled) {
@@ -2016,17 +2077,16 @@
 		}
 		const availableWidthPx = Math.max(1, pageViewportWidthPx - 2 * pageEditBleedPx);
 		const availableHeightPx = Math.max(1, pageViewportHeightPx - 2 * pageEditBleedPx);
-		return Math.min(availableWidthPx / pageLogicalWidthPx, availableHeightPx / pageLogicalHeightPx);
+		return Math.min(availableWidthPx / pageSize.widthPx, availableHeightPx / pageSize.heightPx);
 	});
+	const pageEffectiveScale = $derived.by(() =>
+		Math.max(1e-6, pageFitScale * clampPageZoom(pageView.zoom))
+	);
 	const pageFrameStyle = $derived.by(() => {
-		const baseWidth = pageSize.enabled ? pageLogicalWidthPx * pageFitScale : pageViewportWidthPx;
-		const baseHeight = pageSize.enabled ? pageLogicalHeightPx * pageFitScale : pageViewportHeightPx;
-		return `inline-size: ${baseWidth}px; block-size: ${baseHeight}px; transform: translate(${pageView.panX}px, ${pageView.panY}px) scale(${pageView.zoom});`;
+		return `inline-size: ${pageLogicalWidthPx}px; block-size: ${pageLogicalHeightPx}px; transform: translate(${pageView.panX}px, ${pageView.panY}px) scale(${pageEffectiveScale});`;
 	});
 	const pageBleedFrameStyle = $derived.by(() => {
-		const baseWidth = pageSize.enabled ? pageLogicalWidthPx * pageFitScale : pageViewportWidthPx;
-		const baseHeight = pageSize.enabled ? pageLogicalHeightPx * pageFitScale : pageViewportHeightPx;
-		return `inline-size: ${baseWidth}px; block-size: ${baseHeight}px; transform: translate(${pageView.panX}px, ${pageView.panY}px) scale(${pageView.zoom}); z-index: 0;`;
+		return `inline-size: ${pageLogicalWidthPx}px; block-size: ${pageLogicalHeightPx}px; transform: translate(${pageView.panX}px, ${pageView.panY}px) scale(${pageEffectiveScale}); z-index: 0;`;
 	});
 
 	const placementStyle = (
@@ -2373,30 +2433,36 @@
 	};
 
 	const zoomPageAtClientPoint = (clientX: number, clientY: number, factor: number): void => {
-		if (!pageViewportElement) {
+		const geometry = getPageFrameGeometry();
+		if (!geometry) {
 			return;
 		}
 		cancelPageViewAnimation();
-		const rect = pageViewportElement.getBoundingClientRect();
+		const { frameCenterX, frameCenterY, baseCenterX, baseCenterY, currentScale } = geometry;
 		const nextZoom = clampPageZoom(pageView.zoom * factor);
 		if (Math.abs(nextZoom - pageView.zoom) <= 1e-9) {
 			return;
 		}
-		const pointX = clientX - rect.left - rect.width * 0.5;
-		const pointY = clientY - rect.top - rect.height * 0.5;
+		const nextScale = Math.max(pageFitScale * nextZoom, 1e-6);
+		const localCenterX = (clientX - frameCenterX) / currentScale;
+		const localCenterY = (clientY - frameCenterY) / currentScale;
 		pageView = {
 			...pageView,
 			zoom: nextZoom,
-			panX: pointX - ((pointX - pageView.panX) / pageView.zoom) * nextZoom,
-			panY: pointY - ((pointY - pageView.panY) / pageView.zoom) * nextZoom
+			panX: clientX - baseCenterX - localCenterX * nextScale,
+			panY: clientY - baseCenterY - localCenterY * nextScale
 		};
 	};
 
 	const frameSelectedWidgets = (): boolean => {
-		if (!pageViewportElement) {
+		const geometry = getPageFrameGeometry();
+		if (!geometry) {
 			return false;
 		}
 		const viewportElement = pageViewportElement;
+		if (!viewportElement) {
+			return false;
+		}
 		const selectedWidgetElements = (session?.selectedNodesIds ?? [])
 			.map((nodeId) =>
 				viewportElement.querySelector<HTMLElement>(`[data-node-id="${String(nodeId)}"]`)
@@ -2406,45 +2472,35 @@
 			homePageView();
 			return true;
 		}
-		const viewportRect = viewportElement.getBoundingClientRect();
+		const { viewportRect, frameCenterX, frameCenterY, baseCenterX, baseCenterY, currentScale } =
+			geometry;
+		const availableWidth = Math.max(1, viewportRect.width - 2 * pageEditBleedPx);
+		const availableHeight = Math.max(1, viewportRect.height - 2 * pageEditBleedPx);
 		let localLeft = Number.POSITIVE_INFINITY;
 		let localRight = Number.NEGATIVE_INFINITY;
 		let localTop = Number.POSITIVE_INFINITY;
 		let localBottom = Number.NEGATIVE_INFINITY;
 		for (const widgetElement of selectedWidgetElements) {
 			const widgetRect = widgetElement.getBoundingClientRect();
-			localLeft = Math.min(
-				localLeft,
-				(widgetRect.left - viewportRect.left - viewportRect.width * 0.5 - pageView.panX) /
-					pageView.zoom
-			);
-			localRight = Math.max(
-				localRight,
-				(widgetRect.right - viewportRect.left - viewportRect.width * 0.5 - pageView.panX) /
-					pageView.zoom
-			);
-			localTop = Math.min(
-				localTop,
-				(widgetRect.top - viewportRect.top - viewportRect.height * 0.5 - pageView.panY) /
-					pageView.zoom
-			);
-			localBottom = Math.max(
-				localBottom,
-				(widgetRect.bottom - viewportRect.top - viewportRect.height * 0.5 - pageView.panY) /
-					pageView.zoom
-			);
+			localLeft = Math.min(localLeft, (widgetRect.left - frameCenterX) / currentScale);
+			localRight = Math.max(localRight, (widgetRect.right - frameCenterX) / currentScale);
+			localTop = Math.min(localTop, (widgetRect.top - frameCenterY) / currentScale);
+			localBottom = Math.max(localBottom, (widgetRect.bottom - frameCenterY) / currentScale);
 		}
 		const localWidth = Math.max(1, localRight - localLeft);
 		const localHeight = Math.max(1, localBottom - localTop);
-		const nextZoom = clampPageZoom(
-			Math.min((viewportRect.width * 0.78) / localWidth, (viewportRect.height * 0.78) / localHeight)
+		const targetScale = Math.min(
+			(availableWidth * 0.78) / localWidth,
+			(availableHeight * 0.78) / localHeight
 		);
+		const nextZoom = clampPageZoom(targetScale / Math.max(pageFitScale, 1e-6));
+		const nextScale = Math.max(pageFitScale * nextZoom, 1e-6);
 		const localCenterX = (localLeft + localRight) * 0.5;
 		const localCenterY = (localTop + localBottom) * 0.5;
 		animatePageViewTo({
 			zoom: nextZoom,
-			panX: -localCenterX * nextZoom,
-			panY: -localCenterY * nextZoom
+			panX: geometry.viewportCenterX - baseCenterX - localCenterX * nextScale,
+			panY: geometry.viewportCenterY - baseCenterY - localCenterY * nextScale
 		});
 		return true;
 	};
@@ -2539,7 +2595,7 @@
 				aria-hidden="true"
 				onpointerdown={handlePageScenePointerDown}>
 			</div>
-			<div class="dashboard-page-frame" style={pageFrameStyle}>
+			<div class="dashboard-page-frame" bind:this={pageFrameElement} style={pageFrameStyle}>
 				<div
 					class="dashboard-surface dashboard-page {layoutKind}"
 					class:surface-target-active={surfaceDragDepth > 0}
@@ -3510,7 +3566,6 @@
 		flex: 1 1 auto;
 		min-inline-size: 0;
 		min-block-size: 0;
-		overflow: hidden;
 	}
 
 	.dashboard-widget-label {
@@ -3528,7 +3583,6 @@
 			rgb(from var(--gc-color-panel-outline) r g b / 0.12),
 			rgb(from var(--gc-color-background) r g b / 0.2)
 		);
-		overflow: hidden;
 		text-overflow: ellipsis;
 		white-space: nowrap;
 	}

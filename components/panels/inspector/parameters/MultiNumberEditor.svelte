@@ -38,9 +38,25 @@
 	let editSession = createUiEditSession('Edit vector', 'param-vector');
 	const NUMERIC_EPSILON = 1e-9;
 	let showValueFields = $derived(presentation.show_value_fields !== false);
-	let fractionDigits = $derived(
-		Math.max(0, Math.min(8, Math.round(presentation.max_decimals ?? 2)))
-	);
+	const inferFractionDigitsFromStep = (step: number | undefined): number | null => {
+		if (!Number.isFinite(step) || step === undefined || step <= 0) {
+			return null;
+		}
+		for (let digits = 0; digits <= 8; digits += 1) {
+			const scaled = step * 10 ** digits;
+			if (Math.abs(scaled - Math.round(scaled)) <= NUMERIC_EPSILON) {
+				return digits;
+			}
+		}
+		return 8;
+	};
+	let fractionDigits = $derived.by(() => {
+		if (presentation.max_decimals !== undefined) {
+			return Math.max(0, Math.min(8, Math.round(presentation.max_decimals)));
+		}
+		const inferred = inferFractionDigitsFromStep(param?.constraints.step);
+		return inferred ?? 2;
+	});
 	let widgetLayoutKind = $derived(presentation.layout === 'column' ? 'column' : 'inline');
 
 	$effect(() => {
@@ -296,6 +312,7 @@
 		display: flex;
 		flex: 1 1 auto;
 		align-items: stretch;
+		justify-content: right;
 		min-width: 0;
 		height: 100%;
 	}

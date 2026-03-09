@@ -61,6 +61,7 @@
 		min-inline-size: 0;
 		min-block-size: 0;
 		overflow: auto;
+		background-color: var(--gc-color-panel);
 	}
 
 	.dashboard-node-widget-inspector-natural {
