@@ -3,9 +3,10 @@
 	import { sendSetParamIntent } from '$lib/golden_ui/store/ui-intents';
 	import type { UiNodeDto } from '$lib/golden_ui/types';
 
-	let { node, layoutMode = 'default' } = $props<{
+	let { node, layoutMode = 'default', insideLabel = null } = $props<{
 		node: UiNodeDto;
 		layoutMode?: 'default' | 'widget';
+		insideLabel?: string | null;
 	}>();
 
 	let session = $derived(appState.session);
@@ -14,6 +15,8 @@
 	let enabled = $derived(liveNode.meta.enabled);
 	let readOnly = $derived(Boolean(param?.read_only));
 	let value = $derived(param?.value.kind === 'bool' ? param.value.value : false);
+	let inlineLabel = $derived(typeof insideLabel === 'string' ? insideLabel.trim() : '');
+	let showsInlineLabel = $derived(layoutMode === 'widget' && inlineLabel.length > 0);
 
 	let draftValue = $state(false);
 
@@ -38,6 +41,7 @@
 	<button
 		type="button"
 		class="editor-checkbox-shell widget-layout widget-checkbox-button"
+		class:with-inline-label={showsInlineLabel}
 		class:checked={draftValue}
 		disabled={!enabled}
 		class:readonly={readOnly}
@@ -48,7 +52,13 @@
 			}
 			updateValue(!draftValue);
 		}}>
-		<span class="widget-checkbox-mark" aria-hidden="true">{draftValue ? '✓' : ''}</span>
+		<span class="widget-checkbox-mark" aria-hidden="true">
+			{#if showsInlineLabel}
+				{inlineLabel}
+			{:else if draftValue}
+				&#10003;
+			{/if}
+		</span>
 	</button>
 {:else}
 	<div class="editor-checkbox-shell">
@@ -107,5 +117,12 @@
 		font-weight: 700;
 		line-height: 1;
 		color: var(--gc-color-checkbox-fg);
+	}
+
+	.widget-checkbox-button.with-inline-label .widget-checkbox-mark {
+		padding-inline: 0.6rem;
+		font-size: 0.82rem;
+		font-weight: 600;
+		text-align: center;
 	}
 </style>

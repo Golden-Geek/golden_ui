@@ -8,6 +8,7 @@
 	interface NumberEditorPresentation {
 		show_value_field?: boolean;
 		max_decimals?: number;
+		inside_label?: string;
 	}
 
 	let { node, layoutMode = 'default', presentation = {} } = $props<{
@@ -49,6 +50,12 @@
 	let fieldStep = $derived(
 		isInteger ? 1 : fractionDigits <= 0 ? 1 : Number(`1e-${fractionDigits}`)
 	);
+	let sliderLabel = $derived(
+		layoutMode === 'widget' && typeof presentation.inside_label === 'string'
+			? presentation.inside_label.trim()
+			: ''
+	);
+	let showsInlineFieldLabel = $derived(!hasRange && showValueField && sliderLabel.length > 0);
 	let formattedDraftValue = $derived(draftValue.toFixed(fractionDigits));
 	let formattedValue = $derived(value.toFixed(fractionDigits));
 
@@ -184,6 +191,7 @@
 			{stepBase}
 			{readOnly}
 			disabled={!enabled}
+			label={hasRange ? sliderLabel : ''}
 			onValueChange={(nextValue: number) => {
 				commitValue(nextValue);
 			}}
@@ -192,25 +200,50 @@
 	</div>
 
 	{#if showValueField}
-		<input
-			bind:this={numberInput}
-			type="number"
-			step={fieldStep}
-			class="number-field"
-			disabled={!enabled}
-			class:readonly={readOnly}
-			value={formattedDraftValue}
-			onblur={setValueFromField}
-			onkeydown={(event) => {
-				if (event.key === 'Enter') {
-					numberInput?.blur();
-				} else if (event.key === 'Escape') {
-					if (numberInput) {
-						numberInput.value = formattedValue;
-						numberInput.blur();
+		{#if showsInlineFieldLabel}
+			<div class="number-field-shell">
+				<span class="number-field-prefix">{sliderLabel} :</span>
+				<input
+					bind:this={numberInput}
+					type="number"
+					step={fieldStep}
+					class="number-field inline-labeled"
+					disabled={!enabled}
+					class:readonly={readOnly}
+					value={formattedDraftValue}
+					onblur={setValueFromField}
+					onkeydown={(event) => {
+						if (event.key === 'Enter') {
+							numberInput?.blur();
+						} else if (event.key === 'Escape') {
+							if (numberInput) {
+								numberInput.value = formattedValue;
+								numberInput.blur();
+							}
+						}
+					}} />
+			</div>
+		{:else}
+			<input
+				bind:this={numberInput}
+				type="number"
+				step={fieldStep}
+				class="number-field"
+				disabled={!enabled}
+				class:readonly={readOnly}
+				value={formattedDraftValue}
+				onblur={setValueFromField}
+				onkeydown={(event) => {
+					if (event.key === 'Enter') {
+						numberInput?.blur();
+					} else if (event.key === 'Escape') {
+						if (numberInput) {
+							numberInput.value = formattedValue;
+							numberInput.blur();
+						}
 					}
-				}
-			}} />
+				}} />
+		{/if}
 	{/if}
 </div>
 
@@ -257,6 +290,26 @@
 		width: 100%;
 	}
 
+	.number-field-shell {
+		display: flex;
+		flex: 1 1 auto;
+		align-items: center;
+		gap: 0.45rem;
+		min-inline-size: 0;
+		padding: 0 0.7rem;
+		border-radius: 0.7rem;
+		background: rgb(from var(--gc-color-background) r g b / 0.48);
+		border: solid 0.06rem rgb(from var(--gc-color-panel-outline) r g b / 0.48);
+		box-sizing: border-box;
+	}
+
+	.number-field-prefix {
+		flex: 0 0 auto;
+		font-size: 0.72rem;
+		font-weight: 600;
+		white-space: nowrap;
+	}
+
 	.number-property-container.widget-layout .number-field {
 		flex: 0 0 auto;
 		inline-size: clamp(4rem, 18%, 6rem);
@@ -275,6 +328,23 @@
 		flex: 1 1 auto;
 		inline-size: auto;
 		min-inline-size: 4rem;
+	}
+
+	.number-property-container.widget-layout .number-field-shell {
+		flex: 1 1 auto;
+		min-inline-size: 0;
+	}
+
+	.number-property-container.widget-layout .number-field.inline-labeled {
+		flex: 1 1 auto;
+		inline-size: auto;
+		min-inline-size: 0;
+		max-width: none;
+		margin-left: 0;
+		border: none;
+		background: transparent;
+		padding: 0;
+		outline: none;
 	}
 
 	input::-webkit-outer-spin-button,

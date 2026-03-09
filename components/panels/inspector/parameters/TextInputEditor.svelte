@@ -6,9 +6,10 @@
 	} from '$lib/golden_ui/store/ui-intents';
 	import type { UiNodeDto } from '$lib/golden_ui/types';
 
-	let { node, layoutMode = 'default' } = $props<{
+	let { node, layoutMode = 'default', insideLabel = null } = $props<{
 		node: UiNodeDto;
 		layoutMode?: 'default' | 'widget';
+		insideLabel?: string | null;
 	}>();
 
 	let session = $derived(appState.session);
@@ -30,6 +31,8 @@
 	});
 
 	let draftValue = $state('');
+	let inlineLabel = $derived(typeof insideLabel === 'string' ? insideLabel.trim() : '');
+	let showsInlineLabel = $derived(layoutMode === 'widget' && inlineLabel.length > 0);
 
 	$effect(() => {
 		draftValue = value;
@@ -114,32 +117,80 @@
 	};
 </script>
 
-<input
-	type="text"
-	class="string-editor"
-	class:widget-layout={layoutMode === 'widget'}
-	value={draftValue}
-	disabled={!enabled}
-	class:readonly={readOnly}
-	onchange={(event) => {
-		const nextValue = (event.target as HTMLInputElement).value;
-		void commitValue(nextValue);
-	}}
-	onkeydown={(event) => {
-		if (event.key === 'Enter') {
-			const target = event.target as HTMLInputElement;
-			void commitValue(target.value);
-			target.blur();
-		}
-		if (event.key === 'Escape') {
-			draftValue = value;
-			(event.target as HTMLInputElement).blur();
-		}
-	}} />
+{#if showsInlineLabel}
+	<div class="string-editor-shell widget-layout">
+		<span class="string-editor-prefix">{inlineLabel} :</span>
+		<input
+			type="text"
+			class="string-editor inline-labeled"
+			value={draftValue}
+			disabled={!enabled}
+			class:readonly={readOnly}
+			onchange={(event) => {
+				const nextValue = (event.target as HTMLInputElement).value;
+				void commitValue(nextValue);
+			}}
+			onkeydown={(event) => {
+				if (event.key === 'Enter') {
+					const target = event.target as HTMLInputElement;
+					void commitValue(target.value);
+					target.blur();
+				}
+				if (event.key === 'Escape') {
+					draftValue = value;
+					(event.target as HTMLInputElement).blur();
+				}
+			}} />
+	</div>
+{:else}
+	<input
+		type="text"
+		class="string-editor"
+		class:widget-layout={layoutMode === 'widget'}
+		value={draftValue}
+		disabled={!enabled}
+		class:readonly={readOnly}
+		onchange={(event) => {
+			const nextValue = (event.target as HTMLInputElement).value;
+			void commitValue(nextValue);
+		}}
+		onkeydown={(event) => {
+			if (event.key === 'Enter') {
+				const target = event.target as HTMLInputElement;
+				void commitValue(target.value);
+				target.blur();
+			}
+			if (event.key === 'Escape') {
+				draftValue = value;
+				(event.target as HTMLInputElement).blur();
+			}
+		}} />
+{/if}
 
 <style>
+	.string-editor-shell {
+		display: flex;
+		align-items: center;
+		gap: 0.55rem;
+		inline-size: 100%;
+		block-size: 100%;
+		min-inline-size: 0;
+		padding: 0.6rem 0.8rem;
+		border-radius: 0.75rem;
+		background: rgb(from var(--gc-color-background) r g b / 0.48);
+		border: solid 0.06rem rgb(from var(--gc-color-panel-outline) r g b / 0.48);
+		box-sizing: border-box;
+	}
+
+	.string-editor-prefix {
+		flex: 0 0 auto;
+		font-size: 0.72rem;
+		font-weight: 600;
+		white-space: nowrap;
+	}
+
 	.string-editor {
-		flex:1;
+		flex: 1;
 		height: 100%;
 		box-sizing: border-box;
 		font-size: 0.75rem;
@@ -148,6 +199,14 @@
 	.string-editor.widget-layout {
 		inline-size: 100%;
 		block-size: 100%;
+	}
+
+	.string-editor.inline-labeled {
+		border: none;
+		background: transparent;
+		padding: 0;
+		min-inline-size: 0;
+		outline: none;
 	}
 
 </style>

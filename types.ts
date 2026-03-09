@@ -28,13 +28,13 @@ export type ParamValue =
 	| { kind: 'vec3'; value: [number, number, number] }
 	| { kind: 'color'; value: [number, number, number, number] }
 	| {
-				kind: 'reference';
-				uuid: string;
-				projection?: UiParamValueProjection;
-				cached_id?: NodeId;
-				cached_name?: string;
-				relative_path_from_root?: string[];
-		  };
+			kind: 'reference';
+			uuid: string;
+			projection?: UiParamValueProjection;
+			cached_id?: NodeId;
+			cached_name?: string;
+			relative_path_from_root?: string[];
+	  };
 
 export type UiReferenceRoot =
 	| { kind: 'engineRoot' }
@@ -408,6 +408,11 @@ export interface UiAnimationCurveBezierFitOptions {
 	max_keys: number;
 }
 
+export interface UiCreateUserItemInitialParam {
+	decl_id: string;
+	value: ParamValue;
+}
+
 export type UiEditIntent =
 	| { kind: 'beginEdit'; client_edit_id: string; label?: string }
 	| { kind: 'endEdit'; client_edit_id: string }
@@ -416,7 +421,13 @@ export type UiEditIntent =
 	| { kind: 'moveNode'; node: NodeId; new_parent: NodeId; new_prev_sibling?: NodeId }
 	| { kind: 'removeNode'; node: NodeId }
 	| { kind: 'removeNodes'; nodes: NodeId[] }
-	| { kind: 'createUserItem'; parent: NodeId; node_type: string; label?: string }
+	| {
+			kind: 'createUserItem';
+			parent: NodeId;
+			node_type: string;
+			label?: string;
+			initial_params?: UiCreateUserItemInitialParam[];
+	  }
 	| {
 			kind: 'duplicateNode';
 			source: NodeId;

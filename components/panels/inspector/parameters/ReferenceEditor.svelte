@@ -11,8 +11,10 @@
 		UiReferenceTargetCandidate
 	} from '$lib/golden_ui/types';
 
-	let { node } = $props<{
+	let { node, layoutMode = 'default', insideLabel = null } = $props<{
 		node: UiNodeDto;
+		layoutMode?: 'default' | 'widget';
+		insideLabel?: string | null;
 	}>();
 
 	const NIL_UUID = '00000000-0000-0000-0000-000000000000';
@@ -270,6 +272,8 @@
 	});
 
 	let triggerElement = $state<HTMLButtonElement | null>(null);
+	let inlineLabel = $derived(typeof insideLabel === 'string' ? insideLabel.trim() : '');
+	let showsInlineLabel = $derived(layoutMode === 'widget' && inlineLabel.length > 0);
 
 	const projectionOptionsForCandidate = (
 		candidate: UiNodeDto
@@ -379,10 +383,12 @@
 	};
 </script>
 
-<div class="reference-editor link-{linkStatus}">
+<div class="reference-editor link-{linkStatus}" class:widget-layout={layoutMode === 'widget'}>
 	<button
 		type="button"
 		class="picker-trigger"
+		class:widget-layout={layoutMode === 'widget'}
+		class:inline-labeled={showsInlineLabel}
 		class:selected={selectedNode !== null}
 		class:readonly={readOnly}
 		disabled={!enabled}
@@ -390,13 +396,18 @@
 		onclick={() => {
 			void openPicker();
 		}}>
+		{#if showsInlineLabel}
+			<span class="picker-trigger-prefix">{inlineLabel} :</span>
+		{/if}
 		{#if selectedNode}
-			{selectedNode.meta.label}
-			{#if value?.projection}
-				<span class="projection-label">({projectionLabel(value.projection)})</span>
-			{/if}
+			<span class="picker-trigger-value">
+				{selectedNode.meta.label}
+				{#if value?.projection}
+					<span class="projection-label">({projectionLabel(value.projection)})</span>
+				{/if}
+			</span>
 		{:else}
-			<span class="placeholder">{ghostReferenceName}</span>
+			<span class="picker-trigger-value placeholder">{ghostReferenceName}</span>
 		{/if}
 	</button>
 </div>
@@ -406,6 +417,11 @@
 		display: flex;
 		flex-direction: column;
 		gap: 0.35rem;
+	}
+
+	.reference-editor.widget-layout {
+		inline-size: 100%;
+		block-size: 100%;
 	}
 
 	.reference-editor.link-missing {
@@ -424,6 +440,33 @@
 		height: 1.6rem;
 		width: 100%;
 		text-align: left;
+	}
+
+	.picker-trigger.widget-layout {
+		block-size: 100%;
+		min-block-size: 0;
+	}
+
+	.picker-trigger.inline-labeled {
+		display: flex;
+		align-items: center;
+		gap: 0.55rem;
+		padding-inline: 0.8rem;
+		min-inline-size: 0;
+	}
+
+	.picker-trigger-prefix {
+		flex: 0 0 auto;
+		font-size: 0.72rem;
+		font-weight: 600;
+		white-space: nowrap;
+	}
+
+	.picker-trigger-value {
+		min-inline-size: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
 	}
 
 	.picker-trigger.readonly {

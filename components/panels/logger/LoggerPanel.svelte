@@ -233,10 +233,10 @@
 			return;
 		}
 
-		const oldestRetainedId = records[0].id;
-		for (const cachedId of recordDecorationsCache.keys()) {
-			if (cachedId >= oldestRetainedId) {
-				break;
+		const retainedIds = new Set(records.map((record) => record.id));
+		for (const cachedId of [...recordDecorationsCache.keys()]) {
+			if (retainedIds.has(cachedId)) {
+				continue;
 			}
 			recordDecorationsCache.delete(cachedId);
 		}
@@ -286,10 +286,10 @@
 			superCollapseObservedSignatureByRecordId.set(record.id, signature);
 		}
 
-		const oldestRetainedId = records[0].id;
-		for (const observedId of superCollapseObservedRepeatByRecordId.keys()) {
-			if (observedId >= oldestRetainedId) {
-				break;
+		const retainedIds = new Set(records.map((record) => record.id));
+		for (const observedId of [...superCollapseObservedRepeatByRecordId.keys()]) {
+			if (retainedIds.has(observedId)) {
+				continue;
 			}
 			superCollapseObservedRepeatByRecordId.delete(observedId);
 			superCollapseObservedSignatureByRecordId.delete(observedId);

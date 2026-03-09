@@ -15,12 +15,14 @@
 	import DashboardCanvasSelf from './DashboardCanvas.svelte';
 	import { resolveDashboardNodeWidgetDisplayMode } from './dashboard-node-widget-registry';
 	import DashboardNodeWidgetParameterEditorContent from './DashboardNodeWidgetParameterEditorContent.svelte';
+	import Slider from '$lib/golden_ui/components/common/Slider.svelte';
 
 	import {
 		bindDashboardGenericWidgetTarget,
 		bindDashboardNodeWidgetTarget,
 		createDashboardGenericWidget,
 		createDashboardNodeWidget,
+		type DashboardGenericWidgetKind,
 		getDashboardGenericWidgetCreationDefaults,
 		getDashboardNodeWidgetCreationDefaults,
 		type DashboardWidgetCreationPlacement
@@ -28,6 +30,7 @@
 	import { readDashboardDragPayload, type DashboardDragPayload } from './dashboard-drag';
 	import {
 		type DashboardAnchor,
+		type DashboardLabelPlacement,
 		formatParamValue,
 		getDashboardLayoutKind,
 		getDashboardPageSize,
@@ -59,6 +62,14 @@
 		label: string;
 		targetKind: DashboardDragPayload['kind'];
 		placement: DashboardWidgetCreationPlacement;
+		genericWidgetKind: DashboardGenericWidgetKind | null;
+		previewText: string | null;
+		previewPlaceholder: string | null;
+		multiline: boolean;
+	};
+	type PendingSurfaceDrop = {
+		preview: SurfaceDropPreview;
+		knownChildIds: NodeId[];
 	};
 
 	let {
@@ -84,6 +95,8 @@
 	let isLayoutSurface = $derived(isPage || isContainerWidget);
 
 	let placement = $derived(getDashboardPlacement(graph, liveNode));
+	let widgetLabelPlacement = $derived(placement.labelPlacement);
+	let widgetLabelText = $derived(liveNode.meta.label.trim());
 	let parentNode = $derived.by(() => {
 		const parentId = graph?.parentById.get(liveNode.node_id);
 		if (parentId === undefined || !graph) {
@@ -107,6 +120,10 @@
 	let pageViewportSize = $state({ width: 0, height: 0 });
 	let pageViewportResizeFrame = $state<number | null>(null);
 	let surfaceDropPreview = $state<SurfaceDropPreview | null>(null);
+	let pendingSurfaceDrop = $state<PendingSurfaceDrop | null>(null);
+	let displayedSurfaceDropPreview = $derived(
+		surfaceDropPreview ?? pendingSurfaceDrop?.preview ?? null
+	);
 	let pendingPersistedPageView = $state<DashboardPersistedPageView | null>(null);
 	let appliedPersistedPageView = $state<DashboardPersistedPageView | null>(null);
 	type ObservedAnchorPlacement = {
@@ -706,7 +723,8 @@
 			targets.push({
 				nodeId: targetNode.node_id,
 				anchor: targetPlacement.anchor,
-				positionParamNodeId: positionParamNode?.data.kind === 'parameter' ? positionParamNode.node_id : null,
+				positionParamNodeId:
+					positionParamNode?.data.kind === 'parameter' ? positionParamNode.node_id : null,
 				positionParamBehaviour:
 					positionParamNode?.data.kind === 'parameter'
 						? positionParamNode.data.param.event_behaviour
@@ -716,7 +734,8 @@
 					widthParamNode?.data.kind === 'parameter'
 						? widthParamNode.data.param.event_behaviour
 						: null,
-				heightParamNodeId: heightParamNode?.data.kind === 'parameter' ? heightParamNode.node_id : null,
+				heightParamNodeId:
+					heightParamNode?.data.kind === 'parameter' ? heightParamNode.node_id : null,
 				heightParamBehaviour:
 					heightParamNode?.data.kind === 'parameter'
 						? heightParamNode.data.param.event_behaviour
@@ -1018,18 +1037,15 @@
 				typeof window === 'undefined'
 					? null
 					: window.requestAnimationFrame(() => {
-						pageViewportResizeFrame = null;
-						if (
-							pageViewportSize.width === nextWidth &&
-							pageViewportSize.height === nextHeight
-						) {
-							return;
-						}
-						pageViewportSize = {
-							width: nextWidth,
-							height: nextHeight
-						};
-					});
+							pageViewportResizeFrame = null;
+							if (pageViewportSize.width === nextWidth && pageViewportSize.height === nextHeight) {
+								return;
+							}
+							pageViewportSize = {
+								width: nextWidth,
+								height: nextHeight
+							};
+						});
 		});
 		observer.observe(pageViewportElement);
 		return () => {
@@ -1095,6 +1111,31 @@
 		return editMode && resolveDraggedParameterNode(payload) !== null;
 	};
 
+	const surfaceDropKindLabel = (preview: SurfaceDropPreview): string => {
+		if (preview.targetKind === 'node') {
+			return 'Node Widget';
+		}
+		switch (preview.genericWidgetKind) {
+			case 'button':
+				return 'Button Widget';
+			case 'slider':
+				return 'Slider Widget';
+			case 'textInput':
+				return 'Text Input Widget';
+			case 'checkbox':
+				return 'Checkbox Widget';
+			default:
+				return 'Text Widget';
+		}
+	};
+
+	const widgetLabelPlacementClass = (labelPlacement: DashboardLabelPlacement | null): string => {
+		if (labelPlacement === null) {
+			return 'label-hidden';
+		}
+		return `label-${labelPlacement}`;
+	};
+
 	const buildSurfaceDropPreview = (
 		event: DragEvent,
 		payload: DashboardDragPayload | null
@@ -1128,15 +1169,29 @@
 			viewportHeightPx: getViewportHeightPx()
 		};
 		const snapPx = surfaceSnapGrid.enabled ? surfaceSnapGrid.step * rootRemPx : 0;
-		const placement =
-			payload.kind === 'parameter'
-				? getDashboardGenericWidgetCreationDefaults(targetNode, context, { centerPx, snapPx })
-						.placement
-				: getDashboardNodeWidgetCreationDefaults(targetNode, context, { centerPx, snapPx });
+		if (payload.kind === 'parameter') {
+			const defaults = getDashboardGenericWidgetCreationDefaults(targetNode, context, {
+				centerPx,
+				snapPx
+			});
+			return {
+				label: targetNode.meta.label,
+				targetKind: payload.kind,
+				placement: defaults.placement,
+				genericWidgetKind: defaults.widgetKind,
+				previewText: defaults.text ?? null,
+				previewPlaceholder: defaults.placeholder ?? null,
+				multiline: defaults.multiline ?? false
+			};
+		}
 		return {
 			label: targetNode.meta.label,
 			targetKind: payload.kind,
-			placement
+			placement: getDashboardNodeWidgetCreationDefaults(targetNode, context, { centerPx, snapPx }),
+			genericWidgetKind: null,
+			previewText: null,
+			previewPlaceholder: null,
+			multiline: false
 		};
 	};
 
@@ -1186,15 +1241,27 @@
 		if (!targetNode) {
 			return;
 		}
+		pendingSurfaceDrop = dropPreview
+			? {
+					preview: dropPreview,
+					knownChildIds: childWidgets.map((child) => child.node_id)
+				}
+			: null;
 		if (payload?.kind === 'parameter') {
-			await createDashboardGenericWidget(getGraph, liveNode.node_id, targetNode, {
+			const created = await createDashboardGenericWidget(getGraph, liveNode.node_id, targetNode, {
 				placement: dropPreview?.placement
 			});
+			if (!created) {
+				pendingSurfaceDrop = null;
+			}
 			return;
 		}
-		await createDashboardNodeWidget(getGraph, liveNode.node_id, targetNode, {
+		const created = await createDashboardNodeWidget(getGraph, liveNode.node_id, targetNode, {
 			placement: dropPreview?.placement
 		});
+		if (!created) {
+			pendingSurfaceDrop = null;
+		}
 	};
 
 	const handleBindingDragEnter = (
@@ -1206,7 +1273,6 @@
 			return;
 		}
 		event.preventDefault();
-		event.stopPropagation();
 		bindingDragDepth += 1;
 	};
 
@@ -1219,7 +1285,6 @@
 			return;
 		}
 		event.preventDefault();
-		event.stopPropagation();
 		if (event.dataTransfer) {
 			event.dataTransfer.dropEffect = 'copy';
 		}
@@ -1512,8 +1577,8 @@
 		event.stopPropagation();
 		const surfaceElement =
 			isPage && event.currentTarget instanceof HTMLElement
-				? (event.currentTarget.closest('.dashboard-page-scene') as HTMLElement | null) ??
-					event.currentTarget
+				? ((event.currentTarget.closest('.dashboard-page-scene') as HTMLElement | null) ??
+					event.currentTarget)
 				: event.currentTarget;
 		const selection: MarqueeSelectionState = {
 			pointerId: event.pointerId,
@@ -1828,6 +1893,16 @@
 		return maxExtent;
 	});
 
+	$effect(() => {
+		if (!pendingSurfaceDrop) {
+			return;
+		}
+		const knownChildIds = new Set(pendingSurfaceDrop.knownChildIds);
+		if (childWidgets.some((child) => !knownChildIds.has(child.node_id))) {
+			pendingSurfaceDrop = null;
+		}
+	});
+
 	const surfaceStyle = $derived.by((): string => {
 		const snapStepPx = surfaceSnapGrid.enabled ? surfaceSnapGrid.step * getRootRemPixels() : 0;
 		const gapStyle = `--dashboard-gap-x: ${formatCssValue(gap.x)}; --dashboard-gap-y: ${formatCssValue(gap.y)}; --dashboard-snap-grid-step: ${snapStepPx}px;`;
@@ -1925,7 +2000,9 @@
 
 	const displayedWidgetPlacement = $derived.by(() => ({
 		...placement,
-		position: currentNodeFreeLayoutPreview ? currentNodeFreeLayoutPreview.position : placement.position,
+		position: currentNodeFreeLayoutPreview
+			? currentNodeFreeLayoutPreview.position
+			: placement.position,
 		size: currentNodeFreeLayoutPreview ? currentNodeFreeLayoutPreview.size : placement.size
 	}));
 
@@ -1943,10 +2020,7 @@
 			if (!(lengthPx > 0.5)) {
 				return;
 			}
-			const start =
-				direction === 'left'
-					? `calc(${anchorInline} - ${lengthPx}px)`
-					: anchorInline;
+			const start = direction === 'left' ? `calc(${anchorInline} - ${lengthPx}px)` : anchorInline;
 			guides.push({
 				axis: 'horizontal',
 				direction,
@@ -1958,10 +2032,7 @@
 			if (!(lengthPx > 0.5)) {
 				return;
 			}
-			const start =
-				direction === 'up'
-					? `calc(${anchorBlock} - ${lengthPx}px)`
-					: anchorBlock;
+			const start = direction === 'up' ? `calc(${anchorBlock} - ${lengthPx}px)` : anchorBlock;
 			guides.push({
 				axis: 'vertical',
 				direction,
@@ -2048,6 +2119,30 @@
 	const showsNodeWidgetEditor = $derived(
 		resolvedNodeWidgetDisplayMode?.id === 'editor' && boundNode?.data.kind === 'parameter'
 	);
+	const widgetUsesLabelPlacement = $derived.by(() => {
+		if (isNodeWidget) {
+			return resolvedNodeWidgetDisplayMode?.usesLabelPlacement ?? false;
+		}
+		return true;
+	});
+	const widgetWrapperLabelPlacement = $derived.by(() => {
+		if (
+			!widgetUsesLabelPlacement ||
+			widgetLabelPlacement === null ||
+			widgetLabelPlacement === 'inside'
+		) {
+			return null;
+		}
+		return widgetLabelPlacement;
+	});
+	const hasExternalWidgetLabel = $derived(
+		widgetWrapperLabelPlacement !== null && widgetLabelText.length > 0
+	);
+	const hasInsideWidgetLabel = $derived(
+		widgetUsesLabelPlacement &&
+			widgetLabelPlacement === 'inside' &&
+			widgetLabelText.length > 0
+	);
 
 	const genericDisplayValue = $derived.by(() => {
 		if (widgetKind === 'text' && boundParam) {
@@ -2055,6 +2150,18 @@
 		}
 		return textConfig;
 	});
+	const genericSliderValue = $derived.by(() => {
+		if (boundParam?.value.kind === 'float' || boundParam?.value.kind === 'int') {
+			return boundParam.value.value;
+		}
+		return valueRange[0];
+	});
+	const genericSliderDisabled = $derived(
+		editMode ||
+			!boundParam ||
+			(boundParam.value.kind !== 'float' && boundParam.value.kind !== 'int') ||
+			boundParamNode?.meta.enabled === false
+	);
 
 	const applyGenericParamValue = async (value: ParamValue): Promise<void> => {
 		if (!boundParamNode || boundParamNode.data.kind !== 'parameter') {
@@ -2066,7 +2173,6 @@
 			boundParamNode.data.param.event_behaviour
 		);
 	};
-
 
 	$effect(() => {
 		const isWidget = isContainerWidget || isNodeWidget || isGenericWidget;
@@ -2102,11 +2208,11 @@
 		const surfaceMetrics = widgetShellElement
 			? getClosestSurfaceMetrics(widgetShellElement, rootRemPx)
 			: {
-				width: getViewportWidthPx(),
-				height: getViewportHeightPx(),
-				scaleX: 1,
-				scaleY: 1
-			};
+					width: getViewportWidthPx(),
+					height: getViewportHeightPx(),
+					scaleX: 1,
+					scaleY: 1
+				};
 		const placementContext = {
 			rootRemPx,
 			surfaceWidthPx: surfaceMetrics.width,
@@ -2358,7 +2464,8 @@
 				class="dashboard-page-scene-hitbox"
 				role="presentation"
 				aria-hidden="true"
-				onpointerdown={handlePageScenePointerDown}></div>
+				onpointerdown={handlePageScenePointerDown}>
+			</div>
 			<div class="dashboard-page-frame" style={pageFrameStyle}>
 				<div
 					class="dashboard-surface dashboard-page {layoutKind}"
@@ -2430,18 +2537,64 @@
 									</div>
 								</div>
 							{/each}
-							{#if surfaceDropPreview && layoutKind === 'free'}
+							{#if displayedSurfaceDropPreview && layoutKind === 'free'}
 								<div
 									class="dashboard-slot dashboard-drop-preview"
-									style={placementStyle(surfaceDropPreview.placement)}
+									class:is-committing={pendingSurfaceDrop !== null && surfaceDropPreview === null}
+									style={placementStyle(displayedSurfaceDropPreview.placement)}
 									aria-hidden="true">
 									<div class="dashboard-slot-fill">
 										<div class="dashboard-drop-preview-fill">
-											<span class="dashboard-drop-preview-kind"
-												>{surfaceDropPreview.targetKind === 'parameter'
-													? 'Parameter Widget'
-													: 'Node Widget'}</span>
-											<strong>{surfaceDropPreview.label}</strong>
+											<div class="dashboard-drop-preview-meta">
+												<span class="dashboard-drop-preview-kind"
+													>{surfaceDropKindLabel(displayedSurfaceDropPreview)}</span>
+												<strong>{displayedSurfaceDropPreview.label}</strong>
+											</div>
+											<div class="dashboard-drop-preview-shell">
+												{#if displayedSurfaceDropPreview.targetKind === 'node'}
+													<div class="dashboard-drop-preview-node-toolbar">
+														<span></span>
+														<span></span>
+														<span></span>
+													</div>
+													<div class="dashboard-drop-preview-node-lines">
+														<span class="wide"></span>
+														<span></span>
+														<span class="short"></span>
+													</div>
+												{:else if displayedSurfaceDropPreview.genericWidgetKind === 'button'}
+													<div class="dashboard-drop-preview-button">
+														{displayedSurfaceDropPreview.previewText ??
+															displayedSurfaceDropPreview.label}
+													</div>
+												{:else if displayedSurfaceDropPreview.genericWidgetKind === 'slider'}
+													<div class="dashboard-drop-preview-slider">
+														<span class="dashboard-drop-preview-slider-label"
+															>{displayedSurfaceDropPreview.label}</span>
+														<span class="dashboard-drop-preview-slider-track"><span></span></span>
+													</div>
+												{:else if displayedSurfaceDropPreview.genericWidgetKind === 'checkbox'}
+													<div class="dashboard-drop-preview-checkbox">
+														<span class="dashboard-drop-preview-checkbox-box"></span>
+														<span
+															>{displayedSurfaceDropPreview.previewText ??
+																displayedSurfaceDropPreview.label}</span>
+													</div>
+												{:else if displayedSurfaceDropPreview.genericWidgetKind === 'textInput'}
+													<div
+														class="dashboard-drop-preview-input"
+														class:multiline={displayedSurfaceDropPreview.multiline}>
+														<span
+															>{displayedSurfaceDropPreview.previewPlaceholder ??
+																displayedSurfaceDropPreview.label}</span>
+													</div>
+												{:else}
+													<div class="dashboard-drop-preview-text">
+														{displayedSurfaceDropPreview.previewText ??
+															displayedSurfaceDropPreview.label}
+													</div>
+												{/if}
+											</div>
 										</div>
 									</div>
 								</div>
@@ -2449,7 +2602,7 @@
 						</div>
 					{/if}
 
-					{#if childWidgets.length === 0}
+					{#if childWidgets.length === 0 && !displayedSurfaceDropPreview}
 						<div class="dashboard-empty-state">
 							<span class="eyebrow">Dashboard Page</span>
 							<h3>Drop a node or parameter here</h3>
@@ -2460,7 +2613,7 @@
 						</div>
 					{/if}
 
-					{#if surfaceDragDepth > 0 && (!surfaceDropPreview || layoutKind !== 'free')}
+					{#if surfaceDragDepth > 0 && (!displayedSurfaceDropPreview || layoutKind !== 'free')}
 						<div class="dashboard-drop-indicator">Drop to create a widget</div>
 					{/if}
 				</div>
@@ -2509,107 +2662,163 @@
 		{#if anchorGuides.length > 0}
 			<div class="dashboard-anchor-guides" aria-hidden="true">
 				{#each anchorGuides as guide}
-					<div class="dashboard-anchor-guide {guide.axis} {guide.direction}" style={guide.style}></div>
+					<div class="dashboard-anchor-guide {guide.axis} {guide.direction}" style={guide.style}>
+					</div>
 				{/each}
 			</div>
 		{/if}
-		<div
-			class="dashboard-surface dashboard-container-surface {layoutKind}"
-			class:surface-target-active={surfaceDragDepth > 0}
-			class:snap-grid-visible={snapGridVisible}
-			role="group"
-			aria-label="Dashboard container surface"
-			style={surfaceStyle}
-			onpointerdown={handleSurfacePointerDown}
-			ondragenter={handleSurfaceDragEnter}
-			ondragover={handleSurfaceDragOver}
-			ondragleave={handleSurfaceDragLeave}
-			ondrop={(event) => {
-				void handleSurfaceDrop(event);
-			}}>
-			{#if layoutKind === 'tabs'}
-				<div class="dashboard-tab-strip compact">
-					{#each childWidgets as child}
-						<button
-							type="button"
-							class:selected={activeTabNodeId === child.node_id}
-							onpointerdown={withStoppedPropagation}
-							onclick={() => {
-								activeTabNodeId = child.node_id;
-							}}>{child.meta.label}</button>
-					{/each}
-				</div>
-				<div class="dashboard-tab-body compact">
-					{#if activeTabNodeId !== null}
-						{@const activeChild =
-							childWidgets.find((candidate) => candidate.node_id === activeTabNodeId) ?? null}
-						{#if activeChild}
-							<div class="dashboard-slot">
-								<div class="dashboard-slot-fill">
-									<DashboardCanvasSelf node={activeChild} {editMode} />
-								</div>
-							</div>
-						{/if}
-					{/if}
-				</div>
-			{:else if layoutKind === 'accordion'}
-				<div class="dashboard-accordion compact">
-					{#each childWidgets as child}
-						<section class="dashboard-accordion-item">
-							<button
-								type="button"
-								class:selected={openAccordionNodeIds.includes(child.node_id)}
-								onpointerdown={withStoppedPropagation}
-								onclick={() => {
-									toggleAccordionNode(child.node_id);
-								}}>{child.meta.label}</button>
-							{#if openAccordionNodeIds.includes(child.node_id)}
-								<div class="dashboard-slot accordion-slot">
+		<div class="dashboard-widget-frame {widgetLabelPlacementClass(widgetWrapperLabelPlacement)}">
+			{#if hasExternalWidgetLabel}
+				<div class="dashboard-widget-label">{widgetLabelText}</div>
+			{/if}
+			<div class="dashboard-widget-body dashboard-container-body">
+				<div
+					class="dashboard-surface dashboard-container-surface {layoutKind}"
+					class:surface-target-active={surfaceDragDepth > 0}
+					class:snap-grid-visible={snapGridVisible}
+					role="group"
+					aria-label="Dashboard container surface"
+					style={surfaceStyle}
+					onpointerdown={handleSurfacePointerDown}
+					ondragenter={handleSurfaceDragEnter}
+					ondragover={handleSurfaceDragOver}
+					ondragleave={handleSurfaceDragLeave}
+					ondrop={(event) => {
+						void handleSurfaceDrop(event);
+					}}>
+					{#if layoutKind === 'tabs'}
+						<div class="dashboard-tab-strip compact">
+							{#each childWidgets as child}
+								<button
+									type="button"
+									class:selected={activeTabNodeId === child.node_id}
+									onpointerdown={withStoppedPropagation}
+									onclick={() => {
+										activeTabNodeId = child.node_id;
+									}}>{child.meta.label}</button>
+							{/each}
+						</div>
+						<div class="dashboard-tab-body compact">
+							{#if activeTabNodeId !== null}
+								{@const activeChild =
+									childWidgets.find((candidate) => candidate.node_id === activeTabNodeId) ?? null}
+								{#if activeChild}
+									<div class="dashboard-slot">
+										<div class="dashboard-slot-fill">
+											<DashboardCanvasSelf node={activeChild} {editMode} />
+										</div>
+									</div>
+								{/if}
+							{/if}
+						</div>
+					{:else if layoutKind === 'accordion'}
+						<div class="dashboard-accordion compact">
+							{#each childWidgets as child}
+								<section class="dashboard-accordion-item">
+									<button
+										type="button"
+										class:selected={openAccordionNodeIds.includes(child.node_id)}
+										onpointerdown={withStoppedPropagation}
+										onclick={() => {
+											toggleAccordionNode(child.node_id);
+										}}>{child.meta.label}</button>
+									{#if openAccordionNodeIds.includes(child.node_id)}
+										<div class="dashboard-slot accordion-slot">
+											<div class="dashboard-slot-fill">
+												<DashboardCanvasSelf node={child} {editMode} />
+											</div>
+										</div>
+									{/if}
+								</section>
+							{/each}
+						</div>
+					{:else}
+						<div class="dashboard-layout">
+							{#each childWidgets as child}
+								<div class="dashboard-slot" style={slotStyle(child)}>
 									<div class="dashboard-slot-fill">
 										<DashboardCanvasSelf node={child} {editMode} />
 									</div>
 								</div>
-							{/if}
-						</section>
-					{/each}
-				</div>
-			{:else}
-				<div class="dashboard-layout">
-					{#each childWidgets as child}
-						<div class="dashboard-slot" style={slotStyle(child)}>
-							<div class="dashboard-slot-fill"><DashboardCanvasSelf node={child} {editMode} /></div>
-						</div>
-					{/each}
-					{#if surfaceDropPreview && layoutKind === 'free'}
-						<div
-							class="dashboard-slot dashboard-drop-preview"
-							style={placementStyle(surfaceDropPreview.placement)}
-							aria-hidden="true">
-							<div class="dashboard-slot-fill">
-								<div class="dashboard-drop-preview-fill">
-									<span class="dashboard-drop-preview-kind"
-										>{surfaceDropPreview.targetKind === 'parameter'
-											? 'Parameter Widget'
-											: 'Node Widget'}</span>
-									<strong>{surfaceDropPreview.label}</strong>
+							{/each}
+							{#if displayedSurfaceDropPreview && layoutKind === 'free'}
+								<div
+									class="dashboard-slot dashboard-drop-preview"
+									class:is-committing={pendingSurfaceDrop !== null && surfaceDropPreview === null}
+									style={placementStyle(displayedSurfaceDropPreview.placement)}
+									aria-hidden="true">
+									<div class="dashboard-slot-fill">
+										<div class="dashboard-drop-preview-fill">
+											<div class="dashboard-drop-preview-meta">
+												<span class="dashboard-drop-preview-kind"
+													>{surfaceDropKindLabel(displayedSurfaceDropPreview)}</span>
+												<strong>{displayedSurfaceDropPreview.label}</strong>
+											</div>
+											<div class="dashboard-drop-preview-shell">
+												{#if displayedSurfaceDropPreview.targetKind === 'node'}
+													<div class="dashboard-drop-preview-node-toolbar">
+														<span></span>
+														<span></span>
+														<span></span>
+													</div>
+													<div class="dashboard-drop-preview-node-lines">
+														<span class="wide"></span>
+														<span></span>
+														<span class="short"></span>
+													</div>
+												{:else if displayedSurfaceDropPreview.genericWidgetKind === 'button'}
+													<div class="dashboard-drop-preview-button">
+														{displayedSurfaceDropPreview.previewText ??
+															displayedSurfaceDropPreview.label}
+													</div>
+												{:else if displayedSurfaceDropPreview.genericWidgetKind === 'slider'}
+													<div class="dashboard-drop-preview-slider">
+														<span class="dashboard-drop-preview-slider-label"
+															>{displayedSurfaceDropPreview.label}</span>
+														<span class="dashboard-drop-preview-slider-track"><span></span></span>
+													</div>
+												{:else if displayedSurfaceDropPreview.genericWidgetKind === 'checkbox'}
+													<div class="dashboard-drop-preview-checkbox">
+														<span class="dashboard-drop-preview-checkbox-box"></span>
+														<span
+															>{displayedSurfaceDropPreview.previewText ??
+																displayedSurfaceDropPreview.label}</span>
+													</div>
+												{:else if displayedSurfaceDropPreview.genericWidgetKind === 'textInput'}
+													<div
+														class="dashboard-drop-preview-input"
+														class:multiline={displayedSurfaceDropPreview.multiline}>
+														<span
+															>{displayedSurfaceDropPreview.previewPlaceholder ??
+																displayedSurfaceDropPreview.label}</span>
+													</div>
+												{:else}
+													<div class="dashboard-drop-preview-text">
+														{displayedSurfaceDropPreview.previewText ??
+															displayedSurfaceDropPreview.label}
+													</div>
+												{/if}
+											</div>
+										</div>
+									</div>
 								</div>
-							</div>
+							{/if}
 						</div>
 					{/if}
+
+					{#if childWidgets.length === 0 && !displayedSurfaceDropPreview}
+						<div class="dashboard-empty-inline">Drop widgets here or use the add menu.</div>
+					{/if}
+
+					{#if surfaceDragDepth > 0 && (!displayedSurfaceDropPreview || layoutKind !== 'free')}
+						<div class="dashboard-drop-indicator">Drop to add a child widget</div>
+					{/if}
+
+					{#if marqueeSelection}
+						<div class="dashboard-marquee-selection" style={marqueeStyle} aria-hidden="true"></div>
+					{/if}
 				</div>
-			{/if}
-
-			{#if childWidgets.length === 0}
-				<div class="dashboard-empty-inline">Drop widgets here or use the add menu.</div>
-			{/if}
-
-			{#if surfaceDragDepth > 0 && (!surfaceDropPreview || layoutKind !== 'free')}
-				<div class="dashboard-drop-indicator">Drop to add a child widget</div>
-			{/if}
-
-			{#if marqueeSelection}
-				<div class="dashboard-marquee-selection" style={marqueeStyle} aria-hidden="true"></div>
-			{/if}
+			</div>
 		</div>
 	</section>
 {:else if isNodeWidget}
@@ -2655,26 +2864,41 @@
 		{#if anchorGuides.length > 0}
 			<div class="dashboard-anchor-guides" aria-hidden="true">
 				{#each anchorGuides as guide}
-					<div class="dashboard-anchor-guide {guide.axis} {guide.direction}" style={guide.style}></div>
+					<div class="dashboard-anchor-guide {guide.axis} {guide.direction}" style={guide.style}>
+					</div>
 				{/each}
 			</div>
 		{/if}
-		<div class="dashboard-widget-content inspector-body">
-			{#if boundNode}
-				<div class="dashboard-live-content" class:inert-mode={editMode} inert={editMode}>
-					{#if showsNodeWidgetEditor}
-						<DashboardNodeWidgetParameterEditorContent
-							widgetNode={liveNode}
-							targetNode={boundNode} />
-					{:else if NodeWidgetDisplayComponent}
-						<NodeWidgetDisplayComponent targetNode={boundNode} {includeChildren} {editMode} />
+		<div class="dashboard-widget-frame {widgetLabelPlacementClass(widgetWrapperLabelPlacement)}">
+			{#if hasExternalWidgetLabel}
+				<div class="dashboard-widget-label">{widgetLabelText}</div>
+			{/if}
+			<div class="dashboard-widget-body">
+				<div class="dashboard-widget-content inspector-body">
+					{#if boundNode}
+						<div class="dashboard-live-content" class:inert-mode={editMode} inert={editMode}>
+							{#if showsNodeWidgetEditor}
+								<DashboardNodeWidgetParameterEditorContent
+									widgetNode={liveNode}
+									targetNode={boundNode}
+									insideLabel={hasInsideWidgetLabel ? widgetLabelText : null} />
+							{:else if resolvedNodeWidgetDisplayMode?.id === 'vec2Pad' && NodeWidgetDisplayComponent}
+								<NodeWidgetDisplayComponent
+									targetNode={boundNode}
+									insideLabel={hasInsideWidgetLabel ? widgetLabelText : null} />
+							{:else if NodeWidgetDisplayComponent}
+								<NodeWidgetDisplayComponent targetNode={boundNode} {includeChildren} {editMode} />
+							{:else}
+								<div class="dashboard-empty-inline">
+									No display mode is available for this node.
+								</div>
+							{/if}
+						</div>
 					{:else}
-						<div class="dashboard-empty-inline">No display mode is available for this node.</div>
+						<div class="dashboard-empty-inline">This widget is not bound yet.</div>
 					{/if}
 				</div>
-			{:else}
-				<div class="dashboard-empty-inline">This widget is not bound yet.</div>
-			{/if}
+			</div>
 		</div>
 	</section>
 {:else if isGenericWidget}
@@ -2720,107 +2944,141 @@
 		{#if anchorGuides.length > 0}
 			<div class="dashboard-anchor-guides" aria-hidden="true">
 				{#each anchorGuides as guide}
-					<div class="dashboard-anchor-guide {guide.axis} {guide.direction}" style={guide.style}></div>
+					<div class="dashboard-anchor-guide {guide.axis} {guide.direction}" style={guide.style}>
+					</div>
 				{/each}
 			</div>
 		{/if}
-		<div class="dashboard-widget-content generic-body">
-			<div class="dashboard-live-content" class:inert-mode={editMode} inert={editMode}>
-				{#if widgetKind === 'button'}
-					<button
-						type="button"
-						class="generic-button"
-						onclick={() => {
-							void triggerGenericAction();
-						}}
-						disabled={editMode}>{textConfig || boundParamNode?.meta.label || 'Trigger'}</button>
-				{:else if widgetKind === 'slider'}
-					<div class="generic-slider-wrap">
-						<input
-							type="range"
-							min={String(valueRange[0])}
-							max={String(valueRange[1])}
-							step={String(sliderStep)}
-							value={String(
-								boundParam?.value.kind === 'float' || boundParam?.value.kind === 'int'
-									? boundParam.value.value
-									: valueRange[0]
-							)}
-							disabled={editMode ||
-								!boundParam ||
-								(boundParam.value.kind !== 'float' && boundParam.value.kind !== 'int')}
-							oninput={(event) => {
-								void applySliderValue((event.target as HTMLInputElement).value);
-							}} />
-						<div class="generic-readout">
-							{boundParam ? formatParamValue(boundParam.value) : 'Unbound'}
-						</div>
-					</div>
-				{:else if widgetKind === 'checkbox'}
-					<label class="generic-checkbox">
-						<input
-							type="checkbox"
-							checked={boundParam?.value.kind === 'bool' ? boundParam.value.value : defaultChecked}
-							disabled={editMode || boundParam?.value.kind !== 'bool'}
-							onchange={(event) => {
-								void applyGenericParamValue({
-									kind: 'bool',
-									value: (event.target as HTMLInputElement).checked
-								});
-							}} />
-						<span>{textConfig || boundParamNode?.meta.label || 'Enabled'}</span>
-					</label>
-				{:else if widgetKind === 'textInput'}
-					{#if multiline}
-						<textarea
-							rows="4"
-							placeholder={placeholderConfig}
-							disabled={editMode ||
-								!boundParam ||
-								(boundParam.value.kind !== 'str' &&
-									boundParam.value.kind !== 'file' &&
-									boundParam.value.kind !== 'enum' &&
-									boundParam.value.kind !== 'css_value')}
-							onchange={(event) => {
-								void applyStringValue((event.target as HTMLTextAreaElement).value);
-							}}
-							>{boundParam
-								? boundParam.value.kind === 'css_value'
-									? formatCssValue(boundParam.value)
-									: boundParam.value.kind === 'str' ||
-										  boundParam.value.kind === 'file' ||
-										  boundParam.value.kind === 'enum'
+		<div class="dashboard-widget-frame {widgetLabelPlacementClass(widgetWrapperLabelPlacement)}">
+			{#if hasExternalWidgetLabel}
+				<div class="dashboard-widget-label">{widgetLabelText}</div>
+			{/if}
+			<div class="dashboard-widget-body">
+				<div class="dashboard-widget-content generic-body">
+					<div class="dashboard-live-content" class:inert-mode={editMode} inert={editMode}>
+						{#if widgetKind === 'button'}
+							<button
+								type="button"
+								class="generic-button"
+								class:with-inside-label={hasInsideWidgetLabel}
+								onclick={() => {
+									void triggerGenericAction();
+								}}
+								disabled={editMode}>
+								{#if hasInsideWidgetLabel}
+									<span class="generic-inline-label">{widgetLabelText}</span>
+								{/if}
+								<span class="generic-button-text"
+									>{textConfig || boundParamNode?.meta.label || 'Trigger'}</span>
+							</button>
+						{:else if widgetKind === 'slider'}
+							<div class="generic-slider-wrap">
+								<div class="generic-slider-bar">
+									<Slider
+										value={genericSliderValue}
+										min={valueRange[0]}
+										max={valueRange[1]}
+										step={sliderStep}
+										disabled={genericSliderDisabled}
+										readOnly={Boolean(boundParam?.read_only)}
+										label={hasInsideWidgetLabel ? widgetLabelText : ''}
+										onValueChange={(nextValue: number) => {
+											void applySliderValue(String(nextValue));
+										}} />
+								</div>
+								<div class="generic-readout">
+									{boundParam ? formatParamValue(boundParam.value) : 'Unbound'}
+								</div>
+							</div>
+						{:else if widgetKind === 'checkbox'}
+							<label class="generic-checkbox" class:with-inside-label={hasInsideWidgetLabel}>
+								{#if hasInsideWidgetLabel}
+									<span class="generic-inline-label">{widgetLabelText}</span>
+								{/if}
+								<input
+									type="checkbox"
+									checked={boundParam?.value.kind === 'bool'
 										? boundParam.value.value
-										: textConfig
-								: textConfig}</textarea>
-					{:else}
-						<input
-							type="text"
-							value={boundParam
-								? boundParam.value.kind === 'css_value'
-									? formatCssValue(boundParam.value)
-									: boundParam.value.kind === 'str' ||
-										  boundParam.value.kind === 'file' ||
-										  boundParam.value.kind === 'enum'
-										? boundParam.value.value
-										: textConfig
-								: textConfig}
-							placeholder={placeholderConfig}
-							disabled={editMode ||
-								!boundParam ||
-								(boundParam.value.kind !== 'str' &&
-									boundParam.value.kind !== 'file' &&
-									boundParam.value.kind !== 'enum' &&
-									boundParam.value.kind !== 'css_value')}
-							onchange={(event) => {
-								void applyStringValue((event.target as HTMLInputElement).value);
-							}} />
-					{/if}
-				{:else}
-					<div class="generic-text-display">
-						{genericDisplayValue || 'Drop a parameter or set static text.'}
+										: defaultChecked}
+									disabled={editMode || boundParam?.value.kind !== 'bool'}
+									onchange={(event) => {
+										void applyGenericParamValue({
+											kind: 'bool',
+											value: (event.target as HTMLInputElement).checked
+										});
+									}} />
+								<span class="generic-checkbox-text"
+									>{textConfig || boundParamNode?.meta.label || 'Enabled'}</span>
+							</label>
+						{:else if widgetKind === 'textInput'}
+							{#if multiline}
+								<div
+									class="generic-input-shell multiline"
+									class:with-inside-label={hasInsideWidgetLabel}>
+									{#if hasInsideWidgetLabel}
+										<span class="generic-inline-label">{widgetLabelText}</span>
+									{/if}
+									<textarea
+										rows="4"
+										placeholder={placeholderConfig}
+										disabled={editMode ||
+											!boundParam ||
+											(boundParam.value.kind !== 'str' &&
+												boundParam.value.kind !== 'file' &&
+												boundParam.value.kind !== 'enum' &&
+												boundParam.value.kind !== 'css_value')}
+										onchange={(event) => {
+											void applyStringValue((event.target as HTMLTextAreaElement).value);
+										}}
+										>{boundParam
+											? boundParam.value.kind === 'css_value'
+												? formatCssValue(boundParam.value)
+												: boundParam.value.kind === 'str' ||
+													  boundParam.value.kind === 'file' ||
+													  boundParam.value.kind === 'enum'
+													? boundParam.value.value
+													: textConfig
+											: textConfig}</textarea>
+								</div>
+							{:else}
+								<div class="generic-input-shell" class:with-inside-label={hasInsideWidgetLabel}>
+									{#if hasInsideWidgetLabel}
+										<span class="generic-inline-label">{widgetLabelText}</span>
+									{/if}
+									<input
+										type="text"
+										value={boundParam
+											? boundParam.value.kind === 'css_value'
+												? formatCssValue(boundParam.value)
+												: boundParam.value.kind === 'str' ||
+													  boundParam.value.kind === 'file' ||
+													  boundParam.value.kind === 'enum'
+													? boundParam.value.value
+													: textConfig
+											: textConfig}
+										placeholder={placeholderConfig}
+										disabled={editMode ||
+											!boundParam ||
+											(boundParam.value.kind !== 'str' &&
+												boundParam.value.kind !== 'file' &&
+												boundParam.value.kind !== 'enum' &&
+												boundParam.value.kind !== 'css_value')}
+										onchange={(event) => {
+											void applyStringValue((event.target as HTMLInputElement).value);
+										}} />
+								</div>
+							{/if}
+						{:else}
+							<div class="generic-text-display" class:with-inside-label={hasInsideWidgetLabel}>
+								{#if hasInsideWidgetLabel}
+									<span class="generic-inline-label">{widgetLabelText}</span>
+								{/if}
+								<span class="generic-text-display-value"
+									>{genericDisplayValue || 'Drop a parameter or set static text.'}</span>
+							</div>
+						{/if}
 					</div>
-				{/if}
+				</div>
 			</div>
 		</div>
 	</section>
@@ -3152,6 +3410,83 @@
 		background: transparent;
 	}
 
+	.dashboard-widget-frame {
+		position: relative;
+		display: flex;
+		flex: 1 1 auto;
+		flex-direction: column;
+		inline-size: 100%;
+		block-size: 100%;
+		min-inline-size: 0;
+		min-block-size: 0;
+	}
+
+	.dashboard-widget-frame.label-left,
+	.dashboard-widget-frame.label-right {
+		flex-direction: row;
+	}
+
+	.dashboard-widget-frame.label-bottom {
+		flex-direction: column;
+	}
+
+	.dashboard-widget-frame.label-right > .dashboard-widget-label,
+	.dashboard-widget-frame.label-bottom > .dashboard-widget-label {
+		order: 1;
+	}
+
+	.dashboard-widget-body {
+		position: relative;
+		display: flex;
+		flex: 1 1 auto;
+		min-inline-size: 0;
+		min-block-size: 0;
+		overflow: hidden;
+	}
+
+	.dashboard-widget-label {
+		display: flex;
+		flex: 0 0 auto;
+		align-items: center;
+		min-inline-size: 0;
+		padding: 0.45rem 0.7rem;
+		font-size: 0.72rem;
+		font-weight: 600;
+		line-height: 1.2;
+		color: #eef4ff;
+		background: linear-gradient(
+			180deg,
+			rgb(from var(--gc-color-panel-outline) r g b / 0.12),
+			rgb(from var(--gc-color-background) r g b / 0.2)
+		);
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.dashboard-widget-frame.label-top > .dashboard-widget-label {
+		border-block-end: solid 0.06rem rgb(from var(--gc-color-panel-outline) r g b / 0.24);
+	}
+
+	.dashboard-widget-frame.label-bottom > .dashboard-widget-label {
+		border-block-start: solid 0.06rem rgb(from var(--gc-color-panel-outline) r g b / 0.24);
+	}
+
+	.dashboard-widget-frame.label-left > .dashboard-widget-label,
+	.dashboard-widget-frame.label-right > .dashboard-widget-label {
+		inline-size: min(7rem, 36%);
+		justify-content: center;
+		text-align: center;
+	}
+
+	.dashboard-widget-frame.label-left > .dashboard-widget-label {
+		border-inline-end: solid 0.06rem rgb(from var(--gc-color-panel-outline) r g b / 0.24);
+	}
+
+	.dashboard-widget-frame.label-right > .dashboard-widget-label {
+		border-inline-start: solid 0.06rem rgb(from var(--gc-color-panel-outline) r g b / 0.24);
+	}
+
 	.dashboard-resize-zone {
 		position: absolute;
 		background: transparent;
@@ -3419,11 +3754,15 @@
 		z-index: 2;
 	}
 
+	.dashboard-drop-preview.is-committing {
+		opacity: 0.82;
+	}
+
 	.dashboard-drop-preview-fill {
 		display: flex;
 		flex-direction: column;
-		justify-content: center;
-		gap: 0.35rem;
+		justify-content: space-between;
+		gap: 0.55rem;
 		inline-size: 100%;
 		block-size: 100%;
 		padding: 0.75rem 0.85rem;
@@ -3442,6 +3781,12 @@
 		overflow: hidden;
 	}
 
+	.dashboard-drop-preview-meta {
+		display: flex;
+		flex-direction: column;
+		gap: 0.2rem;
+	}
+
 	.dashboard-drop-preview-fill strong {
 		font-size: 0.78rem;
 		font-weight: 600;
@@ -3452,6 +3797,129 @@
 
 	.dashboard-drop-preview-kind {
 		opacity: 0.72;
+	}
+
+	.dashboard-drop-preview-shell {
+		display: flex;
+		flex: 1 1 auto;
+		flex-direction: column;
+		justify-content: center;
+		gap: 0.45rem;
+		min-block-size: 0;
+	}
+
+	.dashboard-drop-preview-node-toolbar,
+	.dashboard-drop-preview-node-lines {
+		display: flex;
+		flex-direction: column;
+		gap: 0.35rem;
+	}
+
+	.dashboard-drop-preview-node-toolbar span,
+	.dashboard-drop-preview-node-lines span,
+	.dashboard-drop-preview-slider-track,
+	.dashboard-drop-preview-input,
+	.dashboard-drop-preview-text,
+	.dashboard-drop-preview-button,
+	.dashboard-drop-preview-checkbox {
+		border-radius: 0.55rem;
+	}
+
+	.dashboard-drop-preview-node-toolbar span,
+	.dashboard-drop-preview-node-lines span,
+	.dashboard-drop-preview-slider-track,
+	.dashboard-drop-preview-checkbox-box {
+		background: rgb(from var(--gc-color-text) r g b / 0.18);
+	}
+
+	.dashboard-drop-preview-node-toolbar span {
+		block-size: 0.45rem;
+	}
+
+	.dashboard-drop-preview-node-lines span {
+		block-size: 0.5rem;
+	}
+
+	.dashboard-drop-preview-node-lines span.wide {
+		inline-size: 100%;
+	}
+
+	.dashboard-drop-preview-node-lines span.short {
+		inline-size: 58%;
+	}
+
+	.dashboard-drop-preview-button,
+	.dashboard-drop-preview-text,
+	.dashboard-drop-preview-input,
+	.dashboard-drop-preview-checkbox,
+	.dashboard-drop-preview-slider {
+		display: flex;
+		align-items: center;
+		min-block-size: 0;
+	}
+
+	.dashboard-drop-preview-button,
+	.dashboard-drop-preview-text,
+	.dashboard-drop-preview-input {
+		padding: 0.65rem 0.8rem;
+		background: rgb(from var(--gc-color-background) r g b / 0.38);
+		border: solid 0.06rem rgb(from var(--gc-color-text) r g b / 0.18);
+	}
+
+	.dashboard-drop-preview-button {
+		justify-content: center;
+		font-weight: 600;
+	}
+
+	.dashboard-drop-preview-text {
+		align-items: flex-start;
+		line-height: 1.4;
+	}
+
+	.dashboard-drop-preview-input {
+		color: rgb(from var(--gc-color-text) r g b / 0.72);
+	}
+
+	.dashboard-drop-preview-input.multiline {
+		align-items: flex-start;
+		min-block-size: 4.4rem;
+	}
+
+	.dashboard-drop-preview-slider {
+		flex-direction: column;
+		align-items: stretch;
+		gap: 0.45rem;
+	}
+
+	.dashboard-drop-preview-slider-label {
+		font-size: 0.72rem;
+		opacity: 0.78;
+	}
+
+	.dashboard-drop-preview-slider-track {
+		display: block;
+		block-size: 0.5rem;
+		overflow: hidden;
+	}
+
+	.dashboard-drop-preview-slider-track > span {
+		display: block;
+		block-size: 100%;
+		inline-size: 48%;
+		border-radius: inherit;
+		background: rgb(from var(--gc-color-selection) r g b / 0.78);
+	}
+
+	.dashboard-drop-preview-checkbox {
+		gap: 0.55rem;
+		padding: 0.65rem 0.1rem;
+	}
+
+	.dashboard-drop-preview-checkbox-box {
+		inline-size: 1rem;
+		block-size: 1rem;
+		border-radius: 0.3rem;
+		flex: 0 0 auto;
 	}
 
 	.generic-body {
@@ -3467,14 +3935,13 @@
 	.generic-text-display,
 	.generic-slider-wrap,
 	.generic-checkbox,
-	.generic-body input[type='text'],
-	.generic-body input[type='range'],
-	.generic-body textarea {
+	.generic-input-shell {
 		inline-size: 100%;
 		block-size: 100%;
 	}
 
 	.generic-button {
+		position: relative;
 		display: flex;
 		align-items: center;
 		justify-content: center;
@@ -3496,13 +3963,44 @@
 	.generic-text-display,
 	.generic-slider-wrap,
 	.generic-checkbox,
-	.generic-body input[type='text'],
-	.generic-body textarea {
+	.generic-input-shell {
 		border-radius: 0.7rem;
 		background: rgb(from var(--gc-color-background) r g b / 0.48);
 		border: solid 0.06rem rgb(from var(--gc-color-panel-outline) r g b / 0.48);
 		padding: 0.5rem 0.65rem;
 		box-sizing: border-box;
+	}
+
+	.generic-button.with-inside-label,
+	.generic-text-display.with-inside-label,
+	.generic-checkbox.with-inside-label,
+	.generic-input-shell.with-inside-label {
+		padding-block-start: 1.85rem;
+	}
+
+	.generic-inline-label {
+		position: absolute;
+		inset-inline-start: 0.65rem;
+		inset-block-start: 0.55rem;
+		z-index: 1;
+		max-inline-size: calc(100% - 1.3rem);
+		padding: 0.26rem 0.5rem;
+		border-radius: 999rem;
+		background: rgb(from var(--gc-color-background) r g b / 0.82);
+		box-shadow: 0 0.2rem 0.6rem rgb(from var(--gc-color-background) r g b / 0.16);
+		font-size: 0.66rem;
+		font-weight: 600;
+		line-height: 1.1;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+		pointer-events: none;
+	}
+
+	.generic-button-text,
+	.generic-text-display-value,
+	.generic-checkbox-text {
+		min-inline-size: 0;
 	}
 
 	.generic-slider-wrap {
@@ -3512,7 +4010,19 @@
 		gap: 0.5rem;
 	}
 
+	.generic-slider-bar {
+		display: flex;
+		flex: 1 1 auto;
+		min-block-size: 1.6rem;
+	}
+
+	.generic-slider-bar :global(.slider-label) {
+		padding-inline: 0.7rem;
+		font-size: 0.72rem;
+	}
+
 	.generic-text-display {
+		position: relative;
 		display: flex;
 		align-items: center;
 		justify-content: center;
@@ -3525,6 +4035,7 @@
 	}
 
 	.generic-checkbox {
+		position: relative;
 		display: flex;
 		flex: 1 1 auto;
 		gap: 0.6rem;
@@ -3535,7 +4046,29 @@
 		flex: 0 0 auto;
 	}
 
-	.generic-body textarea {
+	.generic-input-shell {
+		position: relative;
+		display: flex;
+		flex: 1 1 auto;
+		min-inline-size: 0;
+		min-block-size: 0;
+	}
+
+	.generic-input-shell > input[type='text'],
+	.generic-input-shell > textarea {
+		inline-size: 100%;
+		block-size: 100%;
+		min-inline-size: 0;
+		min-block-size: 0;
+		border: none;
+		background: transparent;
+		padding: 0;
+		outline: none;
+		font: inherit;
+		color: inherit;
+	}
+
+	.generic-input-shell > textarea {
 		resize: none;
 		min-block-size: 0;
 	}

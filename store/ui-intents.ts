@@ -5,6 +5,7 @@ import type {
 	NodeId,
 	ParamEventBehaviour,
 	ParamValue,
+	UiCreateUserItemInitialParam,
 	UiEditIntent,
 	UiNodeMetaDto,
 	UiParameterControlState,
@@ -45,9 +46,7 @@ const sendUiIntent = async (intent: UiEditIntent): Promise<boolean> => {
 	}
 };
 
-export const sendUiIntentBatch = async (
-	intents: UiEditIntent[]
-): Promise<UiIntentBatchResult> => {
+export const sendUiIntentBatch = async (intents: UiEditIntent[]): Promise<UiIntentBatchResult> => {
 	const session = appState.session;
 	if (!session) {
 		return { success: false, appliedCount: 0 };
@@ -152,16 +151,22 @@ export const sendCreateUserItemIntent = async (
 	return sendCreateUserItemByTypeIntent(parent, item.node_type, item.label);
 };
 
+interface CreateUserItemOptions {
+	initial_params?: UiCreateUserItemInitialParam[];
+}
+
 export const sendCreateUserItemByTypeIntent = async (
 	parent: NodeId,
 	node_type: string,
-	label?: string
+	label?: string,
+	options?: CreateUserItemOptions
 ): Promise<boolean> => {
 	return sendUiIntent({
 		kind: 'createUserItem',
 		parent,
 		node_type,
-		label
+		label,
+		initial_params: options?.initial_params
 	});
 };
 
@@ -215,10 +220,7 @@ export const sendReloadScript = async (node: NodeId): Promise<boolean> => {
 	}
 };
 
-export const createUiEditSession = (
-	label?: string,
-	prefix = 'ui-edit'
-): UiEditSession => {
+export const createUiEditSession = (label?: string, prefix = 'ui-edit'): UiEditSession => {
 	const clientEditId = nextIntentId(prefix);
 	let active = false;
 

@@ -106,9 +106,7 @@ export type RustParamValue =
 			[key: string]: unknown;
 	  };
 
-type RustScriptSource =
-	| { kind: 'inline'; text: string }
-	| { kind: 'projectFile'; path: string };
+type RustScriptSource = { kind: 'inline'; text: string } | { kind: 'projectFile'; path: string };
 
 interface RustScriptConfig {
 	source: RustScriptSource;
@@ -243,10 +241,7 @@ type RustUiEventDto =
 						old_state: unknown;
 						new_state: unknown;
 				  }
-				| Exclude<
-						UiEventDto['kind'],
-						{ kind: 'paramChanged' } | { kind: 'paramControlChanged' }
-				  >;
+				| Exclude<UiEventDto['kind'], { kind: 'paramChanged' } | { kind: 'paramControlChanged' }>;
 	  })
 	| (Omit<UiEventDto, 'kind'> & {
 			kind: UiEventDto['kind']['kind'];
@@ -340,17 +335,17 @@ const fromRustReferencePayload = (
 		const cachedName = payload.cached_name;
 		const cached_name = typeof cachedName === 'string' ? cachedName : undefined;
 		const relativePathRaw = payload.relative_path_from_root;
-			const relative_path_from_root = Array.isArray(relativePathRaw)
-				? relativePathRaw.filter((segment): segment is string => typeof segment === 'string')
-				: undefined;
-			return {
-				uuid,
-				projection: payload.projection,
-				cached_id,
-				cached_name,
-				relative_path_from_root
-			};
-		}
+		const relative_path_from_root = Array.isArray(relativePathRaw)
+			? relativePathRaw.filter((segment): segment is string => typeof segment === 'string')
+			: undefined;
+		return {
+			uuid,
+			projection: payload.projection,
+			cached_id,
+			cached_name,
+			relative_path_from_root
+		};
+	}
 
 	return { uuid: '' };
 };
@@ -415,12 +410,7 @@ const fromRustParamValue = (value: unknown): ParamValue => {
 		const vec = value.Color as unknown[];
 		return {
 			kind: 'color',
-			value: [
-				Number(vec[0] ?? 0),
-				Number(vec[1] ?? 0),
-				Number(vec[2] ?? 0),
-				Number(vec[3] ?? 1)
-			]
+			value: [Number(vec[0] ?? 0), Number(vec[1] ?? 0), Number(vec[2] ?? 0), Number(vec[3] ?? 1)]
 		};
 	}
 	if ('Reference' in value) {
@@ -428,9 +418,7 @@ const fromRustParamValue = (value: unknown): ParamValue => {
 		return {
 			kind: 'reference',
 			uuid: reference.uuid,
-			projection: isUiParamValueProjection(reference.projection)
-				? reference.projection
-				: undefined,
+			projection: isUiParamValueProjection(reference.projection) ? reference.projection : undefined,
 			cached_id: reference.cached_id,
 			cached_name: reference.cached_name,
 			relative_path_from_root: reference.relative_path_from_root
@@ -493,7 +481,10 @@ const fromRustReferenceRoot = (root: unknown): UiReferenceRoot => {
 		}
 		if ('RelativeToOwner' in root) {
 			const payload = root.RelativeToOwner;
-			const path = isRecord(payload) && Array.isArray(payload.path) ? payload.path.filter((segment): segment is string => typeof segment === 'string') : [];
+			const path =
+				isRecord(payload) && Array.isArray(payload.path)
+					? payload.path.filter((segment): segment is string => typeof segment === 'string')
+					: [];
 			return { kind: 'relativeToOwner', path };
 		}
 		if (root.kind === 'uuid') {
@@ -501,7 +492,9 @@ const fromRustReferenceRoot = (root: unknown): UiReferenceRoot => {
 		}
 		if (root.kind === 'relativeToOwner') {
 			const rawPath = root.path;
-			const path = Array.isArray(rawPath) ? rawPath.filter((segment): segment is string => typeof segment === 'string') : [];
+			const path = Array.isArray(rawPath)
+				? rawPath.filter((segment): segment is string => typeof segment === 'string')
+				: [];
 			return { kind: 'relativeToOwner', path };
 		}
 	}
@@ -534,9 +527,7 @@ const fromRustReferenceConstraints = (reference: unknown): UiReferenceConstraint
 		allowed_node_types: allowedNodeTypes,
 		allowed_parameter_types: allowedParameterTypes,
 		allow_projections:
-			typeof reference.allow_projections === 'boolean'
-				? reference.allow_projections
-				: true,
+			typeof reference.allow_projections === 'boolean' ? reference.allow_projections : true,
 		custom_filter_key:
 			typeof reference.custom_filter_key === 'string' ? reference.custom_filter_key : undefined,
 		default_search_filter:
@@ -557,7 +548,10 @@ const fromRustFileConstraints = (file: unknown): UiFileConstraints | undefined =
 		: [];
 	const allowed_types = allowedTypesRaw
 		.map((value: unknown) => String(value).toLowerCase())
-		.filter((value): value is UiFileConstraints['allowed_types'][number] => value === 'audio' || value === 'video' || value === 'script');
+		.filter(
+			(value): value is UiFileConstraints['allowed_types'][number] =>
+				value === 'audio' || value === 'video' || value === 'script'
+		);
 	const allowed_extensions = allowedExtensionsRaw
 		.map((value: unknown) => String(value).trim())
 		.filter((value) => value.length > 0);
@@ -640,8 +634,7 @@ const fromRustScriptManifest = (manifest: unknown): UiScriptManifest | undefined
 	return {
 		api_version: apiVersion,
 		update_rate_hz:
-			typeof manifest.update_rate_hz === 'number' &&
-			Number.isFinite(manifest.update_rate_hz)
+			typeof manifest.update_rate_hz === 'number' && Number.isFinite(manifest.update_rate_hz)
 				? Math.max(1, Math.round(manifest.update_rate_hz))
 				: undefined,
 		exports
@@ -681,9 +674,7 @@ const fromRustRangeConstraint = (range: unknown): UiParamConstraints['range'] | 
 			if (!Array.isArray(value)) {
 				return undefined;
 			}
-			const parsed = value
-				.map((entry) => Number(entry))
-				.filter((entry) => Number.isFinite(entry));
+			const parsed = value.map((entry) => Number(entry)).filter((entry) => Number.isFinite(entry));
 			return parsed.length > 0 ? parsed : undefined;
 		};
 
@@ -703,9 +694,7 @@ const fromRustConstraints = (
 ): UiParamConstraints => {
 	const payload = constraints ?? {};
 	const step =
-		typeof payload.step === 'number' && Number.isFinite(payload.step)
-			? payload.step
-			: undefined;
+		typeof payload.step === 'number' && Number.isFinite(payload.step) ? payload.step : undefined;
 	const stepBase =
 		typeof payload.step_base === 'number' && Number.isFinite(payload.step_base)
 			? payload.step_base
@@ -810,9 +799,7 @@ const fromRustTokenSuggestion = (value: unknown): UiTokenSuggestion | null => {
 	return { token: value.token };
 };
 
-const fromRustParamControlCandidate = (
-	value: unknown
-): UiParamControlCandidate | null => {
+const fromRustParamControlCandidate = (value: unknown): UiParamControlCandidate | null => {
 	if (!isRecord(value)) {
 		return null;
 	}
@@ -1016,9 +1003,7 @@ const fromRustNode = (node: RustUiNodeDto, enumOptionsById: EnumOptionsById): Ui
 		...node.meta,
 		user_permissions: {
 			can_edit_name: Boolean(node.meta.user_permissions?.can_edit_name),
-			can_remove_and_duplicate: Boolean(
-				node.meta.user_permissions?.can_remove_and_duplicate
-			),
+			can_remove_and_duplicate: Boolean(node.meta.user_permissions?.can_remove_and_duplicate),
 			can_edit_constraints: Boolean(node.meta.user_permissions?.can_edit_constraints),
 			can_edit_tags: Boolean(node.meta.user_permissions?.can_edit_tags),
 			can_edit_color: Boolean(node.meta.user_permissions?.can_edit_color)
@@ -1144,8 +1129,13 @@ export const fromRustReferenceTargets = (
 		? payload.candidates
 				.map((entry) => fromRustReferenceTargetCandidate(entry))
 				.filter(
-					(entry): entry is { target_id: number; direct: boolean; projections: UiParamValueProjection[] } =>
-						entry !== null
+					(
+						entry
+					): entry is {
+						target_id: number;
+						direct: boolean;
+						projections: UiParamValueProjection[];
+					} => entry !== null
 				)
 		: []
 });
@@ -1197,6 +1187,15 @@ export const toRustIntent = (intent: UiEditIntent): unknown => {
 		return {
 			...intent,
 			value: toRustParamValue(intent.value)
+		};
+	}
+	if (intent.kind === 'createUserItem' && intent.initial_params) {
+		return {
+			...intent,
+			initial_params: intent.initial_params.map((entry) => ({
+				...entry,
+				value: toRustParamValue(entry.value)
+			}))
 		};
 	}
 	if (intent.kind === 'setParamControlState') {
@@ -1325,19 +1324,13 @@ export const createHttpUiClient = (options: HttpClientOptions = {}): UiClient =>
 
 		async referenceTargets(paramNodeId: number): Promise<UiReferenceTargets> {
 			const request: RustReferenceTargetsRequest = { param: paramNodeId };
-			const response = await postJson<RustReferenceTargetsResponse>(
-				'/reference-targets',
-				request
-			);
+			const response = await postJson<RustReferenceTargetsResponse>('/reference-targets', request);
 			return fromRustReferenceTargets(response);
 		},
 
 		async paramControlInfo(paramNodeId: number): Promise<UiParamControlInfo> {
 			const request: RustParamControlInfoRequest = { param: paramNodeId };
-			const response = await postJson<RustParamControlInfoResponse>(
-				'/param-control-info',
-				request
-			);
+			const response = await postJson<RustParamControlInfoResponse>('/param-control-info', request);
 			return fromRustParamControlInfo(response);
 		},
 

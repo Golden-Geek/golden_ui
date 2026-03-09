@@ -20,7 +20,7 @@
 	import ContextMenu from '../../common/ContextMenu.svelte';
 	import NodeWarningBadge from '../../common/NodeWarningBadge.svelte';
 	import type { ContextMenuAnchor, ContextMenuItem } from '../../common/context-menu';
-	import { propertiesInspectorClass } from './inspector.svelte';
+	import { resolveParameterEditor } from './inspector.svelte';
 	import { projectionLabel } from '../../../projection-labels';
 	import resetIcon from '../../../style/icons/reset.svg';
 	import referenceIcon from '../../../style/icons/parameter/reference.svg';
@@ -71,9 +71,8 @@
 	let readOnly = $derived(Boolean(param?.read_only));
 	let isNameChangeable = $derived(Boolean(meta.user_permissions.can_edit_name));
 	let warnings = $derived(node ? session?.getNodeVisibleWarnings(liveNode.node_id) : null);
-	let editorInfos: any = $derived(
-		type.length > 0 ? (propertiesInspectorClass[type] ?? null) : null
-	);
+	let graphNodesById = $derived(session?.graph.state.nodesById ?? null);
+	let editorInfos: any = $derived(resolveParameterEditor(liveNode, graphNodesById));
 	let EditorComponent = $derived(editorInfos ? editorInfos.component : null);
 	let isValueOverridden = $derived.by((): boolean => {
 		if (!param) {
@@ -94,7 +93,6 @@
 	let controlInfoPrevNodeId = $state<number | null>(null);
 	let controlInfoPrevMode = $state<UiParameterControlMode | null>(null);
 	let controlInfoPrevMenuOpen = $state(false);
-	let graphNodesById = $derived(session?.graph.state.nodesById ?? null);
 	const controlModeOptions: ReadonlyArray<{ mode: UiParameterControlMode; label: string }> = [
 		{ mode: 'manual', label: 'Manual' },
 		{ mode: 'contextLink', label: 'Context Link' },
@@ -299,11 +297,10 @@
 			case 'enum':
 			case 'bool':
 				return left.value === (right as typeof left).value;
-				case 'css_value':
-					return (
-						left.value === (right as typeof left).value &&
-						left.unit === (right as typeof left).unit
-					);
+			case 'css_value':
+				return (
+					left.value === (right as typeof left).value && left.unit === (right as typeof left).unit
+				);
 			case 'vec2':
 				return (
 					left.value[0] === (right as typeof left).value[0] &&
@@ -594,7 +591,12 @@
 								</span>
 							{/if}
 						{:else}
-							<span class="parameter-label" draggable="true" role="button" tabindex="-1" ondragstart={startParameterLabelDrag}>
+							<span
+								class="parameter-label"
+								draggable="true"
+								role="button"
+								tabindex="-1"
+								ondragstart={startParameterLabelDrag}>
 								{liveNode.meta.label}
 							</span>
 						{/if}
@@ -622,7 +624,9 @@
 				{/if}
 
 				{#if EditorComponent}
-					<div class="parameter-controls" class:full-width={isControlNode || layoutMode === 'dashboard'}>
+					<div
+						class="parameter-controls"
+						class:full-width={isControlNode || layoutMode === 'dashboard'}>
 						<div class="parameter-wrapper {readOnly ? 'readonly' : ''} {enabled ? '' : 'disabled'}">
 							<EditorComponent node={liveNode} />
 						</div>

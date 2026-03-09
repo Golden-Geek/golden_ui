@@ -1,5 +1,5 @@
 import { createGraphStore, type GraphStore } from './graph.svelte';
-import { createWebSocketUiClient } from '../transport/ws';
+import { createWebSocketUiClient, type UiTransportConnectionState } from '../transport/ws';
 import type {
 	EventTime,
 	NodeId,
@@ -45,6 +45,16 @@ export interface WorkbenchSessionOptions {
 	bootstrapRetryMs?: number;
 }
 
+export type WorkbenchConnectionStatus = 'disconnected' | 'connecting' | 'connected';
+
+export type WorkbenchToastLevel = 'info' | 'success' | 'warning' | 'error';
+
+export interface WorkbenchToast {
+	id: number;
+	level: WorkbenchToastLevel;
+	message: string;
+}
+
 export interface NodeWarningRecord {
 	targetNodeId: NodeId;
 	targetNodeLabel: string;
@@ -64,7 +74,8 @@ export interface WorkbenchSession {
 	readonly logUiUpdateHz: number;
 	readonly selectedNodesIds: NodeId[];
 	readonly selectedNodeId: NodeId | null;
-	readonly status: string;
+	readonly status: WorkbenchConnectionStatus;
+	readonly toasts: WorkbenchToast[];
 	readonly historyBusy: boolean;
 	readonly canUndo: boolean;
 	readonly canRedo: boolean;
@@ -81,6 +92,7 @@ export interface WorkbenchSession {
 	clearSelection(): void;
 	sendIntent(intent: UiEditIntent): Promise<void>;
 	setLogUiUpdateHz(hz: number): void;
+	dismissToast(toastId: number): void;
 	undo(): Promise<void>;
 	redo(): Promise<void>;
 	mount(): () => void;
@@ -98,10 +110,14 @@ interface QueuedIntent {
 
 const DEFAULT_RETRY_MS = 1000;
 const DEFAULT_WARNING_ID = '';
+const MAX_TOASTS = 3;
+const DEFAULT_TOAST_DURATION_MS = 5000;
+const UI_LOG_TAG_INTENT = 'intent';
+const UI_LOG_TAG_TRANSPORT = 'transport';
 
 type PendingLogMutation =
 	| { kind: 'clear' }
-	| { kind: 'replaceTail'; record: UiLogRecord }
+	| { kind: 'replaceRecord'; record: UiLogRecord }
 	| { kind: 'append'; records: UiLogRecord[] };
 
 interface NodeClipboardEntry {
@@ -109,10 +125,24 @@ interface NodeClipboardEntry {
 	label: string;
 }
 
-const formatEventTime = (value: { tick: number; micro: number; seq: number }): string =>
-	`${value.tick}:${value.micro}:${value.seq}`;
-
 const defaultEventTime: EventTime = { tick: 0, micro: 0, seq: 0 };
+
+const toConnectionStatus = (
+	transportState: UiTransportConnectionState,
+	hasLoadedSnapshot: boolean
+): WorkbenchConnectionStatus => {
+	if (transportState === 'connected') {
+		return hasLoadedSnapshot ? 'connected' : 'connecting';
+	}
+	if (
+		transportState === 'connecting' ||
+		transportState === 'reconnecting' ||
+		transportState === 'fallbackPolling'
+	) {
+		return 'connecting';
+	}
+	return 'disconnected';
+};
 
 const controlStateEquals = (
 	left: UiParameterControlState,
@@ -240,7 +270,7 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 		console.info(`[ui-perf] ${message}`);
 	};
 
-	let status = $state('Connecting to engine...');
+	let status = $state<WorkbenchConnectionStatus>('connecting');
 	let selectedNodeIds = $state<NodeId[]>([]);
 	let nodeClipboard = $state<NodeClipboardEntry[]>([]);
 	const persistedSelection = loadPersistedSelection();
@@ -248,6 +278,7 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 	let historyBusy = $state(false);
 	let canUndo = $state(false);
 	let canRedo = $state(false);
+	let toasts = $state<WorkbenchToast[]>([]);
 	let logRecords = $state<UiLogRecord[]>([]);
 	let logMaxEntries = $state(0);
 	let logUiUpdateHz = $state(DEFAULT_LOG_UI_UPDATE_HZ);
@@ -259,35 +290,190 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 	let resyncQueued = false;
 	let snapshotRequestInFlight: Promise<UiSnapshot> | null = null;
 	let hasLoadedSnapshot = false;
+	let connectionState: UiTransportConnectionState = 'connecting';
+	let nextToastId = 0;
+	let nextUiLogId = -1;
+	const toastTimers = new Map<number, ReturnType<typeof setTimeout>>();
+	const uiGeneratedLogIds = new Set<number>();
 	const pendingIntentQueue: QueuedIntent[] = [];
 	let intentQueueProcessing = false;
 	// Keep batch payloads bounded while still reducing setParam fan-out.
 	const MAX_SET_PARAM_BATCH_SIZE = 512;
+
+	const clearToastTimer = (toastId: number): void => {
+		const timer = toastTimers.get(toastId);
+		if (!timer) {
+			return;
+		}
+		clearTimeout(timer);
+		toastTimers.delete(toastId);
+	};
+
+	const dismissToast = (toastId: number): void => {
+		clearToastTimer(toastId);
+		const nextToasts = toasts.filter((toast) => toast.id !== toastId);
+		if (nextToasts.length !== toasts.length) {
+			toasts = nextToasts;
+		}
+	};
+
+	const scheduleToastDismiss = (toastId: number, durationMs: number): void => {
+		clearToastTimer(toastId);
+		toastTimers.set(
+			toastId,
+			setTimeout(() => {
+				dismissToast(toastId);
+			}, durationMs)
+		);
+	};
+
+	const clearToasts = (): void => {
+		for (const toastId of [...toastTimers.keys()]) {
+			clearToastTimer(toastId);
+		}
+		toasts = [];
+	};
+
+	const emitToastForLogRecord = (
+		record: Pick<UiLogRecord, 'level' | 'message'>,
+		durationMs = DEFAULT_TOAST_DURATION_MS
+	): void => {
+		if (record.level === 'info') {
+			return;
+		}
+		pushToast(record.message, record.level, durationMs);
+	};
+
+	const pushToast = (
+		message: string,
+		level: WorkbenchToastLevel = 'info',
+		durationMs = DEFAULT_TOAST_DURATION_MS
+	): void => {
+		const normalizedMessage = message.trim();
+		if (normalizedMessage.length === 0) {
+			return;
+		}
+
+		const lastToast = toasts[toasts.length - 1];
+		if (lastToast && lastToast.message === normalizedMessage && lastToast.level === level) {
+			scheduleToastDismiss(lastToast.id, durationMs);
+			return;
+		}
+
+		if (toasts.length >= MAX_TOASTS) {
+			const oldestToast = toasts[0];
+			if (oldestToast) {
+				dismissToast(oldestToast.id);
+			}
+		}
+
+		const toast: WorkbenchToast = {
+			id: nextToastId,
+			level,
+			message: normalizedMessage
+		};
+		nextToastId += 1;
+		toasts = [...toasts, toast];
+		scheduleToastDismiss(toast.id, durationMs);
+	};
+
+	const syncConnectionStatus = (): void => {
+		status = toConnectionStatus(connectionState, hasLoadedSnapshot);
+	};
+
+	const compareLogRecords = (left: UiLogRecord, right: UiLogRecord): number => {
+		if (left.timestamp_ms !== right.timestamp_ms) {
+			return left.timestamp_ms - right.timestamp_ms;
+		}
+		return left.id - right.id;
+	};
+
+	const trimLogRecords = (): void => {
+		if (logMaxEntries <= 0) {
+			return;
+		}
+		const overflow = logRecords.length - logMaxEntries;
+		if (overflow <= 0) {
+			return;
+		}
+		const removedRecords = logRecords.slice(0, overflow);
+		for (const record of removedRecords) {
+			uiGeneratedLogIds.delete(record.id);
+		}
+		logRecords = logRecords.slice(overflow);
+	};
+
+	const findLogRecordIndexById = (recordId: number): number => {
+		for (let index = logRecords.length - 1; index >= 0; index -= 1) {
+			if (logRecords[index]?.id === recordId) {
+				return index;
+			}
+		}
+		return -1;
+	};
+
+	const appendUiLogRecord = (
+		level: WorkbenchToastLevel,
+		tag: string,
+		message: string,
+		origin?: NodeId
+	): void => {
+		const normalizedMessage = message.trim();
+		if (normalizedMessage.length === 0) {
+			return;
+		}
+
+		flushPendingLogMutations();
+		const timestampMs = Date.now();
+		const lastRecord = logRecords[logRecords.length - 1];
+		if (
+			lastRecord &&
+			uiGeneratedLogIds.has(lastRecord.id) &&
+			lastRecord.level === level &&
+			lastRecord.tag === tag &&
+			lastRecord.message === normalizedMessage &&
+			lastRecord.origin === origin
+		) {
+			const repeatCount = Math.max(1, Math.floor(lastRecord.repeat_count ?? 1)) + 1;
+			const nextRecord: UiLogRecord = {
+				...lastRecord,
+				timestamp_ms: timestampMs,
+				repeat_count: repeatCount
+			};
+			logRecords = [...logRecords.slice(0, -1), nextRecord];
+			emitToastForLogRecord(nextRecord);
+			return;
+		}
+
+		const record: UiLogRecord = {
+			id: nextUiLogId,
+			timestamp_ms: timestampMs,
+			level,
+			tag,
+			message: normalizedMessage,
+			origin
+		};
+		nextUiLogId -= 1;
+		uiGeneratedLogIds.add(record.id);
+		logRecords = [...logRecords, record];
+		trimLogRecords();
+		emitToastForLogRecord(record);
+	};
 
 	const client = createWebSocketUiClient({
 		wsUrl: options.wsUrl,
 		httpBaseUrl: options.httpBaseUrl,
 		pollIntervalMs: options.pollIntervalMs,
 		onConnectionStateChange: (state) => {
-			if (state === 'connecting') {
-				status = 'Connecting to engine...';
-				return;
+			connectionState = state;
+			syncConnectionStatus();
+			if (state === 'fallbackPolling') {
+				appendUiLogRecord(
+					'warning',
+					UI_LOG_TAG_TRANSPORT,
+					'WebSocket lost. Using HTTP fallback while reconnecting...'
+				);
 			}
-			if (state === 'connected') {
-				status = hasLoadedSnapshot
-					? 'Connected.'
-					: 'Transport connected. Syncing snapshot...';
-				return;
-			}
-			if (state === 'disconnected') {
-				status = 'Disconnected from engine.';
-				return;
-			}
-			if (state === 'reconnecting') {
-				status = 'Disconnected, reconnecting...';
-				return;
-			}
-			status = 'WebSocket lost. Using HTTP fallback while reconnecting...';
 		}
 	});
 
@@ -537,17 +723,6 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 		setSelection(nextSelection);
 	};
 
-	const trimLogRecords = (): void => {
-		if (logMaxEntries <= 0) {
-			return;
-		}
-		const overflow = logRecords.length - logMaxEntries;
-		if (overflow <= 0) {
-			return;
-		}
-		logRecords.splice(0, overflow);
-	};
-
 	const clearPendingLogFlush = (): void => {
 		if (logFlushTimer !== null) {
 			clearTimeout(logFlushTimer);
@@ -571,12 +746,17 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 				if (logRecords.length > 0) {
 					logRecords = [];
 				}
+				uiGeneratedLogIds.clear();
 				continue;
 			}
 
-			if (mutation.kind === 'replaceTail') {
-				if (logRecords.length > 0) {
-					logRecords[logRecords.length - 1] = mutation.record;
+			if (mutation.kind === 'replaceRecord') {
+				const recordIndex = findLogRecordIndexById(mutation.record.id);
+				if (recordIndex >= 0) {
+					logRecords[recordIndex] = mutation.record;
+					logRecords = [...logRecords];
+				} else {
+					logRecords = [...logRecords, mutation.record];
 				}
 				continue;
 			}
@@ -602,14 +782,16 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 
 	const queuePendingLogMutations = (
 		shouldClearLogs: boolean,
-		replaceTailRecord: UiLogRecord | null,
+		replaceRecords: UiLogRecord[],
 		pendingLogRecords: UiLogRecord[]
 	): void => {
 		if (shouldClearLogs) {
 			pendingLogMutations.length = 0;
 			pendingLogMutations.push({ kind: 'clear' });
-		} else if (replaceTailRecord) {
-			pendingLogMutations.push({ kind: 'replaceTail', record: replaceTailRecord });
+		} else {
+			for (const record of replaceRecords) {
+				pendingLogMutations.push({ kind: 'replaceRecord', record });
+			}
 		}
 
 		if (pendingLogRecords.length > 0) {
@@ -622,26 +804,6 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 		if (pendingLogMutations.length > 0) {
 			schedulePendingLogFlush();
 		}
-	};
-
-	const pendingLogTailId = (): number | undefined => {
-		let tailId:number | undefined = logRecords[logRecords.length - 1]?.id;
-		for (const mutation of pendingLogMutations) {
-			if (mutation.kind === 'clear') {
-				tailId = undefined;
-				continue;
-			}
-			if (mutation.kind === 'replaceTail') {
-				if (tailId !== undefined) {
-					tailId = mutation.record.id;
-				}
-				continue;
-			}
-			if (mutation.records.length > 0) {
-				tailId = mutation.records[mutation.records.length - 1]?.id;
-			}
-		}
-		return tailId;
 	};
 
 	const setLogUiUpdateHz = (hz: number): void => {
@@ -1051,7 +1213,8 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 		canRedo = history.can_redo;
 	};
 
-	const applySnapshotToState = (snapshot: UiSnapshot, successStatus: string): void => {
+	const applySnapshotToState = (snapshot: UiSnapshot): void => {
+		const retainedUiLogRecords = logRecords.filter((record) => uiGeneratedLogIds.has(record.id));
 		graph.loadSnapshot(snapshot);
 		hasLoadedSnapshot = true;
 		invalidateWarningCaches();
@@ -1060,8 +1223,9 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 		applyHistoryState(snapshot.history);
 		resetPendingLogMutations();
 		logMaxEntries = snapshot.logger.max_entries;
-		logRecords = [...snapshot.logger.records];
-		status = successStatus;
+		logRecords = [...snapshot.logger.records, ...retainedUiLogRecords].sort(compareLogRecords);
+		trimLogRecords();
+		syncConnectionStatus();
 	};
 
 	const requestSnapshot = (): Promise<UiSnapshot> => {
@@ -1075,7 +1239,7 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 		return snapshotRequestInFlight;
 	};
 
-	const resyncSnapshot = async (successStatus: string): Promise<void> => {
+	const resyncSnapshot = async (successMessage?: string): Promise<void> => {
 		if (resyncInFlight) {
 			resyncQueued = true;
 			return;
@@ -1089,7 +1253,10 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 				(typeof performance !== 'undefined' ? performance.now() : Date.now()) -
 				fetchStartedAt;
 			const applyStartedAt = typeof performance !== 'undefined' ? performance.now() : Date.now();
-			applySnapshotToState(snapshot, successStatus);
+			applySnapshotToState(snapshot);
+			if (successMessage) {
+				appendUiLogRecord('info', UI_LOG_TAG_TRANSPORT, successMessage);
+			}
 			const applyElapsedMs =
 				(typeof performance !== 'undefined' ? performance.now() : Date.now()) -
 				applyStartedAt;
@@ -1100,12 +1267,12 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 			);
 		} catch (error) {
 			const message = error instanceof Error ? error.message : 'unknown resync error';
-			status = `Resync failed: ${message}`;
+			appendUiLogRecord('error', UI_LOG_TAG_TRANSPORT, `Resync failed: ${message}`);
 		} finally {
 			resyncInFlight = false;
 			if (resyncQueued) {
 				resyncQueued = false;
-				void resyncSnapshot(successStatus);
+				void resyncSnapshot(successMessage);
 			}
 		}
 	};
@@ -1115,7 +1282,7 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 		const pendingLogRecords: UiLogRecord[] = [];
 		let shouldClearLogs = false;
 		let nextLogMaxEntries: number | null = null;
-		let replaceTailRecord: UiLogRecord | null = null;
+		const replaceLogRecords = new Map<number, UiLogRecord>();
 
 		for (const event of batch.events) {
 			if (event.kind.kind !== 'custom') {
@@ -1134,22 +1301,25 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 					continue;
 				}
 
-				if (!shouldClearLogs && pendingLogRecords.length === 0) {
-					const currentTailId = replaceTailRecord?.id ?? pendingLogTailId();
-					if (currentTailId !== undefined && currentTailId === record.id) {
-						replaceTailRecord = record;
-						continue;
-					}
+				if (replaceLogRecords.has(record.id)) {
+					replaceLogRecords.set(record.id, record);
+					continue;
+				}
+
+				if (!shouldClearLogs && findLogRecordIndexById(record.id) >= 0) {
+					replaceLogRecords.set(record.id, record);
+					continue;
 				}
 
 				pendingLogRecords.push(record);
+				emitToastForLogRecord(record);
 				continue;
 			}
 
 			if (event.kind.topic === '__logger.cleared') {
 				shouldClearLogs = true;
 				pendingLogRecords.length = 0;
-				replaceTailRecord = null;
+				replaceLogRecords.clear();
 				continue;
 			}
 
@@ -1168,8 +1338,12 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 			trimLogRecords();
 		}
 
-		if (shouldClearLogs || replaceTailRecord !== null || pendingLogRecords.length > 0) {
-			queuePendingLogMutations(shouldClearLogs, replaceTailRecord, pendingLogRecords);
+		if (shouldClearLogs || replaceLogRecords.size > 0 || pendingLogRecords.length > 0) {
+			queuePendingLogMutations(
+				shouldClearLogs,
+				[...replaceLogRecords.values()],
+				pendingLogRecords
+			);
 		}
 
 		if (graphEvents.length > 0) {
@@ -1198,12 +1372,16 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 			const ack = await client.sendIntent(intent);
 			applyHistoryState(ack.history);
 			if (!ack.success) {
-				status = `Error: ${ack.error_message ?? ack.error_code ?? 'unknown error'}`;
+				appendUiLogRecord(
+					'error',
+					UI_LOG_TAG_INTENT,
+					`Error: ${ack.error_message ?? ack.error_code ?? 'unknown error'}`
+				);
 				return;
 			}
 
 			if (ack.status === 'staged') {
-				status = 'Intent accepted and staged.';
+				appendUiLogRecord('info', UI_LOG_TAG_INTENT, 'Intent accepted and staged.');
 				return;
 			}
 
@@ -1225,25 +1403,12 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 				}
 			}
 
-			if (intent.kind !== 'setParam') {
-				if (intent.kind === 'undo' || intent.kind === 'redo') {
-					const label = intent.kind === 'undo' ? 'Undo' : 'Redo';
-					status = ack.earliest_event_time
-						? `${label} applied at ${formatEventTime(ack.earliest_event_time)}`
-						: `Nothing to ${intent.kind}.`;
-				} else {
-					status = ack.earliest_event_time
-						? `Applied at ${formatEventTime(ack.earliest_event_time)}`
-						: 'Applied.';
-				}
-			}
-
 			if (graph.state.requiresResync) {
 				await resyncSnapshot('Snapshot resynced.');
 			}
 		} catch (error) {
 			const message = error instanceof Error ? error.message : 'unknown error';
-			status = `Error: ${message}`;
+			appendUiLogRecord('error', UI_LOG_TAG_INTENT, `Error: ${message}`);
 		}
 	};
 
@@ -1270,7 +1435,11 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 				}
 			}
 			if (firstFailure) {
-				status = `Error: ${firstFailure.error_message ?? firstFailure.error_code ?? 'unknown error'}`;
+				appendUiLogRecord(
+					'error',
+					UI_LOG_TAG_INTENT,
+					`Error: ${firstFailure.error_message ?? firstFailure.error_code ?? 'unknown error'}`
+				);
 				return;
 			}
 			if (graph.state.requiresResync) {
@@ -1278,7 +1447,7 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 			}
 		} catch (error) {
 			const message = error instanceof Error ? error.message : 'unknown error';
-			status = `Error: ${message}`;
+			appendUiLogRecord('error', UI_LOG_TAG_INTENT, `Error: ${message}`);
 		}
 	};
 
@@ -1509,7 +1678,7 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 					return;
 				}
 				const applyStartedAt = typeof performance !== 'undefined' ? performance.now() : Date.now();
-				applySnapshotToState(snapshot, 'Connected.');
+				applySnapshotToState(snapshot);
 				const applyElapsedMs =
 					(typeof performance !== 'undefined' ? performance.now() : Date.now()) -
 					applyStartedAt;
@@ -1527,7 +1696,13 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 					return;
 				}
 				const message = error instanceof Error ? error.message : 'unknown connection error';
-				status = `Connection failed: ${message} (retrying...)`;
+				connectionState = 'disconnected';
+				syncConnectionStatus();
+				appendUiLogRecord(
+					'error',
+					UI_LOG_TAG_TRANSPORT,
+					`Connection failed: ${message} (retrying...)`
+				);
 				scheduleRetry();
 			} finally {
 				bootstrapInFlight = false;
@@ -1561,9 +1736,14 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 			resetPendingLogMutations();
 			selectedNodeIds = [];
 			nodeClipboard = [];
+			uiGeneratedLogIds.clear();
+			clearToasts();
 			logRecords = [];
 			logMaxEntries = 0;
 			hasLoadedSnapshot = false;
+			nextUiLogId = -1;
+			connectionState = 'connecting';
+			syncConnectionStatus();
 			mountedCleanup = null;
 		};
 
@@ -1592,8 +1772,11 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 		get selectedNodeId(): NodeId | null {
 			return selectedNodeIds[0] ?? null;
 		},
-		get status(): string {
+		get status(): WorkbenchConnectionStatus {
 			return status;
+		},
+		get toasts(): WorkbenchToast[] {
+			return toasts;
 		},
 		get historyBusy(): boolean {
 			return historyBusy;
@@ -1617,6 +1800,7 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 		clearSelection,
 		sendIntent,
 		setLogUiUpdateHz,
+		dismissToast,
 		undo,
 		redo,
 		mount

@@ -1,6 +1,16 @@
 import type { GraphState } from '$lib/golden_ui/store/graph.svelte';
-import type { NodeId, ParamValue, UiNodeDto, UiParamDto, UiParamValueProjection } from '$lib/golden_ui/types';
-import { cssValueFromParamValue, formatCssValue, type CssValueData } from '$lib/golden_ui/css-value';
+import type {
+	NodeId,
+	ParamValue,
+	UiNodeDto,
+	UiParamDto,
+	UiParamValueProjection
+} from '$lib/golden_ui/types';
+import {
+	cssValueFromParamValue,
+	formatCssValue,
+	type CssValueData
+} from '$lib/golden_ui/css-value';
 
 export type DashboardLayoutKind =
 	| 'free'
@@ -10,8 +20,10 @@ export type DashboardLayoutKind =
 	| 'accordion'
 	| 'tabs';
 
+export type DashboardLabelPlacement = 'left' | 'right' | 'top' | 'bottom' | 'inside';
+
 export interface DashboardPlacement {
-	titleVisible: boolean;
+	labelPlacement: DashboardLabelPlacement | null;
 	position: { x: number; y: number };
 	anchor: DashboardAnchor;
 	size: { width: CssValueData; height: CssValueData };
@@ -50,14 +62,23 @@ export const getLiveNode = (graph: GraphState | null, node: UiNodeDto): UiNodeDt
 	return graph?.nodesById.get(node.node_id) ?? node;
 };
 
-export const getDirectChildren = (graph: GraphState | null, node: UiNodeDto | null): UiNodeDto[] => {
+export const getDirectChildren = (
+	graph: GraphState | null,
+	node: UiNodeDto | null
+): UiNodeDto[] => {
 	if (!graph || !node) {
 		return [];
 	}
-	return node.children.map((childId) => graph.nodesById.get(childId)).filter((child): child is UiNodeDto => child !== undefined);
+	return node.children
+		.map((childId) => graph.nodesById.get(childId))
+		.filter((child): child is UiNodeDto => child !== undefined);
 };
 
-export const getDirectItemChildren = (graph: GraphState | null, node: UiNodeDto | null, nodeType?: string): UiNodeDto[] => {
+export const getDirectItemChildren = (
+	graph: GraphState | null,
+	node: UiNodeDto | null,
+	nodeType?: string
+): UiNodeDto[] => {
 	return getDirectChildren(graph, node).filter((child) => {
 		if (child.user_role !== 'itemRoot') {
 			return false;
@@ -69,15 +90,50 @@ export const getDirectItemChildren = (graph: GraphState | null, node: UiNodeDto 
 	});
 };
 
-export const getDirectParamNode = (graph: GraphState | null, node: UiNodeDto | null, declId: string): UiNodeDto | null => {
-	return (
-		getDirectChildren(graph, node).find(
-			(child) => child.data.kind === 'parameter' && child.decl_id === declId
-		) ?? null
-	);
+export const getDirectParamNode = (
+	graph: GraphState | null,
+	node: UiNodeDto | null,
+	declId: string
+): UiNodeDto | null => {
+	if (!graph || !node) {
+		return null;
+	}
+
+	const exactDeclId = declId.trim();
+	if (exactDeclId.length === 0) {
+		return null;
+	}
+
+	const stack = [...node.children];
+	let basenameMatch: UiNodeDto | null = null;
+	while (stack.length > 0) {
+		const childId = stack.shift();
+		if (childId === undefined) {
+			continue;
+		}
+		const child = graph.nodesById.get(childId);
+		if (!child) {
+			continue;
+		}
+		if (child.data.kind === 'parameter') {
+			if (child.decl_id === exactDeclId) {
+				return child;
+			}
+			if (basenameMatch === null && child.decl_id.split('/').at(-1) === exactDeclId) {
+				basenameMatch = child;
+			}
+		}
+		stack.unshift(...child.children);
+	}
+
+	return basenameMatch;
 };
 
-export const getDirectParam = (graph: GraphState | null, node: UiNodeDto | null, declId: string): UiParamDto | null => {
+export const getDirectParam = (
+	graph: GraphState | null,
+	node: UiNodeDto | null,
+	declId: string
+): UiParamDto | null => {
 	const paramNode = getDirectParamNode(graph, node, declId);
 	if (!paramNode || paramNode.data.kind !== 'parameter') {
 		return null;
@@ -118,15 +174,29 @@ const asNumber = (value: ParamValue | undefined, fallback: number): number => {
 	return fallback;
 };
 
-const asBool = (value: ParamValue | undefined, fallback: boolean): boolean => {
-	if (!value || value.kind !== 'bool') {
-		return fallback;
+const asDashboardLabelPlacement = (
+	value: ParamValue | undefined,
+	fallback: DashboardLabelPlacement
+): DashboardLabelPlacement => {
+	if (
+		value?.kind === 'enum' &&
+		(value.value === 'left' ||
+			value.value === 'right' ||
+			value.value === 'top' ||
+			value.value === 'bottom' ||
+			value.value === 'inside')
+	) {
+		return value.value;
 	}
-	return value.value;
+	return fallback;
 };
 
-export const getDashboardPlacement = (graph: GraphState | null, node: UiNodeDto | null): DashboardPlacement => {
+export const getDashboardPlacement = (
+	graph: GraphState | null,
+	node: UiNodeDto | null
+): DashboardPlacement => {
 	const anchorParam = getDirectParam(graph, node, 'anchor');
+	const labelPlacementNode = getDirectParamNode(graph, node, 'label_placement');
 	const anchor =
 		anchorParam?.value.kind === 'enum' &&
 		[
@@ -144,17 +214,29 @@ export const getDashboardPlacement = (graph: GraphState | null, node: UiNodeDto 
 			: 'top-left';
 	const positionParam = getDirectParam(graph, node, 'position');
 	return {
-		titleVisible: asBool(getDirectParam(graph, node, 'title_visible')?.value, true),
+		labelPlacement:
+			labelPlacementNode?.meta.enabled && labelPlacementNode.data.kind === 'parameter'
+				? asDashboardLabelPlacement(labelPlacementNode.data.param.value, 'top')
+				: null,
 		position: {
 			x: positionParam?.value.kind === 'vec2' ? Number(positionParam.value.value[0] ?? 0) : 0,
 			y: positionParam?.value.kind === 'vec2' ? Number(positionParam.value.value[1] ?? 0) : 0
 		},
 		anchor,
 		size: {
-			width: cssValueFromParamValue(getDirectParam(graph, node, 'width')?.value, { value: 12, unit: 'rem' }),
-			height: cssValueFromParamValue(getDirectParam(graph, node, 'height')?.value, { value: 4, unit: 'rem' })
+			width: cssValueFromParamValue(getDirectParam(graph, node, 'width')?.value, {
+				value: 12,
+				unit: 'rem'
+			}),
+			height: cssValueFromParamValue(getDirectParam(graph, node, 'height')?.value, {
+				value: 4,
+				unit: 'rem'
+			})
 		},
-		columnSpan: Math.max(1, Math.round(asNumber(getDirectParam(graph, node, 'column_span')?.value, 1))),
+		columnSpan: Math.max(
+			1,
+			Math.round(asNumber(getDirectParam(graph, node, 'column_span')?.value, 1))
+		),
 		rowSpan: Math.max(1, Math.round(asNumber(getDirectParam(graph, node, 'row_span')?.value, 1)))
 	};
 };
@@ -203,15 +285,24 @@ export const getDashboardSnapGrid = (
 ): DashboardSnapGrid => {
 	const paramNode = getDirectParamNode(graph, node, 'snap_grid');
 	const step =
-		paramNode?.data.kind === 'parameter' ? asNumber(paramNode.data.param.value, fallback) : fallback;
+		paramNode?.data.kind === 'parameter'
+			? asNumber(paramNode.data.param.value, fallback)
+			: fallback;
 	return {
 		enabled: (paramNode?.meta.enabled ?? false) && step > 0,
 		step: Math.max(0, step)
 	};
 };
 
-export const getGridColumns = (graph: GraphState | null, node: UiNodeDto | null, fallback = 12): number => {
-	return Math.max(1, Math.round(asNumber(getDirectParam(graph, node, 'grid_columns')?.value, fallback)));
+export const getGridColumns = (
+	graph: GraphState | null,
+	node: UiNodeDto | null,
+	fallback = 12
+): number => {
+	return Math.max(
+		1,
+		Math.round(asNumber(getDirectParam(graph, node, 'grid_columns')?.value, fallback))
+	);
 };
 
 export const formatParamValue = (value: ParamValue | null | undefined): string => {
@@ -256,7 +347,10 @@ export const findNodeByUuid = (graph: GraphState | null, uuid: string): UiNodeDt
 	return null;
 };
 
-export const resolveReferenceTarget = (graph: GraphState | null, value: ParamValue | null | undefined): UiNodeDto | null => {
+export const resolveReferenceTarget = (
+	graph: GraphState | null,
+	value: ParamValue | null | undefined
+): UiNodeDto | null => {
 	if (!graph || !value || value.kind !== 'reference') {
 		return null;
 	}
@@ -295,7 +389,11 @@ export const nodePathFromRoot = (graph: GraphState | null, targetNodeId: NodeId)
 	return [];
 };
 
-export const createReferenceValue = (graph: GraphState | null, targetNode: UiNodeDto, projection?: UiParamValueProjection): ParamValue => {
+export const createReferenceValue = (
+	graph: GraphState | null,
+	targetNode: UiNodeDto,
+	projection?: UiParamValueProjection
+): ParamValue => {
 	return {
 		kind: 'reference',
 		uuid: targetNode.uuid,
@@ -305,4 +403,3 @@ export const createReferenceValue = (graph: GraphState | null, targetNode: UiNod
 		relative_path_from_root: nodePathFromRoot(graph, targetNode.node_id)
 	};
 };
-

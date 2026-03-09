@@ -8,6 +8,7 @@
 	import { propertiesInspectorClass } from '$lib/golden_ui/components/panels/inspector/inspector.svelte';
 	import MultiNumberEditor from '$lib/golden_ui/components/panels/inspector/parameters/MultiNumberEditor.svelte';
 	import NumberEditor from '$lib/golden_ui/components/panels/inspector/parameters/NumberEditor.svelte';
+	import ReferenceEditor from '$lib/golden_ui/components/panels/inspector/parameters/ReferenceEditor.svelte';
 	import TextInputEditor from '$lib/golden_ui/components/panels/inspector/parameters/TextInputEditor.svelte';
 	import TriggerEditor from '$lib/golden_ui/components/panels/inspector/parameters/TriggerEditor.svelte';
 	import { getDirectParam } from './dashboard-model';
@@ -15,6 +16,7 @@
 	type NumberEditorOptions = {
 		show_value_field?: boolean;
 		max_decimals?: number;
+		inside_label?: string;
 	};
 
 	type VectorEditorOptions = {
@@ -29,15 +31,25 @@
 		show_rgba_fields?: boolean;
 	};
 
-	let { targetNode, widgetNode = null } = $props<{
+	let {
+		targetNode,
+		widgetNode = null,
+		insideLabel = null
+	} = $props<{
 		targetNode: UiNodeDto;
 		widgetNode?: UiNodeDto | null;
+		insideLabel?: string | null;
 	}>();
 
 	let session = $derived(appState.session);
 	let graph = $derived(session?.graph.state ?? null);
-	let liveWidgetNode = $derived(widgetNode ? (graph?.nodesById.get(widgetNode.node_id) ?? widgetNode) : null);
-	let paramKind = $derived(targetNode.data.kind === 'parameter' ? targetNode.data.param.value.kind : null);
+	let liveWidgetNode = $derived(
+		widgetNode ? (graph?.nodesById.get(widgetNode.node_id) ?? widgetNode) : null
+	);
+	let liveTargetNode = $derived(graph?.nodesById.get(targetNode.node_id) ?? targetNode);
+	let paramKind = $derived(
+		liveTargetNode.data.kind === 'parameter' ? liveTargetNode.data.param.value.kind : null
+	);
 
 	const clampMaxDecimals = (value: number | undefined, fallback: number): number | undefined => {
 		if (value === undefined || !Number.isFinite(value)) {
@@ -62,34 +74,46 @@
 		return fallback;
 	};
 
-	const getEnumWidgetParam = (declId: string, fallback: 'inline' | 'column'): 'inline' | 'column' => {
+	const getEnumWidgetParam = (
+		declId: string,
+		fallback: 'inline' | 'column'
+	): 'inline' | 'column' => {
 		const value = liveWidgetNode ? getDirectParam(graph, liveWidgetNode, declId)?.value : null;
 		const rawValue = value?.kind === 'enum' || value?.kind === 'str' ? value.value : null;
 		return rawValue === 'column' || rawValue === 'inline' ? rawValue : fallback;
 	};
 
-	let numberPresentation = $derived.by((): NumberEditorOptions => ({
-		show_value_field: getBoolWidgetParam('number_show_value_field', true),
-		max_decimals: clampMaxDecimals(getIntWidgetParam('number_max_decimals', 3), 3)
-	}));
+	let numberPresentation = $derived.by(
+		(): NumberEditorOptions => ({
+			show_value_field: getBoolWidgetParam('number_show_value_field', true),
+			max_decimals: clampMaxDecimals(getIntWidgetParam('number_max_decimals', 3), 3)
+		})
+	);
 
-	let vectorPresentation = $derived.by((): VectorEditorOptions => ({
-		layout: getEnumWidgetParam('vector_layout', 'column'),
-		show_value_fields: getBoolWidgetParam('vector_show_value_fields', true),
-		max_decimals: clampMaxDecimals(getIntWidgetParam('vector_max_decimals', 2), 2)
-	}));
+	let vectorPresentation = $derived.by(
+		(): VectorEditorOptions => ({
+			layout: getEnumWidgetParam('vector_layout', 'column'),
+			show_value_fields: getBoolWidgetParam('vector_show_value_fields', true),
+			max_decimals: clampMaxDecimals(getIntWidgetParam('vector_max_decimals', 2), 2)
+		})
+	);
 
-	let colorPresentation = $derived.by((): ColorEditorOptions => ({
-		force_expanded: getBoolWidgetParam('color_force_expanded', false),
-		show_hex: getBoolWidgetParam('color_show_hex', true),
-		show_rgba_fields: getBoolWidgetParam('color_show_rgba_fields', true)
-	}));
+	let colorPresentation = $derived.by(
+		(): ColorEditorOptions => ({
+			force_expanded: getBoolWidgetParam('color_force_expanded', false),
+			show_hex: getBoolWidgetParam('color_show_hex', true),
+			show_rgba_fields: getBoolWidgetParam('color_show_rgba_fields', true)
+		})
+	);
+	let insideLabelText = $derived(typeof insideLabel === 'string' ? insideLabel.trim() : '');
+	let showsInsideLabel = $derived(insideLabelText.length > 0);
+	let editorInsideLabel = $derived(showsInsideLabel ? insideLabelText : null);
 
 	let editorEntry = $derived.by(() => {
-		if (targetNode.data.kind !== 'parameter') {
+		if (liveTargetNode.data.kind !== 'parameter') {
 			return null;
 		}
-		return propertiesInspectorClass[targetNode.data.param.value.kind] ?? null;
+		return propertiesInspectorClass[liveTargetNode.data.param.value.kind] ?? null;
 	});
 
 	let EditorComponent = $derived(editorEntry?.component ?? null);
@@ -100,42 +124,60 @@
 		<div class="dashboard-node-widget-mode-empty">Editor mode only applies to parameters.</div>
 	{:else if paramKind === 'int' || paramKind === 'float'}
 		<div class="dashboard-node-widget-parameter-editor-body widget-layout">
-			<NumberEditor node={targetNode} layoutMode="widget" presentation={numberPresentation} />
+			<NumberEditor
+				node={liveTargetNode}
+				layoutMode="widget"
+				presentation={{
+					...numberPresentation,
+					inside_label: editorInsideLabel ?? undefined
+				}} />
 		</div>
 	{:else if paramKind === 'vec2' || paramKind === 'vec3'}
 		<div class="dashboard-node-widget-parameter-editor-body widget-layout">
-			<MultiNumberEditor node={targetNode} layoutMode="widget" presentation={vectorPresentation} />
+			<MultiNumberEditor
+				node={liveTargetNode}
+				layoutMode="widget"
+				presentation={vectorPresentation} />
 		</div>
 	{:else if paramKind === 'color'}
 		<div class="dashboard-node-widget-parameter-editor-body widget-layout color-layout">
-			<ColorPickerEditor node={targetNode} layoutMode="widget" presentation={colorPresentation} />
+			<ColorPickerEditor
+				node={liveTargetNode}
+				layoutMode="widget"
+				presentation={colorPresentation} />
 		</div>
 	{:else if paramKind === 'bool'}
 		<div class="dashboard-node-widget-parameter-editor-body widget-layout checkbox-layout">
-			<CheckboxEditor node={targetNode} layoutMode="widget" />
+			<CheckboxEditor node={liveTargetNode} layoutMode="widget" insideLabel={editorInsideLabel} />
 		</div>
 	{:else if paramKind === 'trigger'}
 		<div class="dashboard-node-widget-parameter-editor-body widget-layout">
-			<TriggerEditor node={targetNode} layoutMode="widget" />
+			<TriggerEditor node={liveTargetNode} layoutMode="widget" insideLabel={editorInsideLabel} />
 		</div>
 	{:else if paramKind === 'str'}
 		<div class="dashboard-node-widget-parameter-editor-body widget-layout">
-			<TextInputEditor node={targetNode} layoutMode="widget" />
+			<TextInputEditor node={liveTargetNode} layoutMode="widget" insideLabel={editorInsideLabel} />
 		</div>
 	{:else if paramKind === 'enum'}
 		<div class="dashboard-node-widget-parameter-editor-body widget-layout">
-			<DropdownEditor node={targetNode} layoutMode="widget" />
+			<DropdownEditor node={liveTargetNode} layoutMode="widget" insideLabel={editorInsideLabel} />
+		</div>
+	{:else if paramKind === 'reference'}
+		<div class="dashboard-node-widget-parameter-editor-body widget-layout">
+			<ReferenceEditor node={liveTargetNode} layoutMode="widget" insideLabel={editorInsideLabel} />
 		</div>
 	{:else if paramKind === 'css_value'}
 		<div class="dashboard-node-widget-parameter-editor-body widget-layout">
-			<CssValueEditor node={targetNode} layoutMode="widget" />
+			<CssValueEditor node={liveTargetNode} layoutMode="widget" />
 		</div>
 	{:else if EditorComponent}
 		<div class="dashboard-node-widget-parameter-editor-body widget-layout">
-			<EditorComponent node={targetNode} />
+			<EditorComponent node={liveTargetNode} />
 		</div>
 	{:else}
-		<div class="dashboard-node-widget-mode-empty">No editor is registered for this parameter type.</div>
+		<div class="dashboard-node-widget-mode-empty">
+			No editor is registered for this parameter type.
+		</div>
 	{/if}
 </div>
 

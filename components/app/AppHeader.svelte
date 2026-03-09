@@ -148,8 +148,6 @@
 			<button type="button" class="close-app" aria-label="Close app" onclick={() => closeWindow()}
 				>🔴</button>
 		</div>
-	{:else if session.status}
-		<p class="status">{session.status}</p>
 	{/if}
 </div>
 
@@ -204,16 +202,8 @@
 		touch-action: none;
 	}
 
-	.status,
 	.app-buttons {
 		width: 20%;
 		text-align: right;
-	}
-
-	.status {
-		white-space: nowrap;
-		max-width: 10rem;
-		font-size: 0.7rem;
-		color: var(--gc-color-text);
 	}
 </style>

@@ -18,10 +18,24 @@ export type DashboardDragPayload =
 			source: 'inspector';
 	  };
 
+let activeDashboardDragPayload: DashboardDragPayload | null = null;
+
+const clearActiveDashboardDragPayload = (): void => {
+	activeDashboardDragPayload = null;
+};
+
 const writePayload = (event: DragEvent, payload: DashboardDragPayload): void => {
 	const transfer = event.dataTransfer;
 	if (!transfer) {
 		return;
+	}
+
+	activeDashboardDragPayload = payload;
+	if (typeof window !== 'undefined') {
+		window.addEventListener('dragend', clearActiveDashboardDragPayload, {
+			once: true,
+			capture: true
+		});
 	}
 
 	transfer.effectAllowed = 'copy';
@@ -56,7 +70,7 @@ export const beginDashboardParameterDrag = (event: DragEvent, node: UiNodeDto): 
 export const readDashboardDragPayload = (event: DragEvent): DashboardDragPayload | null => {
 	const raw = event.dataTransfer?.getData(DASHBOARD_DRAG_MIME) ?? '';
 	if (raw.length === 0) {
-		return null;
+		return activeDashboardDragPayload;
 	}
 
 	try {
@@ -88,6 +102,6 @@ export const readDashboardDragPayload = (event: DragEvent): DashboardDragPayload
 			source: 'inspector'
 		};
 	} catch {
-		return null;
+		return activeDashboardDragPayload;
 	}
 };

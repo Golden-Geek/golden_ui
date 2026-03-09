@@ -4,9 +4,10 @@
 	import { sendSetParamIntent } from '$lib/golden_ui/store/ui-intents';
 	import type { UiNodeDto } from '$lib/golden_ui/types';
 
-	let { node, layoutMode = 'default' } = $props<{
+	let { node, layoutMode = 'default', insideLabel = null } = $props<{
 		node: UiNodeDto;
 		layoutMode?: 'default' | 'widget';
+		insideLabel?: string | null;
 	}>();
 
 	let session = $derived(appState.session);
@@ -17,6 +18,8 @@
 
 	let hitTimeout = $state<ReturnType<typeof setTimeout> | null>(null);
 	let isHit = $state(false);
+	let inlineLabel = $derived(typeof insideLabel === 'string' ? insideLabel.trim() : '');
+	let showsInlineLabel = $derived(layoutMode === 'widget' && inlineLabel.length > 0);
 
 	const hit = (): void => {
 		isHit = true;
@@ -42,6 +45,7 @@
 	type="button"
 	class="trigger"
 	class:widget-layout={layoutMode === 'widget'}
+	class:with-inline-label={showsInlineLabel}
 	class:active={isHit}
 	disabled={!enabled}
 	class:readonly={readOnly}
@@ -53,6 +57,9 @@
 		}
 	}}>
 	<img src={parameterTriggerIcon} alt="Trigger" />
+	{#if showsInlineLabel}
+		<span class="trigger-label">{inlineLabel}</span>
+	{/if}
 </button>
 
 <style>
@@ -87,6 +94,11 @@
 		min-block-size: 0;
 	}
 
+	.trigger.widget-layout.with-inline-label {
+		gap: 0.55rem;
+		padding-inline: 0.8rem;
+	}
+
 	.trigger:disabled {
 		opacity: 0.5;
 		cursor: default;
@@ -112,6 +124,13 @@
 	.trigger.widget-layout img {
 		width: 1.2rem;
 		height: 1.2rem;
+	}
+
+	.trigger-label {
+		font-size: 0.78rem;
+		font-weight: 600;
+		line-height: 1;
+		white-space: nowrap;
 	}
 
 	.trigger.trigger.readonly img {
