@@ -529,8 +529,29 @@ select {
     }
 
     .dv-tabs-and-actions-container {
+        /* Stretch Dockview's built-in group drag handle behind the whole header bar. */
+        position: relative;
+        isolation: isolate;
         align-items: center;
-        ;
+    }
+
+    .dv-tabs-and-actions-container>.dv-void-container {
+        position: absolute;
+        inset: 0;
+        z-index: 0;
+    }
+
+    .dv-tabs-and-actions-container>:not(.dv-void-container) {
+        position: relative;
+        z-index: 1;
+    }
+
+    .dv-tabs-and-actions-container:not(.dv-groupview-header-vertical)>.dv-right-actions-container {
+        margin-inline-start: auto;
+    }
+
+    .dv-tabs-and-actions-container.dv-groupview-header-vertical>.dv-right-actions-container {
+        margin-block-start: auto;
     }
 
     .dv-tabs-and-actions-container .dv-tabs-container>.dv-tab {
