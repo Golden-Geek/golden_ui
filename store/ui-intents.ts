@@ -223,6 +223,7 @@ export const sendReloadScript = async (node: NodeId): Promise<boolean> => {
 export const createUiEditSession = (label?: string, prefix = 'ui-edit'): UiEditSession => {
 	const clientEditId = nextIntentId(prefix);
 	let active = false;
+	let activationEpoch: number | null = null;
 
 	return {
 		get active(): boolean {
@@ -232,6 +233,10 @@ export const createUiEditSession = (label?: string, prefix = 'ui-edit'): UiEditS
 			if (active) {
 				return;
 			}
+			const session = appState.session;
+			if (!session || session.hasActiveEditSession) {
+				return;
+			}
 			const ok = await sendUiIntent({
 				kind: 'beginEdit',
 				client_edit_id: clientEditId,
@@ -239,13 +244,25 @@ export const createUiEditSession = (label?: string, prefix = 'ui-edit'): UiEditS
 			});
 			if (ok) {
 				active = true;
+				activationEpoch = session.editSessionEpoch;
 			}
 		},
 		async end(): Promise<void> {
 			if (!active) {
 				return;
 			}
+			const session = appState.session;
+			if (
+				!session?.hasActiveEditSession ||
+				activationEpoch === null ||
+				session.editSessionEpoch !== activationEpoch
+			) {
+				active = false;
+				activationEpoch = null;
+				return;
+			}
 			active = false;
+			activationEpoch = null;
 			await sendUiIntent({
 				kind: 'endEdit',
 				client_edit_id: clientEditId

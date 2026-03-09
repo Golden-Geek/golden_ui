@@ -350,6 +350,12 @@ interface ActiveCurveDrag {
 		| { kind: 'curve'; key_id: NodeId }
 		| { kind: 'all' };
 
+	interface CanvasPrimaryDownSample {
+		time_stamp: number;
+		screen_x: number;
+		screen_y: number;
+	}
+
 	type SelectionMode = 'replace' | 'add' | 'toggle';
 
 	interface ActiveBoxSelection {
@@ -446,6 +452,8 @@ interface ActiveCurveDrag {
 	const KEY_HIT_RADIUS_REM = 0.7;
 	const CURVE_HIT_RADIUS_REM = 0.7;
 	const BEZIER_HANDLE_HIT_RADIUS_REM = 0.64;
+	const CANVAS_DOUBLE_CLICK_WINDOW_MS = 320;
+	const CANVAS_DOUBLE_CLICK_RADIUS_PX = 7;
 	const DEFAULT_EASING_KIND_ORDER: CurveEasingKind[] = [
 		'linear',
 		'bezier',
@@ -494,13 +502,13 @@ interface ActiveCurveDrag {
 	let curve_context_menu_open = $state(false);
 	let curve_context_menu_anchor = $state<ContextMenuAnchor | null>(null);
 	let curve_context_menu_target = $state<CurveContextMenuTarget | null>(null);
+	let last_canvas_primary_down = $state<CanvasPrimaryDownSample | null>(null);
 
 	let interaction_transform = $state<CanvasTransform | null>(null);
 	let queued_drag_targets: Map<NodeId, DragPreview> | null = null;
 	let queued_bezier_handle_targets: Map<NodeId, BezierEasingPreview> | null = null;
 	let drag_commit_raf_id = 0;
 	let pending_param_write_promises: Set<Promise<void>> = new Set();
-	const float_bits_view = new DataView(new ArrayBuffer(8));
 	let active_curve_draw_points = $derived.by(() =>
 		active_curve_draw?.points.map((point) => ({
 			position: point.position,
@@ -583,6 +591,23 @@ interface ActiveCurveDrag {
 		value.trim().toLowerCase() === 'numphases' ? 'numPhases' : 'frequency';
 	const shortcut_modifier_active = (event: MouseEvent | PointerEvent): boolean =>
 		event.ctrlKey || event.metaKey;
+	const matches_canvas_double_activation = (
+		previous: CanvasPrimaryDownSample | null,
+		event: PointerEvent,
+		screen_x: number,
+		screen_y: number
+	): boolean => {
+		if (!previous) {
+			return false;
+		}
+		if (event.timeStamp - previous.time_stamp > CANVAS_DOUBLE_CLICK_WINDOW_MS) {
+			return false;
+		}
+		return (
+			Math.hypot(screen_x - previous.screen_x, screen_y - previous.screen_y) <=
+			CANVAS_DOUBLE_CLICK_RADIUS_PX
+		);
+	};
 	const easing_kind_options_for_key = (key: ParsedCurveKey | undefined): EasingKindOption[] => {
 		const kind_param = key?.easing?.params[DECL_KIND];
 		const enum_options = kind_param?.constraints.enum_options ?? [];
@@ -692,12 +717,6 @@ interface ActiveCurveDrag {
 		return stable_mix_u32(base);
 	};
 	const hash_to_unit = (hash: number): number => (hash >>> 0) / 0xffffffff;
-	const float_position_seed = (value: number): number => {
-		float_bits_view.setFloat64(0, value, true);
-		const low = float_bits_view.getUint32(0, true);
-		const high = float_bits_view.getUint32(4, true);
-		return stable_mix_u32(low ^ ((high << 1) | (high >>> 31)));
-	};
 	const value_noise_1d = (position: number, seed: number): number => {
 		const left = Math.floor(position);
 		const right = left + 1;
@@ -871,9 +890,7 @@ interface ActiveCurveDrag {
 					fade_in: Math.max(0, param_number_value(params[DECL_FADE_IN]?.value, 0)),
 					fade_out: Math.max(0, param_number_value(params[DECL_FADE_OUT]?.value, 0)),
 					phase: param_number_value(params[DECL_PHASE]?.value, 0),
-					seed: stable_mix_u32(
-						float_position_seed(start.position) ^ ((float_position_seed(end.position) << 17) >>> 0)
-					)
+					seed: 0
 				};
 			} else if (easing_kind === 'random') {
 				easing = {
@@ -1007,8 +1024,18 @@ interface ActiveCurveDrag {
 			return sample_bezier(position, easing.x, easing.y, easing.start_position, easing.inv_span);
 		}
 		if (easing.kind === 'steps') {
-			const steps = Math.max(1, easing.steps);
-			const step_index = clamp(Math.floor(progress * steps), 0, steps);
+			const steps = Math.max(1, Math.round(easing.steps));
+			const scaled_progress = progress * steps;
+			const rounded_progress = Math.round(scaled_progress);
+			const snap_tolerance =
+				Number.EPSILON * Math.max(32, Math.abs(scaled_progress) * 64);
+			const step_index = clamp(
+				Math.abs(scaled_progress - rounded_progress) <= snap_tolerance
+					? rounded_progress
+					: Math.floor(scaled_progress),
+				0,
+				steps
+			);
 			const stepped_progress = clamp(step_index / steps, 0, 1);
 			return segment.start_value + segment.value_delta * stepped_progress;
 		}
@@ -1022,7 +1049,8 @@ interface ActiveCurveDrag {
 				return linear_value;
 			}
 			const envelope = fade_envelope(progress, easing.fade_in, easing.fade_out);
-			const noise_position = position * easing.frequency + easing.phase;
+			const noise_position =
+				(position - segment.start_position) * easing.frequency + easing.phase;
 			const noise = fractal_noise_1d(noise_position, easing.octaves, easing.seed);
 			return linear_value + noise * easing.amplitude * envelope;
 		}
@@ -3072,6 +3100,60 @@ interface ActiveCurveDrag {
 		return Number.isFinite(y_min) && Number.isFinite(y_max) ? { min: y_min, max: y_max } : null;
 	};
 
+	const default_curve_view_bounds = (): CurveViewBounds | null => {
+		const active_range = active_curve_range_constraint;
+		if (active_range) {
+			return {
+				x_min: active_range.x_min,
+				x_max: active_range.x_max,
+				y_min: active_range.y_min,
+				y_max: active_range.y_max
+			};
+		}
+		if (compiled_curve.keys.length === 0) {
+			return null;
+		}
+
+		let x_min = compiled_curve.keys[0]?.position ?? 0;
+		let x_max = compiled_curve.keys[compiled_curve.keys.length - 1]?.position ?? x_min;
+		if (!Number.isFinite(x_min) || !Number.isFinite(x_max)) {
+			return null;
+		}
+		if (Math.abs(x_max - x_min) <= CURVE_EPSILON) {
+			x_min -= 0.5;
+			x_max += 0.5;
+		}
+
+		const sampled_bounds = sampled_curve_value_bounds(x_min, x_max);
+		let y_min = sampled_bounds?.min ?? Number.POSITIVE_INFINITY;
+		let y_max = sampled_bounds?.max ?? Number.NEGATIVE_INFINITY;
+		for (const key of parsed_keys) {
+			const value = clamp_curve_value_to_active_range(key.value);
+			if (value < y_min) {
+				y_min = value;
+			}
+			if (value > y_max) {
+				y_max = value;
+			}
+		}
+		if (!Number.isFinite(y_min) || !Number.isFinite(y_max)) {
+			y_min = -1;
+			y_max = 1;
+		}
+		if (Math.abs(y_max - y_min) <= CURVE_EPSILON) {
+			const delta = Math.max(0.5, Math.abs(y_max) * 0.2);
+			y_min -= delta;
+			y_max += delta;
+		}
+		const value_pad = (y_max - y_min) * 0.08;
+		return sanitize_view_bounds({
+			x_min,
+			x_max,
+			y_min: y_min - value_pad,
+			y_max: y_max + value_pad
+		});
+	};
+
 	const curve_draw_bucket = (screen_x: number): number | null => {
 		if (!interaction_transform) {
 			return null;
@@ -3249,6 +3331,15 @@ interface ActiveCurveDrag {
 	};
 
 	$effect(() => {
+		if (compiled_curve.keys.length !== 0) {
+			return;
+		}
+		if (fixed_view_bounds !== null) {
+			fixed_view_bounds = null;
+		}
+	});
+
+	$effect(() => {
 		active_curve_range_constraint;
 		const current_fixed = fixed_view_bounds;
 		if (!current_fixed) {
@@ -3266,6 +3357,18 @@ interface ActiveCurveDrag {
 			Math.abs(current_fixed.y_max - sanitized.y_max) > CURVE_EPSILON
 		) {
 			fixed_view_bounds = sanitized;
+		}
+	});
+
+	$effect(() => {
+		compiled_curve;
+		active_curve_range_constraint;
+		if (fixed_view_bounds !== null) {
+			return;
+		}
+		const next_bounds = default_curve_view_bounds();
+		if (next_bounds) {
+			fixed_view_bounds = next_bounds;
 		}
 	});
 
@@ -3362,14 +3465,14 @@ interface ActiveCurveDrag {
 		const curve_x = interaction_transform.curve_screen_x;
 		const curve_y = interaction_transform.curve_screen_y;
 		const owners = interaction_transform.curve_owner_key_ids;
-		if (curve_x.length < 2 || curve_y.length < 2) {
+		if (curve_x.length < 2 || curve_y.length < 2 || owners.length < 1) {
 			return null;
 		}
 
 		let result: CurveSegmentHit | null = null;
 		let best_distance_sq = threshold_px * threshold_px;
 		for (let index = 0; index + 1 < curve_x.length; index += 1) {
-			const owner = owners[index] ?? owners[index + 1];
+			const owner = owners[index] ?? null;
 			if (owner === null) {
 				continue;
 			}
@@ -3475,12 +3578,18 @@ interface ActiveCurveDrag {
 		const curve_x = interaction_transform.curve_screen_x;
 		const curve_y = interaction_transform.curve_screen_y;
 		const owners = interaction_transform.curve_owner_key_ids;
-		for (let index = 0; index < curve_x.length; index += 1) {
+		for (let index = 0; index + 1 < curve_x.length; index += 1) {
 			const owner = owners[index];
 			if (owner === null) {
 				continue;
 			}
-			if (point_in_screen_rect(curve_x[index], curve_y[index], rect)) {
+			const midpoint_x = (curve_x[index] + curve_x[index + 1]) * 0.5;
+			const midpoint_y = (curve_y[index] + curve_y[index + 1]) * 0.5;
+			if (
+				point_in_screen_rect(curve_x[index], curve_y[index], rect) ||
+				point_in_screen_rect(curve_x[index + 1], curve_y[index + 1], rect) ||
+				point_in_screen_rect(midpoint_x, midpoint_y, rect)
+			) {
 				selected.add(owner);
 			}
 		}
@@ -4541,6 +4650,7 @@ interface ActiveCurveDrag {
 			return;
 		}
 		event.preventDefault();
+		event.stopPropagation();
 		blur_active_editable_element();
 		canvas_element.focus();
 		is_canvas_focused = true;
@@ -4615,18 +4725,26 @@ interface ActiveCurveDrag {
 		const selection = nearest_key(point.x, point.y, key_hit_threshold_px());
 		const bezier_handle = nearest_bezier_handle(point.x, point.y, bezier_handle_hit_threshold_px());
 		const curve_hit = nearest_curve_hit(point.x, point.y, curve_hit_threshold_px());
+		const is_double_activation = matches_canvas_double_activation(
+			last_canvas_primary_down,
+			event,
+			point.x,
+			point.y
+		);
+		last_canvas_primary_down = {
+			time_stamp: event.timeStamp,
+			screen_x: point.x,
+			screen_y: point.y
+		};
 
-		if (
-			event.detail >= 2 &&
-			handle_canvas_double_activation(
-				selection,
-				bezier_handle,
-				curve_hit,
-				curve_point
-			)
-		) {
-			event.preventDefault();
-			return;
+		if (is_double_activation) {
+			if (
+				handle_canvas_double_activation(selection, bezier_handle, curve_hit, curve_point)
+			) {
+				last_canvas_primary_down = null;
+				event.preventDefault();
+				return;
+			}
 		}
 
 		if (
@@ -5047,6 +5165,7 @@ interface ActiveCurveDrag {
 		hover_curve_owner_key_id = null;
 		hover_bezier_handle = null;
 		hover_curve_position = null;
+		last_canvas_primary_down = null;
 	};
 
 	const on_canvas_focus = (): void => {
@@ -5055,6 +5174,7 @@ interface ActiveCurveDrag {
 
 	const on_canvas_blur = (): void => {
 		is_canvas_focused = false;
+		last_canvas_primary_down = null;
 	};
 
 	const on_canvas_wheel = (event: WheelEvent): void => {
@@ -5286,7 +5406,7 @@ interface ActiveCurveDrag {
 	};
 
 	const home_view = (): void => {
-		fixed_view_bounds = null;
+		fixed_view_bounds = default_curve_view_bounds();
 	};
 
 	const key_anchor_point = (): { position: number; value: number } => {
@@ -5525,7 +5645,7 @@ interface ActiveCurveDrag {
 				drawPathPoints={active_curve_draw_points}
 				selectionRect={active_box_selection_rect}
 				activeCurveRangeConstraint={active_curve_range_constraint}
-				bind:fixedViewBounds={fixed_view_bounds}
+				fixedViewBounds={fixed_view_bounds}
 				bind:interactionTransform={interaction_transform}
 				bind:canvasElement={canvas_element}
 				activeCanvasPan={active_canvas_pan !== null}

@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onDestroy } from 'svelte';
 	import { appState } from '$lib/golden_ui/store/workbench.svelte';
+	import EnableButton from '$lib/golden_ui/components/common/EnableButton.svelte';
 	import { createUiEditSession, sendSetParamIntent } from '$lib/golden_ui/store/ui-intents';
 	import type { UiNodeDto } from '$lib/golden_ui/types';
 	import {
@@ -18,11 +19,13 @@
 	let {
 		targetNode,
 		widgetNode = null,
-		insideLabel = null
+		insideLabel = null,
+		showEnableButton = true
 	} = $props<{
 		targetNode: UiNodeDto;
 		widgetNode?: UiNodeDto | null;
 		insideLabel?: string | null;
+		showEnableButton?: boolean;
 		includeChildren?: boolean;
 		editMode?: boolean;
 	}>();
@@ -108,6 +111,7 @@
 		isInteger ? 1 : fractionDigits <= 0 ? 1 : Number(`1e-${fractionDigits}`)
 	);
 	let insideLabelText = $derived(typeof insideLabel === 'string' ? insideLabel.trim() : '');
+	let showsEnableButton = $derived(showEnableButton && liveTargetNode.meta.can_be_disabled);
 	let displayedDraftValue = $derived.by(() => {
 		if (typeof min === 'number' && draftValue < min) {
 			return min;
@@ -270,6 +274,11 @@
 </script>
 
 <div class="dashboard-node-widget-number-rotary">
+	{#if showsEnableButton}
+		<div class="dashboard-node-widget-enable">
+			<EnableButton node={liveTargetNode} />
+		</div>
+	{/if}
 	{#if !isNumeric}
 		<div class="dashboard-node-widget-mode-empty">
 			Rotary mode only applies to int and float parameters.
@@ -396,6 +405,10 @@
 		min-block-size: 0;
 	}
 
+	.dashboard-node-widget-number-rotary {
+		position: relative;
+	}
+
 	.dashboard-node-widget-number-rotary-shell,
 	.dashboard-node-widget-number-rotary-body {
 		flex-direction: column;
@@ -403,6 +416,15 @@
 		justify-content: center;
 		gap: 0.75rem;
 		position: relative;
+	}
+
+	.dashboard-node-widget-enable {
+		position: absolute;
+		inset-block-start: 0.75rem;
+		inset-inline-end: 0.75rem;
+		z-index: 1;
+		display: flex;
+		align-items: center;
 	}
 
 	.dashboard-node-widget-number-rotary-label {

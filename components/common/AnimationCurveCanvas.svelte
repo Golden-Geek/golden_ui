@@ -16,6 +16,17 @@
 	interface CompiledCurveSegmentLike {
 		start_position: number;
 		end_position: number;
+		start_value: number;
+		end_value: number;
+		easing:
+			| { kind: 'linear' }
+			| { kind: 'hold' }
+			| { kind: 'bezier' }
+			| { kind: 'shape' }
+			| { kind: 'perlinNoise' }
+			| { kind: 'random' }
+			| { kind: 'script' }
+			| { kind: 'steps'; steps: number };
 	}
 
 	interface CompiledCurveLike {
@@ -135,10 +146,8 @@ interface CurveDrawPathPoint {
 	const GRID_MIN_PIXEL_SPACING = 3.5;
 	const CURVE_BOUNDS_SAMPLE_MIN = 192;
 	const CURVE_BOUNDS_SAMPLE_MAX = 2048;
-	const CURVE_RENDER_MAX_POINTS = 12288;
-	const CURVE_RENDER_FLATNESS_PX = 0.34;
-	const CURVE_RENDER_MIN_SEGMENT_PX = 0.22;
-	const CURVE_RENDER_MAX_DEPTH = 13;
+	const CURVE_RENDER_SAMPLES_PER_REM = 2.4;
+	const CURVE_RENDER_MAX_SEGMENT_SAMPLES = 1024;
 	const CURVE_DRAW_MIN_DELTA_PX = 0.08;
 
 	const clamp = (value: number, min: number, max: number): number =>
@@ -176,7 +185,7 @@ interface CurveDrawPathPoint {
 		drawPathPoints = [],
 		selectionRect = null,
 		activeCurveRangeConstraint = null,
-		fixedViewBounds = $bindable<CurveViewBounds | null>(null),
+		fixedViewBounds = null,
 		interactionTransform = $bindable<CanvasTransform | null>(null),
 		canvasElement = $bindable<HTMLCanvasElement | null>(null),
 		activeCanvasPan = false,
@@ -284,7 +293,7 @@ interface CurveDrawPathPoint {
 		return Math.abs(ratio - rounded) <= 1e-6 * Math.max(1, Math.abs(ratio));
 	};
 
-	const blended_grid_steps = (ideal_step: number): GridBlendStep[] => {
+	const resolve_grid_steps = (ideal_step: number): GridBlendStep[] => {
 		if (!Number.isFinite(ideal_step) || ideal_step <= CURVE_EPSILON) {
 			return [{ step: 1, weight: 1 }];
 		}
@@ -398,7 +407,7 @@ interface CurveDrawPathPoint {
 		}
 	};
 
-	const draw_adaptive_axis_grid = (
+	const draw_axis_grid = (
 		context: CanvasRenderingContext2D,
 		min_value: number,
 		max_value: number,
@@ -415,7 +424,7 @@ interface CurveDrawPathPoint {
 		}
 
 		const ideal_major_step = (span * target_major_spacing_px) / Math.max(1, axis_pixels);
-		const levels = blended_grid_steps(Math.max(ideal_major_step, CURVE_EPSILON));
+		const levels = resolve_grid_steps(Math.max(ideal_major_step, CURVE_EPSILON));
 		for (const level of levels) {
 			const major_step = level.step;
 			const major_px = (major_step / span) * axis_pixels;
@@ -521,7 +530,7 @@ interface CurveDrawPathPoint {
 		const safe_font = Math.max(7, font_px);
 		context.font = `${safe_font}px sans-serif`;
 		const ideal_major_step = (span * target_major_spacing_px) / Math.max(1, axis_pixels);
-		const levels = blended_grid_steps(Math.max(ideal_major_step, CURVE_EPSILON));
+		const levels = resolve_grid_steps(Math.max(ideal_major_step, CURVE_EPSILON));
 
 		if (axis === 'x') {
 			const baseline_y = plot_top + plot_height + safe_font * 1.12;
@@ -641,12 +650,11 @@ interface CurveDrawPathPoint {
 		context.restore();
 	};
 
-	const build_adaptive_curve_samples = (
+	const build_curve_samples = (
 		x_min: number,
 		x_max: number,
-		x_span: number,
 		plot_width: number,
-		keys: CompiledCurveKeyLike[],
+		compiled_curve: CompiledCurveLike,
 		to_screen_x: (position: number) => number,
 		to_screen_y: (value: number) => number,
 		sample_value: (position: number) => number
@@ -655,30 +663,8 @@ interface CurveDrawPathPoint {
 		values: Float64Array;
 		screen_x: Float64Array;
 		screen_y: Float64Array;
+		edge_owner_key_ids: Array<NodeId | null>;
 	} => {
-		const seed_positions: number[] = [x_min, x_max];
-		for (const key of keys) {
-			if (key.position > x_min + CURVE_EPSILON && key.position < x_max - CURVE_EPSILON) {
-				seed_positions.push(key.position);
-			}
-		}
-		seed_positions.sort((left, right) => left - right);
-
-		const unique_seeds: number[] = [];
-		for (const seed of seed_positions) {
-			const previous = unique_seeds[unique_seeds.length - 1];
-			if (
-				previous !== undefined &&
-				Math.abs(previous - seed) <= Math.max(CURVE_EPSILON, x_span * 1e-12)
-			) {
-				continue;
-			}
-			unique_seeds.push(seed);
-		}
-		if (unique_seeds.length < 2) {
-			unique_seeds.splice(0, unique_seeds.length, x_min, x_max);
-		}
-
 		const sample_cache = new Map<number, number>();
 		const sample_at = (position: number): number => {
 			const cached = sample_cache.get(position);
@@ -694,135 +680,137 @@ interface CurveDrawPathPoint {
 		const values: number[] = [];
 		const screen_x: number[] = [];
 		const screen_y: number[] = [];
-		const append_point = (x: number, value: number, sx: number, sy: number): void => {
+		const edge_owner_key_ids: Array<NodeId | null> = [];
+		const step_value_at_index = (
+			segment: CompiledCurveSegmentLike,
+			steps: number,
+			step_index: number
+		): number => {
+			const stepped_progress = clamp(step_index / Math.max(1, steps), 0, 1);
+			return segment.start_value + (segment.end_value - segment.start_value) * stepped_progress;
+		};
+		const append_point = (
+			position: number,
+			value: number,
+			edge_owner_key_id: NodeId | null
+		): void => {
 			const last_index = positions.length - 1;
-			if (last_index >= 0 && Math.abs(positions[last_index] - x) <= CURVE_EPSILON) {
-				positions[last_index] = x;
+			if (
+				last_index >= 0 &&
+				Math.abs(positions[last_index] - position) <= CURVE_EPSILON &&
+				Math.abs(values[last_index] - value) <= CURVE_EPSILON
+			) {
+				positions[last_index] = position;
 				values[last_index] = value;
-				screen_x[last_index] = sx;
-				screen_y[last_index] = sy;
 				return;
 			}
-			positions.push(x);
+			positions.push(position);
 			values.push(value);
-			screen_x.push(sx);
-			screen_y.push(sy);
+			screen_x.push(to_screen_x(position));
+			screen_y.push(to_screen_y(value));
+			if (positions.length > 1) {
+				edge_owner_key_ids.push(edge_owner_key_id);
+			}
 		};
 
-		const max_points = Math.max(768, Math.min(CURVE_RENDER_MAX_POINTS, Math.round(plot_width * 8)));
-		const min_world_dx = x_span / Math.max(1, plot_width * 3.6);
-		type Interval = {
-			x0: number;
-			y0: number;
-			sx0: number;
-			sy0: number;
-			x1: number;
-			y1: number;
-			sx1: number;
-			sy1: number;
-			depth: number;
-		};
+		const keys = compiled_curve.keys;
+		const segments = compiled_curve.segments;
+		if (segments.length === 0) {
+			append_point(x_min, sample_at(x_min), null);
+			append_point(x_max, sample_at(x_max), null);
+			return {
+				positions: Float64Array.from(positions),
+				values: Float64Array.from(values),
+				screen_x: Float64Array.from(screen_x),
+				screen_y: Float64Array.from(screen_y),
+				edge_owner_key_ids
+			};
+		}
 
-		for (let index = 0; index + 1 < unique_seeds.length; index += 1) {
-			const x0 = unique_seeds[index];
-			const x1 = unique_seeds[index + 1];
-			if (!(x1 > x0 + CURVE_EPSILON)) {
+		const first_key = keys[0];
+		const last_key = keys[keys.length - 1];
+		if (first_key && x_min < first_key.position - CURVE_EPSILON) {
+			append_point(x_min, sample_at(x_min), null);
+			append_point(Math.min(x_max, first_key.position), first_key.value, null);
+		}
+
+		for (let segment_index = 0; segment_index < segments.length; segment_index += 1) {
+			const segment = segments[segment_index];
+			const owner_key_id = keys[segment_index]?.node_id ?? null;
+			const visible_start = Math.max(x_min, segment.start_position);
+			const visible_end = Math.min(x_max, segment.end_position);
+			if (!(visible_end > visible_start + CURVE_EPSILON) || owner_key_id === null) {
 				continue;
 			}
-			const y0 = sample_at(x0);
-			const y1 = sample_at(x1);
-			const sx0 = to_screen_x(x0);
-			const sx1 = to_screen_x(x1);
-			const sy0 = to_screen_y(y0);
-			const sy1 = to_screen_y(y1);
-			const stack: Interval[] = [{ x0, y0, sx0, sy0, x1, y1, sx1, sy1, depth: 0 }];
 
-			while (stack.length > 0) {
-				const interval = stack.pop();
-				if (!interval) {
-					continue;
+			const span = Math.max(CURVE_EPSILON, segment.end_position - segment.start_position);
+			const epsilon = Math.max(CURVE_EPSILON, span * 1e-9);
+			append_point(visible_start, sample_at(visible_start), owner_key_id);
+
+			if (segment.easing.kind === 'hold') {
+				append_point(visible_end, segment.start_value, owner_key_id);
+				if (visible_end >= segment.end_position - CURVE_EPSILON) {
+					append_point(segment.end_position, segment.end_value, owner_key_id);
 				}
+				continue;
+			}
 
-				const world_dx = interval.x1 - interval.x0;
-				const screen_dx = interval.sx1 - interval.sx0;
-				const can_subdivide =
-					interval.depth < CURVE_RENDER_MAX_DEPTH &&
-					positions.length < max_points - 1 &&
-					world_dx > min_world_dx &&
-					screen_dx > CURVE_RENDER_MIN_SEGMENT_PX;
-
-				if (!can_subdivide) {
-					append_point(interval.x0, interval.y0, interval.sx0, interval.sy0);
-					append_point(interval.x1, interval.y1, interval.sx1, interval.sy1);
-					continue;
+			if (segment.easing.kind === 'steps') {
+				const steps = Math.max(1, Math.round(segment.easing.steps));
+				for (let step_index = 1; step_index <= steps; step_index += 1) {
+					const boundary_position =
+						segment.start_position + (span * step_index) / Math.max(1, steps);
+					if (
+						boundary_position <= visible_start + epsilon ||
+						boundary_position > visible_end + epsilon
+					) {
+						continue;
+					}
+					append_point(
+						boundary_position,
+						step_value_at_index(segment, steps, step_index - 1),
+						owner_key_id
+					);
+					append_point(
+						boundary_position,
+						step_value_at_index(segment, steps, step_index),
+						owner_key_id
+					);
 				}
+				append_point(visible_end, sample_at(visible_end), owner_key_id);
+				continue;
+			}
 
-				const midpoint_x = interval.x0 + world_dx * 0.5;
-				const midpoint_y = sample_at(midpoint_x);
-				const midpoint_sx = to_screen_x(midpoint_x);
-				const midpoint_sy = to_screen_y(midpoint_y);
-
-				const quarter_x = interval.x0 + world_dx * 0.25;
-				const quarter_y = sample_at(quarter_x);
-				const quarter_sy = to_screen_y(quarter_y);
-				const three_quarter_x = interval.x0 + world_dx * 0.75;
-				const three_quarter_y = sample_at(three_quarter_x);
-				const three_quarter_sy = to_screen_y(three_quarter_y);
-
-				const linear_mid_sy = interval.sy0 + (interval.sy1 - interval.sy0) * 0.5;
-				const linear_quarter_sy = interval.sy0 + (interval.sy1 - interval.sy0) * 0.25;
-				const linear_three_quarter_sy = interval.sy0 + (interval.sy1 - interval.sy0) * 0.75;
-				const flatness_error = Math.max(
-					Math.abs(midpoint_sy - linear_mid_sy),
-					Math.abs(quarter_sy - linear_quarter_sy),
-					Math.abs(three_quarter_sy - linear_three_quarter_sy)
-				);
-
-				if (flatness_error <= CURVE_RENDER_FLATNESS_PX) {
-					append_point(interval.x0, interval.y0, interval.sx0, interval.sy0);
-					append_point(interval.x1, interval.y1, interval.sx1, interval.sy1);
-					continue;
-				}
-
-				stack.push({
-					x0: midpoint_x,
-					y0: midpoint_y,
-					sx0: midpoint_sx,
-					sy0: midpoint_sy,
-					x1: interval.x1,
-					y1: interval.y1,
-					sx1: interval.sx1,
-					sy1: interval.sy1,
-					depth: interval.depth + 1
-				});
-				stack.push({
-					x0: interval.x0,
-					y0: interval.y0,
-					sx0: interval.sx0,
-					sy0: interval.sy0,
-					x1: midpoint_x,
-					y1: midpoint_y,
-					sx1: midpoint_sx,
-					sy1: midpoint_sy,
-					depth: interval.depth + 1
-				});
+			const segment_screen_span = Math.abs(to_screen_x(visible_end) - to_screen_x(visible_start));
+			const target_sample_spacing = Math.max(0.12, rem_base_px / CURVE_RENDER_SAMPLES_PER_REM);
+			const sample_count = Math.max(
+				2,
+				Math.min(
+					CURVE_RENDER_MAX_SEGMENT_SAMPLES,
+					Math.ceil(segment_screen_span / target_sample_spacing) + 1
+				)
+			);
+			for (let sample_index = 1; sample_index < sample_count; sample_index += 1) {
+				const t = sample_index / Math.max(1, sample_count - 1);
+				const position =
+					sample_index + 1 === sample_count
+						? visible_end
+						: visible_start + (visible_end - visible_start) * t;
+				append_point(position, sample_at(position), owner_key_id);
 			}
 		}
 
-		if (positions.length === 0) {
-			const start_value = sample_at(x_min);
-			const end_value = sample_at(x_max);
-			positions.push(x_min, x_max);
-			values.push(start_value, end_value);
-			screen_x.push(to_screen_x(x_min), to_screen_x(x_max));
-			screen_y.push(to_screen_y(start_value), to_screen_y(end_value));
+		if (last_key && x_max > last_key.position + CURVE_EPSILON) {
+			append_point(Math.max(x_min, last_key.position), last_key.value, null);
+			append_point(x_max, sample_at(x_max), null);
 		}
 
 		return {
 			positions: Float64Array.from(positions),
 			values: Float64Array.from(values),
 			screen_x: Float64Array.from(screen_x),
-			screen_y: Float64Array.from(screen_y)
+			screen_y: Float64Array.from(screen_y),
+			edge_owner_key_ids
 		};
 	};
 
@@ -841,9 +829,6 @@ interface CurveDrawPathPoint {
 			context.fillStyle = curve_canvas_theme.empty_text;
 			context.font = `${Math.max(9, Math.round(height * 0.065))}px sans-serif`;
 			context.fillText('No keys in this curve', width * 0.04, height * 0.18);
-			if (fixedViewBounds !== null) {
-				fixedViewBounds = null;
-			}
 			if (interactionTransform !== null) {
 				interactionTransform = null;
 			}
@@ -933,7 +918,7 @@ interface CurveDrawPathPoint {
 			y_max += value_pad;
 		}
 
-		const adaptive_bounds: CurveViewBounds = active_range
+		const fallback_view_bounds: CurveViewBounds = active_range
 			? {
 					x_min: active_range.x_min,
 					x_max: active_range.x_max,
@@ -941,33 +926,11 @@ interface CurveDrawPathPoint {
 					y_max: active_range.y_max
 				}
 			: { x_min, x_max, y_min, y_max };
-		const active_bounds = fixedViewBounds ?? adaptive_bounds;
-
-		if (
-			Math.abs(active_bounds.x_min - x_min) > CURVE_EPSILON ||
-			Math.abs(active_bounds.x_max - x_max) > CURVE_EPSILON
-		) {
-			x_min = active_bounds.x_min;
-			x_max = active_bounds.x_max;
-			bounds_sample_step = (x_max - x_min) / Math.max(1, bounds_sample_count - 1);
-			for (let index = 0; index < bounds_sample_count; index += 1) {
-				const position =
-					index + 1 === bounds_sample_count ? x_max : x_min + bounds_sample_step * index;
-				const sample = sampleCurveAt(position);
-				let value = sample ?? 0;
-				if (active_range) {
-					value = clamp(value, active_range.y_min, active_range.y_max);
-				}
-			}
-		}
-
-		if (fixedViewBounds) {
-			y_min = active_bounds.y_min;
-			y_max = active_bounds.y_max;
-		} else {
-			y_min = adaptive_bounds.y_min;
-			y_max = adaptive_bounds.y_max;
-		}
+		const view_bounds = fixedViewBounds ?? fallback_view_bounds;
+		x_min = view_bounds.x_min;
+		x_max = view_bounds.x_max;
+		y_min = view_bounds.y_min;
+		y_max = view_bounds.y_max;
 
 		const x_span = Math.max(CURVE_EPSILON, x_max - x_min);
 		const y_span = Math.max(CURVE_EPSILON, y_max - y_min);
@@ -976,12 +939,11 @@ interface CurveDrawPathPoint {
 		const to_screen_y = (value: number): number =>
 			plot_top + plot_height - ((value - y_min) / y_span) * plot_height;
 
-		const sampled_curve = build_adaptive_curve_samples(
+		const sampled_curve = build_curve_samples(
 			x_min,
 			x_max,
-			x_span,
 			plot_width,
-			compiledCurve.keys,
+			compiledCurve,
 			to_screen_x,
 			to_screen_y,
 			(position) => {
@@ -997,27 +959,7 @@ interface CurveDrawPathPoint {
 		const sample_screen_x = sampled_curve.screen_x;
 		const sample_screen_y = sampled_curve.screen_y;
 		const sample_count = sample_positions.length;
-		const sample_owner_key_ids: Array<NodeId | null> = new Array(sample_count).fill(null);
-		const segments = compiledCurve.segments;
-		let active_segment_index = 0;
-		for (let index = 0; index < sample_count; index += 1) {
-			const position = sample_positions[index];
-
-			while (
-				active_segment_index + 1 < segments.length &&
-				position > segments[active_segment_index].end_position + CURVE_EPSILON
-			) {
-				active_segment_index += 1;
-			}
-			const segment = segments[active_segment_index];
-			if (
-				segment &&
-				position >= segment.start_position - CURVE_EPSILON &&
-				position <= segment.end_position + CURVE_EPSILON
-			) {
-				sample_owner_key_ids[index] = compiledCurve.keys[active_segment_index]?.node_id ?? null;
-			}
-		}
+		const sample_owner_key_ids = sampled_curve.edge_owner_key_ids;
 
 		const border_radius = rem_base_px * 0.3;
 		context.save();
@@ -1039,7 +981,7 @@ interface CurveDrawPathPoint {
 
 		const target_major_spacing_px = Math.max(34, rem_base_px * 5.8);
 		if (showGrid) {
-			draw_adaptive_axis_grid(
+			draw_axis_grid(
 				context,
 				x_min,
 				x_max,
@@ -1050,7 +992,7 @@ interface CurveDrawPathPoint {
 				plot_top,
 				plot_top + plot_height
 			);
-			draw_adaptive_axis_grid(
+			draw_axis_grid(
 				context,
 				y_min,
 				y_max,
@@ -1266,31 +1208,32 @@ interface CurveDrawPathPoint {
 			let last_x = 0;
 			let last_y = 0;
 
-			for (let index = 0; index < sample_count; index += 1) {
+			for (let index = 0; index + 1 < sample_count; index += 1) {
 				if (sample_owner_key_ids[index] !== key_id) {
 					drawing = false;
 					continue;
 				}
 
-				const x = sample_screen_x[index];
-				const y = sample_screen_y[index];
+				const start_x = sample_screen_x[index];
+				const start_y = sample_screen_y[index];
+				const end_x = sample_screen_x[index + 1];
+				const end_y = sample_screen_y[index + 1];
 				if (!drawing) {
-					context.moveTo(x, y);
+					context.moveTo(start_x, start_y);
 					drawing = true;
 					has_path = true;
-					last_x = x;
-					last_y = y;
-				} else {
-					if (
-						Math.abs(x - last_x) < CURVE_DRAW_MIN_DELTA_PX &&
-						Math.abs(y - last_y) < CURVE_DRAW_MIN_DELTA_PX
-					) {
-						continue;
-					}
-					context.lineTo(x, y);
-					last_x = x;
-					last_y = y;
+					last_x = start_x;
+					last_y = start_y;
 				}
+				if (
+					Math.abs(end_x - last_x) < CURVE_DRAW_MIN_DELTA_PX &&
+					Math.abs(end_y - last_y) < CURVE_DRAW_MIN_DELTA_PX
+				) {
+					continue;
+				}
+				context.lineTo(end_x, end_y);
+				last_x = end_x;
+				last_y = end_y;
 			}
 
 			if (has_path) {
@@ -1889,6 +1832,7 @@ interface CurveDrawPathPoint {
 		<canvas
 			class="curve-canvas {activeCanvasPan ? 'panning' : ''}"
 			bind:this={canvasElement}
+			data-local-context-menu
 			tabindex="0"
 			{onpointerdown}
 			{onpointermove}

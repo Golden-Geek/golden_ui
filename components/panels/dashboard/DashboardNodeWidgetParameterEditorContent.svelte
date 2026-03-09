@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { appState } from '$lib/golden_ui/store/workbench.svelte';
+	import EnableButton from '$lib/golden_ui/components/common/EnableButton.svelte';
 	import type { UiNodeDto } from '$lib/golden_ui/types';
 	import CheckboxEditor from '$lib/golden_ui/components/panels/inspector/parameters/CheckboxEditor.svelte';
 	import ColorPickerEditor from '$lib/golden_ui/components/panels/inspector/parameters/ColorPickerEditor.svelte';
@@ -41,11 +42,13 @@
 	let {
 		targetNode,
 		widgetNode = null,
-		insideLabel = null
+		insideLabel = null,
+		showEnableButton = true
 	} = $props<{
 		targetNode: UiNodeDto;
 		widgetNode?: UiNodeDto | null;
 		insideLabel?: string | null;
+		showEnableButton?: boolean;
 		includeChildren?: boolean;
 		editMode?: boolean;
 	}>();
@@ -99,6 +102,7 @@
 	let insideLabelText = $derived(typeof insideLabel === 'string' ? insideLabel.trim() : '');
 	let showsInsideLabel = $derived(insideLabelText.length > 0);
 	let editorInsideLabel = $derived(showsInsideLabel ? insideLabelText : null);
+	let showsEnableButton = $derived(showEnableButton && liveTargetNode.meta.can_be_disabled);
 	let effectiveNumberRange = $derived(
 		getEffectiveWidgetScalarRange(graph, liveWidgetNode, liveTargetNode)
 	);
@@ -123,6 +127,11 @@
 </script>
 
 <div class="dashboard-node-widget-parameter-editor">
+	{#if showsEnableButton}
+		<div class="dashboard-node-widget-enable">
+			<EnableButton node={liveTargetNode} />
+		</div>
+	{/if}
 	{#if targetNode.data.kind !== 'parameter'}
 		<div class="dashboard-node-widget-mode-empty">
 			Default widget type only applies to parameters.
@@ -197,6 +206,16 @@
 		min-inline-size: 0;
 		min-block-size: 0;
 		overflow: hidden;
+		position: relative;
+	}
+
+	.dashboard-node-widget-enable {
+		position: absolute;
+		inset-block-start: 0.75rem;
+		inset-inline-end: 0.75rem;
+		z-index: 1;
+		display: flex;
+		align-items: center;
 	}
 
 	.dashboard-node-widget-parameter-editor-body {

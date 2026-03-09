@@ -139,6 +139,8 @@ export interface UiNodeMetaDto {
 	can_be_disabled: boolean;
 	user_permissions: UiNodeUserPermissionsDto;
 	description?: string;
+	declared_description_key?: string;
+	description_overridden?: boolean;
 	tags: string[];
 	presentation?: UiNodePresentationHintsDto;
 }
@@ -327,8 +329,14 @@ export interface UiNodeTypeDescriptor {
 	description?: string;
 }
 
+export interface UiDeclaredDescriptionDescriptor {
+	key: string;
+	description: string;
+}
+
 export interface UiSchemaView {
 	node_types: UiNodeTypeDescriptor[];
+	declared_descriptions: UiDeclaredDescriptionDescriptor[];
 	enums: Array<{
 		enum_id: string;
 		variants: Array<{

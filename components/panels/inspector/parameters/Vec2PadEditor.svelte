@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onDestroy } from 'svelte';
+	import { onDestroy, untrack } from 'svelte';
 	import { registerCommandHandler } from '$lib/golden_ui/store/commands.svelte';
 	import { appState } from '$lib/golden_ui/store/workbench.svelte';
 	import { createUiEditSession, sendSetParamIntent } from '$lib/golden_ui/store/ui-intents';
@@ -55,19 +55,23 @@
 	let {
 		node,
 		layoutMode = 'default',
-		rangeOverride = null
+		rangeOverride = null,
+		trailSeconds = undefined
 	} = $props<{
 		node: UiNodeDto;
 		layoutMode?: 'default' | 'widget';
 		rangeOverride?: UiRangeConstraint | null;
+		trailSeconds?: number | null;
 	}>();
 
 	const EPSILON = 1e-9;
-	const TRAIL_POINT_CAP = 256;
 	const TRAIL_REFRESH_MS = 48;
+	const TRAIL_SAMPLE_INTERVAL_MS = 1000 / 90;
+	const TRAIL_POINT_CAP_MAX = 8192;
 	const DEFAULT_TRAIL_SECONDS = 2;
 	const DEFAULT_UNIT_STEP = 1;
 	const DEFAULT_VIEW_SPAN = 8;
+	const FULL_PERCENT = 100;
 
 	let session = $derived(appState.session);
 	let liveNode = $derived(session?.graph.state.nodesById.get(node.node_id) ?? node);
@@ -89,6 +93,9 @@
 	let safeViewSpan = $derived(Math.max(0.25, DEFAULT_VIEW_SPAN));
 	let plotAspectRatio = $derived.by((): number => {
 		if (!rangedBounds) {
+			if (layoutMode === 'widget') {
+				return shellAspectRatio;
+			}
 			return 1;
 		}
 		const width = Math.max(EPSILON, rangedBounds.xMax - rangedBounds.xMin);
@@ -97,7 +104,10 @@
 	});
 	let effectivePlotAspectRatio = $derived(Math.max(EPSILON, plotAspectRatio));
 
+	let shellElement = $state<HTMLDivElement | null>(null);
 	let stageElement = $state<HTMLDivElement | null>(null);
+	let shellWidth = $state(0);
+	let shellHeight = $state(0);
 	let cameraCenterX = $state(0);
 	let cameraCenterY = $state(0);
 	let cameraHeightSpan = $state(DEFAULT_VIEW_SPAN);
@@ -108,6 +118,66 @@
 	let lastTrailSignature = $state('');
 	let isStageFocused = $state(false);
 	let editSession = createUiEditSession('Edit vec2 in 2D', 'param-vec2-2d');
+
+	const clampPercent = (value: number): number =>
+		Math.max(0, Math.min(FULL_PERCENT, value * FULL_PERCENT));
+
+	let shellAspectRatio = $derived.by((): number => {
+		if (shellWidth <= EPSILON || shellHeight <= EPSILON) {
+			return 1;
+		}
+		return shellWidth / shellHeight;
+	});
+	let plotViewWidth = $derived.by((): number =>
+		effectivePlotAspectRatio >= 1 ? FULL_PERCENT * effectivePlotAspectRatio : FULL_PERCENT
+	);
+	let plotViewHeight = $derived.by((): number =>
+		effectivePlotAspectRatio >= 1 ? FULL_PERCENT : FULL_PERCENT / effectivePlotAspectRatio
+	);
+	let plotViewBox = $derived(`0 0 ${plotViewWidth} ${plotViewHeight}`);
+	let effectiveTrailSeconds = $derived.by((): number => {
+		if (trailSeconds === null) {
+			return 0;
+		}
+		if (trailSeconds === undefined) {
+			return DEFAULT_TRAIL_SECONDS;
+		}
+		if (!Number.isFinite(trailSeconds)) {
+			return DEFAULT_TRAIL_SECONDS;
+		}
+		return Math.max(0, trailSeconds);
+	});
+	let showsTrail = $derived(effectiveTrailSeconds > 0);
+	let maxTrailPointCount = $derived.by((): number => {
+		if (!showsTrail) {
+			return 0;
+		}
+		return Math.max(
+			2,
+			Math.min(
+				TRAIL_POINT_CAP_MAX,
+				Math.ceil((effectiveTrailSeconds * 1000) / TRAIL_SAMPLE_INTERVAL_MS) + 2
+			)
+		);
+	});
+	let stageInlineFit = $derived.by((): string => {
+		if (layoutMode !== 'widget') {
+			return '100%';
+		}
+		if (effectivePlotAspectRatio >= shellAspectRatio) {
+			return '100%';
+		}
+		return `${clampPercent(effectivePlotAspectRatio / Math.max(EPSILON, shellAspectRatio))}%`;
+	});
+	let stageBlockFit = $derived.by((): string => {
+		if (layoutMode !== 'widget') {
+			return 'auto';
+		}
+		if (effectivePlotAspectRatio >= shellAspectRatio) {
+			return `${clampPercent(shellAspectRatio / effectivePlotAspectRatio)}%`;
+		}
+		return '100%';
+	});
 
 	function normalizeBounds(bounds: Bounds): Bounds {
 		let xMin = bounds.xMin;
@@ -199,9 +269,10 @@
 	};
 
 	const toPlotX = (value: number, bounds: Bounds): number =>
-		((value - bounds.xMin) / Math.max(EPSILON, bounds.xMax - bounds.xMin)) * 100;
+		((value - bounds.xMin) / Math.max(EPSILON, bounds.xMax - bounds.xMin)) * plotViewWidth;
 	const toPlotY = (value: number, bounds: Bounds): number =>
-		100 - ((value - bounds.yMin) / Math.max(EPSILON, bounds.yMax - bounds.yMin)) * 100;
+		plotViewHeight -
+		((value - bounds.yMin) / Math.max(EPSILON, bounds.yMax - bounds.yMin)) * plotViewHeight;
 
 	const computeGridStep = (baseStep: number, span: number, targetLineCount = 8): number => {
 		const safeBase = Math.max(0.0001, Math.abs(baseStep));
@@ -261,7 +332,7 @@
 	const labelStride = (lineCount: number): number => Math.max(1, Math.ceil(lineCount / 8));
 
 	const prunedTrailPoints = $derived.by((): TrailPoint[] => {
-		const maxAgeMs = Math.max(0, DEFAULT_TRAIL_SECONDS) * 1000;
+		const maxAgeMs = effectiveTrailSeconds * 1000;
 		if (maxAgeMs <= 0) {
 			return [];
 		}
@@ -271,7 +342,7 @@
 	const trailSegments = $derived.by((): TrailSegment[] => {
 		const points = prunedTrailPoints;
 		const bounds = visibleBounds;
-		const trailAgeMs = Math.max(0, DEFAULT_TRAIL_SECONDS) * 1000;
+		const trailAgeMs = effectiveTrailSeconds * 1000;
 		if (points.length < 2 || trailAgeMs <= 0) {
 			return [];
 		}
@@ -498,11 +569,63 @@
 	};
 
 	$effect(() => {
+		const element = shellElement;
+		if (!element) {
+			return;
+		}
+
+		const syncShellSize = (): void => {
+			const rect = element.getBoundingClientRect();
+			shellWidth = Math.max(0, rect.width);
+			shellHeight = Math.max(0, rect.height);
+		};
+
+		syncShellSize();
+
+		let resizeFrameId: number | null = null;
+		const scheduleShellSizeSync = (): void => {
+			if (typeof window === 'undefined') {
+				syncShellSize();
+				return;
+			}
+			if (resizeFrameId !== null) {
+				return;
+			}
+			resizeFrameId = window.requestAnimationFrame(() => {
+				resizeFrameId = null;
+				syncShellSize();
+			});
+		};
+
+		if (typeof ResizeObserver === 'undefined') {
+			return () => {
+				if (resizeFrameId !== null && typeof window !== 'undefined') {
+					window.cancelAnimationFrame(resizeFrameId);
+				}
+			};
+		}
+
+		const resizeObserver = new ResizeObserver(() => {
+			scheduleShellSizeSync();
+		});
+		resizeObserver.observe(element);
+
+		return () => {
+			if (resizeFrameId !== null && typeof window !== 'undefined') {
+				window.cancelAnimationFrame(resizeFrameId);
+			}
+			resizeObserver.disconnect();
+		};
+	});
+
+	$effect(() => {
 		liveNode.node_id;
-		lastTrailSignature = '';
-		trailPoints = [];
-		draftValue = [...currentValue] as [number, number];
-		resetCamera();
+		untrack(() => {
+			lastTrailSignature = '';
+			trailPoints = [];
+			draftValue = [...currentValue] as [number, number];
+			resetCamera();
+		});
 	});
 
 	$effect(() => {
@@ -555,11 +678,22 @@
 	});
 
 	$effect(() => {
+		if (showsTrail) {
+			return;
+		}
+		lastTrailSignature = '';
+		trailPoints = [];
+	});
+
+	$effect(() => {
 		if (!param || param.value.kind !== 'vec2') {
 			return;
 		}
+		if (!showsTrail) {
+			return;
+		}
 
-		const [x, y] = currentValue;
+		const [x, y] = displayedValue;
 		const signature = `${x}|${y}`;
 		if (signature === lastTrailSignature) {
 			return;
@@ -571,8 +705,14 @@
 			y,
 			timestampMs: Date.now()
 		};
+		const lastPoint = trailPoints.at(-1);
+		if (lastPoint && nextPoint.timestampMs - lastPoint.timestampMs < TRAIL_SAMPLE_INTERVAL_MS) {
+			trailPoints = [...trailPoints.slice(0, -1), nextPoint];
+			return;
+		}
+
 		const nextTrail = [...trailPoints, nextPoint];
-		const overflow = Math.max(0, nextTrail.length - TRAIL_POINT_CAP);
+		const overflow = Math.max(0, nextTrail.length - maxTrailPointCount);
 		trailPoints = overflow > 0 ? nextTrail.slice(overflow) : nextTrail;
 	});
 
@@ -597,7 +737,7 @@
 </script>
 
 <div class="vec2-pad-editor" class:widget-layout={layoutMode === 'widget'}>
-	<div class="vec2-pad-shell">
+	<div bind:this={shellElement} class="vec2-pad-shell">
 		<div
 			bind:this={stageElement}
 			class="vec2-pad-stage"
@@ -606,7 +746,7 @@
 			role="application"
 			tabindex="-1"
 			aria-label="2D vec2 editor"
-			style={`--gc-vec2-pad-aspect:${plotAspectRatio};`}
+			style={`--gc-vec2-pad-aspect:${plotAspectRatio};--gc-vec2-pad-inline-fit:${stageInlineFit};--gc-vec2-pad-block-fit:${stageBlockFit};`}
 			onfocusin={() => {
 				isStageFocused = true;
 			}}
@@ -632,21 +772,38 @@
 				stopInteraction();
 			}}
 			onwheel={handleWheel}>
-			<svg class="vec2-pad-svg" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
-				<rect class="vec2-pad-background" x="0" y="0" width="100" height="100"></rect>
+			<svg
+				class="vec2-pad-svg"
+				viewBox={plotViewBox}
+				preserveAspectRatio="xMidYMid meet"
+				aria-hidden="true">
+				<rect class="vec2-pad-background" x="0" y="0" width={plotViewWidth} height={plotViewHeight}
+				></rect>
 
 				{#each yGridLines as line}
-					<line class="vec2-pad-grid" x1="0" y1={line.position} x2="100" y2={line.position}></line>
+					<line
+						class="vec2-pad-grid"
+						x1="0"
+						y1={line.position}
+						x2={plotViewWidth}
+						y2={line.position}></line>
 				{/each}
 				{#each xGridLines as line}
-					<line class="vec2-pad-grid" x1={line.position} y1="0" x2={line.position} y2="100"></line>
+					<line
+						class="vec2-pad-grid"
+						x1={line.position}
+						y1="0"
+						x2={line.position}
+						y2={plotViewHeight}></line>
 				{/each}
 
 				{#if zeroAxisX !== null}
-					<line class="vec2-pad-axis" x1={zeroAxisX} y1="0" x2={zeroAxisX} y2="100"></line>
+					<line class="vec2-pad-axis" x1={zeroAxisX} y1="0" x2={zeroAxisX} y2={plotViewHeight}
+					></line>
 				{/if}
 				{#if zeroAxisY !== null}
-					<line class="vec2-pad-axis" x1="0" y1={zeroAxisY} x2="100" y2={zeroAxisY}></line>
+					<line class="vec2-pad-axis" x1="0" y1={zeroAxisY} x2={plotViewWidth} y2={zeroAxisY}
+					></line>
 				{/if}
 
 				<g>
@@ -661,13 +818,15 @@
 						></line>
 					{/each}
 
-					<line class="vec2-pad-crosshair" x1={handleX} y1="0" x2={handleX} y2="100"></line>
-					<line class="vec2-pad-crosshair" x1="0" y1={handleY} x2="100" y2={handleY}></line>
+					<line class="vec2-pad-crosshair" x1={handleX} y1="0" x2={handleX} y2={plotViewHeight}
+					></line>
+					<line class="vec2-pad-crosshair" x1="0" y1={handleY} x2={plotViewWidth} y2={handleY}
+					></line>
 				</g>
 
 				{#each xGridLines as line, index}
 					{#if index % labelStride(xGridLines.length) === 0}
-						<text class="vec2-pad-label" x={line.position + 0.8} y="96.5">
+						<text class="vec2-pad-label" x={line.position + 0.8} y={plotViewHeight - 3.5}>
 							{line.label}
 						</text>
 					{/if}
@@ -678,7 +837,7 @@
 						<text
 							class="vec2-pad-label"
 							x="1.3"
-							y={Math.max(4.5, Math.min(96.5, line.position - 0.8))}>
+							y={Math.max(4.5, Math.min(plotViewHeight - 3.5, line.position - 0.8))}>
 							{line.label}
 						</text>
 					{/if}
@@ -723,7 +882,8 @@
 
 	.vec2-pad-stage {
 		position: relative;
-		inline-size: 100%;
+		inline-size: var(--gc-vec2-pad-inline-fit, 100%);
+		block-size: var(--gc-vec2-pad-block-fit, auto);
 		max-inline-size: 100%;
 		min-inline-size: 0;
 		aspect-ratio: var(--gc-vec2-pad-aspect);
@@ -762,8 +922,6 @@
 	}
 
 	.widget-layout .vec2-pad-stage {
-		inline-size: auto;
-		block-size: 100%;
 		flex: 0 1 auto;
 		max-inline-size: 100%;
 		max-block-size: 100%;

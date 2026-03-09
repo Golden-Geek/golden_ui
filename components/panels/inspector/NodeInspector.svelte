@@ -19,7 +19,8 @@
 		order = '',
 		controlNodeType = '',
 		layoutMode = 'default',
-		includeChildren = true
+		includeChildren = true,
+		maxChildLevel = null
 	} = $props<{
 		nodes: UiNodeDto[];
 		level: number;
@@ -27,6 +28,7 @@
 		controlNodeType?: String;
 		layoutMode?: 'default' | 'dashboard';
 		includeChildren?: boolean;
+		maxChildLevel?: number | null;
 	}>();
 
 	let session = $derived(appState.session);
@@ -36,7 +38,6 @@
 
 	let isRoot = $derived(level === 0);
 	let isFirstLevel = $derived(level === 1);
-	let collapsed = $derived(level > 3);
 
 	//for now default to level
 	let levelColors = [
@@ -48,7 +49,15 @@
 		'rgba(255, 159, 64)'
 	];
 	let color = $derived(levelColors[level % levelColors.length]); // TODO: color by node type
-	let children = $derived(includeChildren ? (node?.children ?? []) : []);
+	let children = $derived.by(() => {
+		if (!includeChildren) {
+			return [];
+		}
+		if (maxChildLevel !== null && level >= maxChildLevel) {
+			return [];
+		}
+		return node?.children ?? [];
+	});
 	let isParameter = $derived(node?.data.kind === 'parameter');
 	let showAsContainer = $derived(!isParameter);
 	let hasChildren = $derived(children.length > 0);
@@ -60,6 +69,8 @@
 		node && showAsContainer ? resolveNodeInspector(node.node_type) : null
 	);
 	let CustomInspectorComponent = $derived(customInspectorEntry?.component ?? null);
+
+	let collapsed = $derived(level > 3 && !isParameter);
 
 	let titleTextElem: HTMLSpanElement | null = $state(null as HTMLSpanElement | null);
 	let enableButtonElem: HTMLDivElement | null = $state(null as HTMLDivElement | null);
@@ -283,8 +294,9 @@
 										: index === children.length - 1
 											? 'last'
 											: ''}
-								layoutMode={layoutMode}
-									{includeChildren}
+								{layoutMode}
+								{includeChildren}
+								{maxChildLevel}
 								{controlNodeType} />
 						{/each}
 					</div>
@@ -304,6 +316,7 @@
 				{level}
 				{order}
 				{includeChildren}
+				{maxChildLevel}
 				{layoutMode}
 				{collapsed}
 				{hasChildren}
@@ -339,7 +352,7 @@
 	}
 
 	.node-inspector {
-		padding-top: .6rem;
+		padding-top: 0.6rem;
 	}
 
 	.node-inspector.parameter {

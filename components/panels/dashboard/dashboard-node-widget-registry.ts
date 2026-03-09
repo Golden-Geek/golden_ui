@@ -27,7 +27,7 @@ const builtinWidgetTypes = new Map<string, DashboardNodeWidgetTypeEntry>([
 		{
 			id: 'inspector',
 			component: DashboardNodeWidgetInspectorContent,
-			usesLabelPlacement: false,
+			usesLabelPlacement: true,
 			isCompatible: () => true
 		}
 	],

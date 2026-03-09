@@ -267,6 +267,7 @@
 <style>
 	.slider-wrapper {
 		display: flex;
+		justify-content: right;
 		flex-grow: 1;
 		align-items: stretch;
 		height: 100%;

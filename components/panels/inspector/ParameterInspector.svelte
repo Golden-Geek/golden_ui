@@ -66,6 +66,9 @@
 	let meta: UiNodeMetaDto = $derived(liveNode.meta);
 	let type: string = $derived(param?.value.kind ?? '');
 	let canDisable = $derived(meta.can_be_disabled ?? false);
+	let showsEnableButton = $derived(
+		canDisable && !(layoutMode === 'dashboard' && level === 0)
+	);
 	let enabled = $derived(meta.enabled ?? true);
 	let visible = $derived(!meta.tags.includes('hidden'));
 	let readOnly = $derived(Boolean(param?.read_only));
@@ -554,7 +557,7 @@
 			<div class="firstline">
 				{#if !isControlNode}
 					<div class="parameter-info">
-						{#if canDisable}
+						{#if showsEnableButton}
 							<EnableButton node={liveNode} />
 						{/if}
 

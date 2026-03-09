@@ -148,6 +148,13 @@
 			<button type="button" class="close-app" aria-label="Close app" onclick={() => closeWindow()}
 				>🔴</button>
 		</div>
+	{:else}
+		<div class="footer-status">
+			<span class="status-badge {session.status}">
+				<span class="status-dot" aria-hidden="true"></span>
+				<span class="status-label">{session.status}</span>
+			</span>
+		</div>
 	{/if}
 </div>
 
@@ -205,5 +212,55 @@
 	.app-buttons {
 		width: 20%;
 		text-align: right;
+	}
+
+	.footer-status {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		align-self: center;
+	}
+
+	.status-badge {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.45rem;
+		padding: 0.3rem 0.65rem;
+		border-radius: 999rem;
+		font-size: 0.68rem;
+		font-weight: 600;
+		letter-spacing: 0.04em;
+		background-color: rgb(from var(--gc-color-text) r g b / 8%);
+		border: 0.05rem solid rgb(from var(--gc-color-text) r g b / 14%);
+	}
+
+	.status-badge.disconnected {
+		color: var(--gc-color-error);
+		background-color: rgb(from var(--gc-color-error) r g b / 12%);
+		border-color: rgb(from var(--gc-color-error) r g b / 24%);
+	}
+
+	.status-badge.connecting {
+		color: var(--gc-color-warning);
+		background-color: rgb(from var(--gc-color-warning) r g b / 12%);
+		border-color: rgb(from var(--gc-color-warning) r g b / 24%);
+	}
+
+	.status-badge.connected {
+		color: var(--gc-color-success);
+		background-color: rgb(from var(--gc-color-success) r g b / 12%);
+		border-color: rgb(from var(--gc-color-success) r g b / 24%);
+	}
+
+	.status-dot {
+		width: 0.55rem;
+		height: 0.55rem;
+		border-radius: 50%;
+		background-color: currentColor;
+		box-shadow: 0 0 0.45rem currentColor;
+	}
+
+	.status-label {
+		line-height: 1;
 	}
 </style>

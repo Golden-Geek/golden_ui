@@ -1,17 +1,23 @@
 <script lang="ts">
 	import { appState } from '$lib/golden_ui/store/workbench.svelte';
+	import EnableButton from '$lib/golden_ui/components/common/EnableButton.svelte';
 	import type { UiNodeDto } from '$lib/golden_ui/types';
 	import Vec2PadEditor from '$lib/golden_ui/components/panels/inspector/parameters/Vec2PadEditor.svelte';
-	import { getEffectiveWidgetVectorRange } from './dashboard-node-widget-options';
+	import {
+		getEffectiveWidgetVectorRange,
+		getEnabledWidgetNumberOption
+	} from './dashboard-node-widget-options';
 
 	let {
 		targetNode,
 		widgetNode = null,
-		insideLabel = null
+		insideLabel = null,
+		showEnableButton = true
 	} = $props<{
 		targetNode: UiNodeDto;
 		widgetNode?: UiNodeDto | null;
 		insideLabel?: string | null;
+		showEnableButton?: boolean;
 		includeChildren?: boolean;
 		editMode?: boolean;
 	}>();
@@ -25,14 +31,25 @@
 	let effectiveRange = $derived(
 		getEffectiveWidgetVectorRange(graph, liveWidgetNode, liveTargetNode, 2)
 	);
+	let trailTime = $derived(getEnabledWidgetNumberOption(graph, liveWidgetNode, 'trail_time'));
+	let showsEnableButton = $derived(showEnableButton && liveTargetNode.meta.can_be_disabled);
 </script>
 
 <div class="dashboard-node-widget-vec2-pad">
+	{#if showsEnableButton}
+		<div class="dashboard-node-widget-enable">
+			<EnableButton node={liveTargetNode} />
+		</div>
+	{/if}
 	{#if liveTargetNode.data.kind === 'parameter' && liveTargetNode.data.param.value.kind === 'vec2'}
 		{#if typeof insideLabel === 'string' && insideLabel.trim().length > 0}
 			<div class="dashboard-node-widget-vec2-pad-label">{insideLabel.trim()}</div>
 		{/if}
-		<Vec2PadEditor node={liveTargetNode} layoutMode="widget" rangeOverride={effectiveRange} />
+		<Vec2PadEditor
+			node={liveTargetNode}
+			layoutMode="widget"
+			rangeOverride={effectiveRange}
+			trailSeconds={trailTime} />
 	{:else}
 		<div class="dashboard-node-widget-mode-empty">2D Pad mode only applies to vec2 parameters.</div>
 	{/if}
@@ -48,6 +65,15 @@
 		min-block-size: 0;
 		overflow: hidden;
 		position: relative;
+	}
+
+	.dashboard-node-widget-enable {
+		position: absolute;
+		inset-block-start: 0.75rem;
+		inset-inline-end: 0.75rem;
+		z-index: 1;
+		display: flex;
+		align-items: center;
 	}
 
 	.dashboard-node-widget-vec2-pad-label {

@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { appState } from '$lib/golden_ui/store/workbench.svelte';
+	import EnableButton from '$lib/golden_ui/components/common/EnableButton.svelte';
 	import type { UiNodeDto } from '$lib/golden_ui/types';
 	import NumberEditor from '$lib/golden_ui/components/panels/inspector/parameters/NumberEditor.svelte';
 	import {
@@ -18,11 +19,13 @@
 	let {
 		targetNode,
 		widgetNode = null,
-		insideLabel = null
+		insideLabel = null,
+		showEnableButton = true
 	} = $props<{
 		targetNode: UiNodeDto;
 		widgetNode?: UiNodeDto | null;
 		insideLabel?: string | null;
+		showEnableButton?: boolean;
 		includeChildren?: boolean;
 		editMode?: boolean;
 	}>();
@@ -37,6 +40,7 @@
 		liveTargetNode.data.kind === 'parameter' ? liveTargetNode.data.param.value.kind : null
 	);
 	let insideLabelText = $derived(typeof insideLabel === 'string' ? insideLabel.trim() : '');
+	let showsEnableButton = $derived(showEnableButton && liveTargetNode.meta.can_be_disabled);
 	let sliderPresentation = $derived.by(
 		(): NumberEditorOptions => ({
 			show_value_field: getWidgetBoolOption(graph, liveWidgetNode, 'slider_show_value_field', true),
@@ -53,6 +57,11 @@
 </script>
 
 <div class="dashboard-node-widget-number-slider">
+	{#if showsEnableButton}
+		<div class="dashboard-node-widget-enable">
+			<EnableButton node={liveTargetNode} />
+		</div>
+	{/if}
 	{#if paramKind === 'int' || paramKind === 'float'}
 		<div class="dashboard-node-widget-number-slider-body">
 			<NumberEditor
@@ -77,6 +86,19 @@
 		block-size: 100%;
 		min-inline-size: 0;
 		min-block-size: 0;
+	}
+
+	.dashboard-node-widget-number-slider {
+		position: relative;
+	}
+
+	.dashboard-node-widget-enable {
+		position: absolute;
+		inset-block-start: 0.75rem;
+		inset-inline-end: 0.75rem;
+		z-index: 1;
+		display: flex;
+		align-items: center;
 	}
 
 	.dashboard-node-widget-number-slider :global(.number-property-container),

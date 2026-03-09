@@ -78,7 +78,7 @@
 	.editor-checkbox-shell {
 		display: flex;
 		align-items: center;
-		justify-content: center;
+		justify-content: right;
 		inline-size: 100%;
 	}
 

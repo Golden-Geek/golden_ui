@@ -2145,7 +2145,8 @@
 	let targetNodeParam = $derived(getDirectParam(graph, liveNode, 'target_node'));
 	let targetParamParam = $derived(getDirectParam(graph, liveNode, 'target_param'));
 	let widgetTypeParam = $derived(getDirectParam(graph, liveNode, 'widget_type'));
-	let includeChildrenParam = $derived(getDirectParam(graph, liveNode, 'include_children'));
+	let maxChildLevelParam = $derived(getDirectParam(graph, liveNode, 'max_child_level'));
+	let showEnableButtonParam = $derived(getDirectParam(graph, liveNode, 'show_enable_button'));
 
 	let boundNode = $derived(resolveReferenceTarget(graph, targetNodeParam?.value ?? null));
 	let boundParamNode = $derived(resolveReferenceTarget(graph, targetParamParam?.value ?? null));
@@ -2173,8 +2174,14 @@
 		}
 		return 'auto';
 	});
-	const includeChildren = $derived(
-		includeChildrenParam?.value.kind === 'bool' ? includeChildrenParam.value.value : true
+	const maxChildLevel = $derived.by(() => {
+		if (maxChildLevelParam?.value.kind === 'int' || maxChildLevelParam?.value.kind === 'float') {
+			return Math.max(0, Math.round(maxChildLevelParam.value.value));
+		}
+		return 2;
+	});
+	const showEnableButton = $derived(
+		showEnableButtonParam?.value.kind === 'bool' ? showEnableButtonParam.value.value : true
 	);
 	const resolvedNodeWidgetType = $derived.by(() =>
 		boundNode ? resolveDashboardNodeWidgetType(boundNode, requestedWidgetType) : null
@@ -2948,12 +2955,11 @@
 									widgetNode={liveNode}
 									targetNode={boundNode}
 									insideLabel={hasInsideWidgetLabel ? widgetLabelText : null}
-								{includeChildren}
-								{editMode} />
+									{maxChildLevel}
+									{showEnableButton}
+									{editMode} />
 							{:else}
-								<div class="dashboard-empty-inline">
-									No widget type is available for this node.
-								</div>
+								<div class="dashboard-empty-inline">No widget type is available for this node.</div>
 							{/if}
 						</div>
 					{:else}

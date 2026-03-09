@@ -220,6 +220,11 @@ interface RustUiNodeTypeDescriptor {
 	description?: string;
 }
 
+interface RustUiDeclaredDescriptionDescriptor {
+	key?: string;
+	description?: string;
+}
+
 export interface RustUiSnapshot {
 	protocol_version: string;
 	scope: RustScope;
@@ -227,6 +232,7 @@ export interface RustUiSnapshot {
 	nodes: RustUiNodeDto[];
 	schema: {
 		node_types?: RustUiNodeTypeDescriptor[];
+		declared_descriptions?: RustUiDeclaredDescriptionDescriptor[];
 		enums?: RustUiSchemaEnumDefinition[];
 	};
 	history?: UiHistoryState;
@@ -992,6 +998,22 @@ const parseRustNodeTypeDescriptors = (
 	return parsed;
 };
 
+const parseRustDeclaredDescriptions = (
+	descriptors: RustUiDeclaredDescriptionDescriptor[] | undefined
+): UiSnapshot['schema']['declared_descriptions'] => {
+	const parsed: UiSnapshot['schema']['declared_descriptions'] = [];
+	for (const descriptor of descriptors ?? []) {
+		const key = typeof descriptor.key === 'string' ? descriptor.key.trim() : '';
+		const description =
+			typeof descriptor.description === 'string' ? descriptor.description.trim() : '';
+		if (key.length === 0 || description.length === 0) {
+			continue;
+		}
+		parsed.push({ key, description });
+	}
+	return parsed;
+};
+
 const fromRustParam = (param: RustUiParamDto, enumOptionsById: EnumOptionsById): UiParamDto => {
 	const sharedEnumOptions =
 		typeof param.enum_options_id === 'string'
@@ -1028,7 +1050,10 @@ const fromRustNode = (node: RustUiNodeDto, enumOptionsById: EnumOptionsById): Ui
 	decl_id: node.decl_id,
 	node_type: node.node_type,
 	meta: {
-		...node.meta,
+		short_name: node.meta.short_name,
+		label: node.meta.label,
+		enabled: Boolean(node.meta.enabled),
+		can_be_disabled: Boolean(node.meta.can_be_disabled),
 		user_permissions: {
 			can_edit_name: Boolean(node.meta.user_permissions?.can_edit_name),
 			can_remove_and_duplicate: Boolean(node.meta.user_permissions?.can_remove_and_duplicate),
@@ -1036,7 +1061,15 @@ const fromRustNode = (node: RustUiNodeDto, enumOptionsById: EnumOptionsById): Ui
 			can_edit_tags: Boolean(node.meta.user_permissions?.can_edit_tags),
 			can_edit_color: Boolean(node.meta.user_permissions?.can_edit_color)
 		},
-		tags: [...(node.meta.tags ?? [])]
+		description: typeof node.meta.description === 'string' ? node.meta.description : undefined,
+		declared_description_key:
+			typeof node.meta.declared_description_key === 'string' &&
+			node.meta.declared_description_key.trim().length > 0
+				? node.meta.declared_description_key
+				: undefined,
+		description_overridden: Boolean(node.meta.description_overridden),
+		tags: [...(node.meta.tags ?? [])],
+		presentation: node.meta.presentation
 	},
 	data: fromRustNodeData(node.data, enumOptionsById),
 	user_role: node.user_role ?? 'regular',
@@ -1126,6 +1159,7 @@ export const fromRustSnapshot = (snapshot: RustUiSnapshot): UiSnapshot => {
 		nodes: snapshot.nodes.map((node) => fromRustNode(node, parsedSchemaEnums.enumOptionsById)),
 		schema: {
 			node_types: parseRustNodeTypeDescriptors(snapshot.schema.node_types),
+			declared_descriptions: parseRustDeclaredDescriptions(snapshot.schema.declared_descriptions),
 			enums: parsedSchemaEnums.enums
 		},
 		history: snapshot.history ?? {

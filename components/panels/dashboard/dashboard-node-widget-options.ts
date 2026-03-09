@@ -215,6 +215,12 @@ export const getWidgetIntOption = (
 	return fallback;
 };
 
+export const getEnabledWidgetNumberOption = (
+	graph: GraphState | null,
+	widgetNode: UiNodeDto | null,
+	declId: string
+): number | null => asFiniteNumber(getEnabledWidgetParamValue(graph, widgetNode, declId)) ?? null;
+
 export const getWidgetEnumOption = <T extends string>(
 	graph: GraphState | null,
 	widgetNode: UiNodeDto | null,

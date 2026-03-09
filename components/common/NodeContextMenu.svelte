@@ -141,6 +141,9 @@
 	};
 
 	const handleWindowContextMenu = (event: MouseEvent): void => {
+		if (event.target instanceof Element && event.target.closest('[data-local-context-menu]')) {
+			return;
+		}
 		event.preventDefault();
 		event.stopPropagation();
 
@@ -380,22 +383,26 @@
 		if (!session || !activeNode || !canDuplicate || !parentNode) {
 			return;
 		}
-		void session.sendIntent({
-			kind: 'duplicateNode',
-			source: activeNode.node_id,
-			new_parent: parentNode.node_id,
-			label: nextDuplicateLabel()
-		});
+		void session
+			.sendIntent({
+				kind: 'duplicateNode',
+				source: activeNode.node_id,
+				new_parent: parentNode.node_id,
+				label: nextDuplicateLabel()
+			})
+			.catch(() => {});
 	};
 
 	const deleteNode = (): void => {
 		if (!session || !activeNode || !canDelete) {
 			return;
 		}
-		void session.sendIntent({
-			kind: 'removeNode',
-			node: activeNode.node_id
-		});
+		void session
+			.sendIntent({
+				kind: 'removeNode',
+				node: activeNode.node_id
+			})
+			.catch(() => {});
 	};
 
 	const setNodeColor = (nextColor: UiColorDto): void => {

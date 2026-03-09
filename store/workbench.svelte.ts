@@ -86,6 +86,8 @@ export interface WorkbenchSession {
 	readonly historyBusy: boolean;
 	readonly canUndo: boolean;
 	readonly canRedo: boolean;
+	readonly hasActiveEditSession: boolean;
+	readonly editSessionEpoch: number;
 	getNodeData(nodeId: NodeId): UiNodeDto | null;
 	getSelectedNodes(): UiNodeDto[];
 	getFirstSelectedNode(): UiNodeDto | null;
@@ -294,11 +296,14 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 	let historyBusy = $state(false);
 	let canUndo = $state(false);
 	let canRedo = $state(false);
+	let hasActiveEditSession = $state(false);
+	let editSessionEpoch = $state(0);
 	let toasts = $state<WorkbenchToast[]>([]);
 	let logRecords = $state<UiLogRecord[]>([]);
 	let logMaxEntries = $state(0);
 	let logUiUpdateHz = $state(DEFAULT_LOG_UI_UPDATE_HZ);
 	let nodeTypeDescriptions = $state<Map<string, string>>(new Map());
+	let declaredDescriptions = $state<Map<string, string>>(new Map());
 	let footerHoverStack = $state<FooterHoverEntry[]>([]);
 	const pendingLogMutations: PendingLogMutation[] = [];
 	let logFlushTimer: ReturnType<typeof setTimeout> | null = null;
@@ -336,9 +341,34 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 		nodeTypeDescriptions = nextDescriptions;
 	};
 
+	const rebuildDeclaredDescriptions = (
+		descriptors: UiSnapshot['schema']['declared_descriptions']
+	): void => {
+		const nextDescriptions = new Map<string, string>();
+		for (const descriptor of descriptors) {
+			const key = descriptor.key.trim();
+			const description = normalizeDescription(descriptor.description);
+			if (key.length === 0 || description === null) {
+				continue;
+			}
+			nextDescriptions.set(key, description);
+		}
+		declaredDescriptions = nextDescriptions;
+	};
+
 	const getNodeDescription = (node: UiNodeDto | null | undefined): string | null => {
 		if (!node) {
 			return null;
+		}
+		const declaredDescriptionKey =
+			typeof node.meta.declared_description_key === 'string'
+				? node.meta.declared_description_key.trim()
+				: '';
+		if (declaredDescriptionKey.length > 0) {
+			if (node.meta.description_overridden) {
+				return normalizeDescription(node.meta.description);
+			}
+			return declaredDescriptions.get(declaredDescriptionKey) ?? null;
 		}
 		return normalizeDescription(node.meta.description) ?? nodeTypeDescriptions.get(node.node_type) ?? null;
 	};
@@ -1302,12 +1332,17 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 		}
 		canUndo = history.can_undo;
 		canRedo = history.can_redo;
+		if (hasActiveEditSession !== history.active_edit_session) {
+			editSessionEpoch += 1;
+		}
+		hasActiveEditSession = history.active_edit_session;
 	};
 
 	const applySnapshotToState = (snapshot: UiSnapshot): void => {
 		const retainedUiLogRecords = logRecords.filter((record) => uiGeneratedLogIds.has(record.id));
 		graph.loadSnapshot(snapshot);
 		rebuildNodeTypeDescriptions(snapshot.schema.node_types);
+		rebuildDeclaredDescriptions(snapshot.schema.declared_descriptions);
 		pruneFooterHoverStack();
 		hasLoadedSnapshot = true;
 		invalidateWarningCaches();
@@ -1462,16 +1497,19 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 	};
 
 	const runIntent = async (intent: UiEditIntent): Promise<void> => {
+		let error_logged = false;
 		try {
 			const ack = await client.sendIntent(intent);
 			applyHistoryState(ack.history);
 			if (!ack.success) {
+				const message = ack.error_message ?? ack.error_code ?? 'unknown error';
 				appendUiLogRecord(
 					'error',
 					UI_LOG_TAG_INTENT,
-					`Error: ${ack.error_message ?? ack.error_code ?? 'unknown error'}`
+					`Error: ${message}`
 				);
-				return;
+				error_logged = true;
+				throw new Error(message);
 			}
 
 			if (ack.status === 'staged') {
@@ -1502,7 +1540,10 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 			}
 		} catch (error) {
 			const message = error instanceof Error ? error.message : 'unknown error';
-			appendUiLogRecord('error', UI_LOG_TAG_INTENT, `Error: ${message}`);
+			if (!error_logged) {
+				appendUiLogRecord('error', UI_LOG_TAG_INTENT, `Error: ${message}`);
+			}
+			throw error;
 		}
 	};
 
@@ -1514,6 +1555,7 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 			await runIntent(intents[0]);
 			return;
 		}
+		let error_logged = false;
 		try {
 			const acks = await client.sendIntents(intents);
 			if (acks.length !== intents.length) {
@@ -1529,19 +1571,25 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 				}
 			}
 			if (firstFailure) {
+				const message =
+					firstFailure.error_message ?? firstFailure.error_code ?? 'unknown error';
 				appendUiLogRecord(
 					'error',
 					UI_LOG_TAG_INTENT,
-					`Error: ${firstFailure.error_message ?? firstFailure.error_code ?? 'unknown error'}`
+					`Error: ${message}`
 				);
-				return;
+				error_logged = true;
+				throw new Error(message);
 			}
 			if (graph.state.requiresResync) {
 				await resyncSnapshot('Snapshot resynced.');
 			}
 		} catch (error) {
 			const message = error instanceof Error ? error.message : 'unknown error';
-			appendUiLogRecord('error', UI_LOG_TAG_INTENT, `Error: ${message}`);
+			if (!error_logged) {
+				appendUiLogRecord('error', UI_LOG_TAG_INTENT, `Error: ${message}`);
+			}
+			throw error;
 		}
 	};
 
@@ -1829,6 +1877,7 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 			invalidateWarningCaches();
 			resetPendingLogMutations();
 			nodeTypeDescriptions = new Map();
+			declaredDescriptions = new Map();
 			footerHoverStack = [];
 			selectedNodeIds = [];
 			nodeClipboard = [];
@@ -1882,6 +1931,12 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 		},
 		get canRedo(): boolean {
 			return canRedo;
+		},
+		get hasActiveEditSession(): boolean {
+			return hasActiveEditSession;
+		},
+		get editSessionEpoch(): number {
+			return editSessionEpoch;
 		},
 		getNodeData,
 		getSelectedNodes,

@@ -118,6 +118,7 @@
 <style>
 	.color-picker-editor {
 		display: flex;
+		justify-content: right;
 		inline-size: 100%;
 		min-inline-size: 0;
 	}
