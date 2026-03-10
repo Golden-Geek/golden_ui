@@ -221,8 +221,16 @@
 	}
 
 	.warning-item:global(.highlighted) {
-		background-color: color-mix(in srgb, var(--gc-color-panel-row) 88%, var(--gc-color-warning) 12%);
-		border-color: color-mix(in srgb, var(--gc-color-warning) 58%, var(--gc-color-panel-outline) 42%);
+		background-color: color-mix(
+			in srgb,
+			var(--gc-color-panel-row) 88%,
+			var(--gc-color-warning) 12%
+		);
+		border-color: color-mix(
+			in srgb,
+			var(--gc-color-warning) 58%,
+			var(--gc-color-panel-outline) 42%
+		);
 		box-shadow: 0 0 0 0.08rem rgb(from var(--gc-color-warning) r g b / 0.16);
 	}
 
@@ -292,8 +300,9 @@
 	.warning-detail-value {
 		white-space: pre-wrap;
 		word-break: break-word;
-		font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono',
-			'Courier New', monospace;
+		font-family:
+			ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New',
+			monospace;
 	}
 
 	.warning-detail-line--summary .warning-detail-value {

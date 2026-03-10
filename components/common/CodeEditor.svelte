@@ -322,7 +322,8 @@
 	class="code-editor"
 	class:fill
 	style={`--code-editor-min-height:${minHeight};`}
-	bind:this={hostElement}></div>
+	bind:this={hostElement}>
+</div>
 
 <style>
 	.code-editor {

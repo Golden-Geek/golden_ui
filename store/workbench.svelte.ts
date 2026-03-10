@@ -1,5 +1,10 @@
 import { createGraphStore, type GraphStore } from './graph.svelte';
-import { createWebSocketUiClient, type UiTransportConnectionState } from '../transport/ws';
+import {
+	createDefaultUiClient,
+	type UiTransportConnectionState,
+	type UiTransportFactory,
+	type UiTransportOptions
+} from '../transport';
 import type {
 	EventTime,
 	NodeId,
@@ -18,16 +23,9 @@ import type {
 } from '../types';
 import { wholeGraphScope } from '../types';
 import type { PanelController } from '../dockview/panel-types';
-import {
-	loadPersistedSelection,
-	savePersistedSelection
-} from './ui-persistence';
+import { loadPersistedSelection, savePersistedSelection } from './ui-persistence';
 import { DEFAULT_LOG_UI_UPDATE_HZ, normalizeLogUiUpdateHz } from './logger-ui-config';
-import {
-	handleCommandShortcut,
-	registerCommandHandler,
-	type CommandId
-} from './commands.svelte';
+import { handleCommandShortcut, registerCommandHandler, type CommandId } from './commands.svelte';
 import {
 	createNewProjectFile,
 	openProjectFile,
@@ -44,6 +42,7 @@ export interface WorkbenchSessionOptions {
 	pollIntervalMs?: number;
 	scope?: UiSubscriptionScope;
 	bootstrapRetryMs?: number;
+	transportFactory?: UiTransportFactory;
 }
 
 export type WorkbenchConnectionStatus = 'disconnected' | 'connecting' | 'connected';
@@ -267,7 +266,6 @@ export const appState = $state({
 	panels: null as PanelController | null
 });
 
-
 export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): WorkbenchSession => {
 	const scope = options.scope ?? wholeGraphScope;
 	const retryMs = Math.max(100, options.bootstrapRetryMs ?? DEFAULT_RETRY_MS);
@@ -371,7 +369,11 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 			}
 			return declaredDescriptions.get(declaredDescriptionKey) ?? null;
 		}
-		return normalizeDescription(node.meta.description) ?? nodeTypeDescriptions.get(node.node_type) ?? null;
+		return (
+			normalizeDescription(node.meta.description) ??
+			nodeTypeDescriptions.get(node.node_type) ??
+			null
+		);
 	};
 
 	const clearFooterHover = (token: symbol): void => {
@@ -582,7 +584,7 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 		emitToastForLogRecord(record);
 	};
 
-	const client = createWebSocketUiClient({
+	const transportOptions: UiTransportOptions = {
 		wsUrl: options.wsUrl,
 		httpBaseUrl: options.httpBaseUrl,
 		pollIntervalMs: options.pollIntervalMs,
@@ -597,7 +599,8 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 				);
 			}
 		}
-	});
+	};
+	const client = (options.transportFactory ?? createDefaultUiClient)(transportOptions);
 
 	let warningCacheVersion = 0;
 	let activeWarningsCacheVersion = -1;
@@ -941,7 +944,6 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 		}
 	};
 
-	
 	const getSelectedNodes = (): UiNodeDto[] =>
 		selectedNodeIds
 			.map((nodeId) => graph.state.nodesById.get(nodeId))
@@ -978,15 +980,15 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 			return;
 		}
 
-		if(selectionMode === 'REMOVE') {
+		if (selectionMode === 'REMOVE') {
 			setSelection(selectedNodeIds.filter((id) => !validUniqueIds.includes(id)));
 			return;
 		}
 
-		if(selectionMode === 'TOGGLE') {
+		if (selectionMode === 'TOGGLE') {
 			const toggled = new Set(selectedNodeIds);
-			for(const nodeId of validUniqueIds) {
-				if(toggled.has(nodeId)) {
+			for (const nodeId of validUniqueIds) {
+				if (toggled.has(nodeId)) {
 					toggled.delete(nodeId);
 				} else {
 					toggled.add(nodeId);
@@ -1231,7 +1233,8 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 			return false;
 		}
 
-		let insertAfterNodeId: NodeId | null = selectedSiblingIds[selectedSiblingIds.length - 1] ?? null;
+		let insertAfterNodeId: NodeId | null =
+			selectedSiblingIds[selectedSiblingIds.length - 1] ?? null;
 		const createdNodeIds: NodeId[] = [];
 		for (const sourceId of selectedSiblingIds) {
 			const source = graph.state.nodesById.get(sourceId);
@@ -1379,16 +1382,14 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 			const fetchStartedAt = typeof performance !== 'undefined' ? performance.now() : Date.now();
 			const snapshot = await requestSnapshot();
 			const fetchElapsedMs =
-				(typeof performance !== 'undefined' ? performance.now() : Date.now()) -
-				fetchStartedAt;
+				(typeof performance !== 'undefined' ? performance.now() : Date.now()) - fetchStartedAt;
 			const applyStartedAt = typeof performance !== 'undefined' ? performance.now() : Date.now();
 			applySnapshotToState(snapshot);
 			if (successMessage) {
 				appendUiLogRecord('info', UI_LOG_TAG_TRANSPORT, successMessage);
 			}
 			const applyElapsedMs =
-				(typeof performance !== 'undefined' ? performance.now() : Date.now()) -
-				applyStartedAt;
+				(typeof performance !== 'undefined' ? performance.now() : Date.now()) - applyStartedAt;
 			logUiPerf(
 				`resync snapshot fetch_ms=${fetchElapsedMs.toFixed(1)} apply_ms=${applyElapsedMs.toFixed(
 					1
@@ -1453,7 +1454,10 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 			}
 
 			if (event.kind.topic === '__logger.max_entries') {
-				if (isRecord(event.kind.payload) && Number.isFinite(Number(event.kind.payload.max_entries))) {
+				if (
+					isRecord(event.kind.payload) &&
+					Number.isFinite(Number(event.kind.payload.max_entries))
+				) {
 					nextLogMaxEntries = Math.max(1, Math.round(Number(event.kind.payload.max_entries)));
 				}
 				continue;
@@ -1468,11 +1472,7 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 		}
 
 		if (shouldClearLogs || replaceLogRecords.size > 0 || pendingLogRecords.length > 0) {
-			queuePendingLogMutations(
-				shouldClearLogs,
-				[...replaceLogRecords.values()],
-				pendingLogRecords
-			);
+			queuePendingLogMutations(shouldClearLogs, [...replaceLogRecords.values()], pendingLogRecords);
 		}
 
 		if (graphEvents.length > 0) {
@@ -1504,11 +1504,7 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 			applyHistoryState(ack.history);
 			if (!ack.success) {
 				const message = ack.error_message ?? ack.error_code ?? 'unknown error';
-				appendUiLogRecord(
-					'error',
-					UI_LOG_TAG_INTENT,
-					`Error: ${message}`
-				);
+				appendUiLogRecord('error', UI_LOG_TAG_INTENT, `Error: ${message}`);
 				error_logged = true;
 				throw new Error(message);
 			}
@@ -1572,13 +1568,8 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 				}
 			}
 			if (firstFailure) {
-				const message =
-					firstFailure.error_message ?? firstFailure.error_code ?? 'unknown error';
-				appendUiLogRecord(
-					'error',
-					UI_LOG_TAG_INTENT,
-					`Error: ${message}`
-				);
+				const message = firstFailure.error_message ?? firstFailure.error_code ?? 'unknown error';
+				appendUiLogRecord('error', UI_LOG_TAG_INTENT, `Error: ${message}`);
 				error_logged = true;
 				throw new Error(message);
 			}
@@ -1737,24 +1728,30 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 	const registerWorkbenchCommandHandlers = (): (() => void) => {
 		type CommandHandlerResult = boolean | void | Promise<boolean | void>;
 		const cleanups: Array<() => void> = [];
-		const bind = (commandId: CommandId, handler: () => CommandHandlerResult, priority = 10): void => {
-			cleanups.push(
-				registerCommandHandler(
-					commandId,
-					() => handler(),
-					{ priority }
-				)
-			);
+		const bind = (
+			commandId: CommandId,
+			handler: () => CommandHandlerResult,
+			priority = 10
+		): void => {
+			cleanups.push(registerCommandHandler(commandId, () => handler(), { priority }));
 		};
 
-		bind('edit.undo', () => {
-			void undo();
-			return true;
-		}, 20);
-		bind('edit.redo', () => {
-			void redo();
-			return true;
-		}, 20);
+		bind(
+			'edit.undo',
+			() => {
+				void undo();
+				return true;
+			},
+			20
+		);
+		bind(
+			'edit.redo',
+			() => {
+				void redo();
+				return true;
+			},
+			20
+		);
 		bind('edit.deleteSelection', () => removeSelectedNodesCommand(), 10);
 		bind('select.all', () => selectSiblingNodesCommand(), 10);
 		bind('edit.copy', () => copySelectedNodesCommand(), 10);
@@ -1816,16 +1813,14 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 				const fetchStartedAt = typeof performance !== 'undefined' ? performance.now() : Date.now();
 				const snapshot = await requestSnapshot();
 				const fetchElapsedMs =
-					(typeof performance !== 'undefined' ? performance.now() : Date.now()) -
-					fetchStartedAt;
+					(typeof performance !== 'undefined' ? performance.now() : Date.now()) - fetchStartedAt;
 				if (stopped) {
 					return;
 				}
 				const applyStartedAt = typeof performance !== 'undefined' ? performance.now() : Date.now();
 				applySnapshotToState(snapshot);
 				const applyElapsedMs =
-					(typeof performance !== 'undefined' ? performance.now() : Date.now()) -
-					applyStartedAt;
+					(typeof performance !== 'undefined' ? performance.now() : Date.now()) - applyStartedAt;
 				logUiPerf(
 					`bootstrap snapshot fetch_ms=${fetchElapsedMs.toFixed(1)} apply_ms=${applyElapsedMs.toFixed(
 						1

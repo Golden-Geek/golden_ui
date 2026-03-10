@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { appState } from '$lib/golden_ui/store/workbench.svelte';
 	import { sendReloadScript, sendSetScriptConfig } from '$lib/golden_ui/store/ui-intents';
+	import { hasDesktopHost, openDesktopFileDialog } from '$lib/golden_ui/host/desktop';
 	import type { NodeInspectorComponentProps } from '../node-inspector-registry';
 	import type { UiNodeDto, UiScriptConfig, UiScriptState } from '$lib/golden_ui/types';
 	import SelectNodeButton from '../../../common/SelectNodeButton.svelte';
@@ -10,9 +11,7 @@
 
 	let session = $derived(appState.session);
 	let liveNode: UiNodeDto = $derived(session?.graph.state.nodesById.get(node.node_id) ?? node);
-	let hasDesktopDialog = $derived(
-		typeof window !== 'undefined' && Boolean(window.__TAURI_INTERNALS__?.invoke)
-	);
+	let hasDesktopDialog = $derived(hasDesktopHost());
 
 	let loading = $state(false);
 	let refreshing = $state(false);
@@ -202,22 +201,6 @@
 		await saveConfig(false);
 	};
 
-	const invokeAppCommand = async (
-		command: string,
-		args?: Record<string, unknown>
-	): Promise<unknown | undefined> => {
-		const invoke = window.__TAURI_INTERNALS__?.invoke;
-		if (!invoke) {
-			return undefined;
-		}
-		try {
-			return await invoke(command, args);
-		} catch (error) {
-			console.error(`[script-node] ${command} failed`, error);
-			return undefined;
-		}
-	};
-
 	const browseFile = async (): Promise<void> => {
 		if (
 			!draftConfig ||
@@ -230,10 +213,11 @@
 
 		browsing = true;
 		try {
-			const selected = await invokeAppCommand('open_file_dialog', {
-				allowed_extensions: ['js', 'mjs', 'cjs']
+			const selected = await openDesktopFileDialog({
+				allowedExtensions: ['js', 'mjs', 'cjs'],
+				logTag: 'script-node'
 			});
-			if (typeof selected === 'string' && selected.length > 0) {
+			if (selected) {
 				handleFilePathChange(selected);
 				void saveConfig(false);
 			}
@@ -456,9 +440,9 @@
 		color: var(--text-color);
 	}
 
-		.toolbar button:disabled {
-			opacity: 0.5;
-		}
+	.toolbar button:disabled {
+		opacity: 0.5;
+	}
 
 	input,
 	select {

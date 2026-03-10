@@ -11,7 +11,11 @@
 		UiReferenceTargetCandidate
 	} from '$lib/golden_ui/types';
 
-	let { node, layoutMode = 'default', insideLabel = null } = $props<{
+	let {
+		node,
+		layoutMode = 'default',
+		insideLabel = null
+	} = $props<{
 		node: UiNodeDto;
 		layoutMode?: 'default' | 'widget';
 		insideLabel?: string | null;
@@ -275,9 +279,7 @@
 	let inlineLabel = $derived(typeof insideLabel === 'string' ? insideLabel.trim() : '');
 	let showsInlineLabel = $derived(layoutMode === 'widget' && inlineLabel.length > 0);
 
-	const projectionOptionsForCandidate = (
-		candidate: UiNodeDto
-	): UiParamValueProjection[] => {
+	const projectionOptionsForCandidate = (candidate: UiNodeDto): UiParamValueProjection[] => {
 		return referenceCandidateById.get(candidate.node_id)?.projections ?? [];
 	};
 

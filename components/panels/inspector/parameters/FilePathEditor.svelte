@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { appState } from '$lib/golden_ui/store/workbench.svelte';
 	import { sendSetParamIntent } from '$lib/golden_ui/store/ui-intents';
+	import { hasDesktopHost, openDesktopFileDialog } from '$lib/golden_ui/host/desktop';
 	import type { UiFileTypeGroup, UiNodeDto } from '$lib/golden_ui/types';
 
 	let { node } = $props<{
@@ -20,9 +21,7 @@
 	let value = $derived(param?.value.kind === 'file' ? param.value.value : '');
 	let readOnly = $derived(Boolean(param?.read_only));
 	let enabled = $derived(liveNode.meta.enabled);
-	let hasDesktopDialog = $derived(
-		typeof window !== 'undefined' && Boolean(window.__TAURI_INTERNALS__?.invoke)
-	);
+	let hasDesktopDialog = $derived(hasDesktopHost());
 
 	let draftValue = $state('');
 	let isPicking = $state(false);
@@ -80,22 +79,6 @@
 		draftValue = value;
 	});
 
-	const invokeAppCommand = async (
-		command: string,
-		args?: Record<string, unknown>
-	): Promise<unknown | undefined> => {
-		const invoke = window.__TAURI_INTERNALS__?.invoke;
-		if (!invoke) {
-			return undefined;
-		}
-		try {
-			return await invoke(command, args);
-		} catch (error) {
-			console.error(`[file-editor] ${command} failed.`, error);
-			return undefined;
-		}
-	};
-
 	const commitValue = (nextValue: string): void => {
 		if (!param || param.value.kind !== 'file' || readOnly || !enabled) {
 			return;
@@ -119,10 +102,11 @@
 		}
 		isPicking = true;
 		try {
-			const selected = await invokeAppCommand('open_file_dialog', {
-				allowed_extensions: allowedExtensions
+			const selected = await openDesktopFileDialog({
+				allowedExtensions: allowedExtensions,
+				logTag: 'file-editor'
 			});
-			if (typeof selected === 'string' && selected.length > 0) {
+			if (selected) {
 				commitValue(selected);
 			}
 		} finally {

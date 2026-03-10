@@ -3,7 +3,11 @@
 	import { sendSetParamIntent } from '$lib/golden_ui/store/ui-intents';
 	import type { UiNodeDto } from '$lib/golden_ui/types';
 
-	let { node, layoutMode = 'default', insideLabel = null } = $props<{
+	let {
+		node,
+		layoutMode = 'default',
+		insideLabel = null
+	} = $props<{
 		node: UiNodeDto;
 		layoutMode?: 'default' | 'widget';
 		insideLabel?: string | null;

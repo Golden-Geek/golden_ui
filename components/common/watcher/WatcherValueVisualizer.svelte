@@ -11,15 +11,16 @@
 		watcherSeriesColor
 	} from './watcher-utils';
 
-	let { sampleValue, constraints, timeWindowMs, rangeMode, unit, streamKey, decimationMode } = $props<{
-		sampleValue: ParamValue;
-		constraints: UiParamConstraints;
-		timeWindowMs: number;
-		rangeMode: WatcherRangeMode;
-		unit: string;
-		streamKey: string;
-		decimationMode: WatcherDecimationMode;
-	}>();
+	let { sampleValue, constraints, timeWindowMs, rangeMode, unit, streamKey, decimationMode } =
+		$props<{
+			sampleValue: ParamValue;
+			constraints: UiParamConstraints;
+			timeWindowMs: number;
+			rangeMode: WatcherRangeMode;
+			unit: string;
+			streamKey: string;
+			decimationMode: WatcherDecimationMode;
+		}>();
 
 	const FRAME_INTERVAL_MS = 32;
 	const EPSILON = 1e-6;

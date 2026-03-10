@@ -116,7 +116,6 @@
 			selected_key_id = filtered_selection[0];
 		}
 	});
-
 </script>
 
 {#snippet curveHeaderExtra()}
@@ -130,36 +129,36 @@
 	{@render defaultHeader?.(curveHeaderExtra)}
 
 	{#if !collapsed}
-	<div class="node-inspector-content animation-curve-node-inspector">
-		<div class="curve-editor">
-			<AnimationCurveNodeEditor
-				curveNode={liveNode}
-				bind:selected_key_id
-				bind:selected_key_ids
-				bind:selected_curve_owner_key_ids
-				showGrid={true}
-				showNumbers={true}
-				showBounds={true}
-				canvasHeight="min(24rem, 36vh)" />
+		<div class="node-inspector-content animation-curve-node-inspector">
+			<div class="curve-editor">
+				<AnimationCurveNodeEditor
+					curveNode={liveNode}
+					bind:selected_key_id
+					bind:selected_key_ids
+					bind:selected_curve_owner_key_ids
+					showGrid={true}
+					showNumbers={true}
+					showBounds={true}
+					canvasHeight="min(24rem, 36vh)" />
+			</div>
+			<div class="curve-params-editor">
+				{#if selected_key_node}
+					<div class="selected-key-node-inspector">
+						<NodeInspector nodes={[selected_key_node]} level={level + 1} order="solo" />
+					</div>
+				{:else if selected_curve_easing_node}
+					<div class="selected-curve-node-inspector">
+						<NodeInspector nodes={[selected_curve_easing_node]} level={level + 1} order="solo" />
+					</div>
+				{:else if editable_curve_range_node}
+					<div class="range-node-inspector">
+						<NodeInspector nodes={[editable_curve_range_node]} level={level + 1} order="solo" />
+					</div>
+				{:else}
+					<div class="empty-state">Select a key or a curve segment to edit it.</div>
+				{/if}
+			</div>
 		</div>
-		<div class="curve-params-editor">
-			{#if selected_key_node}
-				<div class="selected-key-node-inspector">
-					<NodeInspector nodes={[selected_key_node]} level={level + 1} order="solo" />
-				</div>
-			{:else if selected_curve_easing_node}
-				<div class="selected-curve-node-inspector">
-					<NodeInspector nodes={[selected_curve_easing_node]} level={level + 1} order="solo" />
-				</div>
-			{:else if editable_curve_range_node}
-				<div class="range-node-inspector">
-					<NodeInspector nodes={[editable_curve_range_node]} level={level + 1} order="solo" />
-				</div>
-			{:else}
-				<div class="empty-state">Select a key or a curve segment to edit it.</div>
-			{/if}
-		</div>
-	</div>
 	{/if}
 {/if}
 

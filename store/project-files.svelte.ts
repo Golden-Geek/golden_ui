@@ -1,4 +1,5 @@
 import { appState } from './workbench.svelte';
+import { openDesktopFileDialog, saveDesktopFileDialog } from '../host/desktop';
 
 export const projectFileState = $state({
 	currentPath: null as string | null,
@@ -6,44 +7,19 @@ export const projectFileState = $state({
 	busy: false
 });
 
-const invokeAppCommand = async <T = unknown>(
-	command: string,
-	args?: Record<string, unknown>
-): Promise<T | undefined> => {
-	const invoke = window.__TAURI_INTERNALS__?.invoke;
-	if (!invoke) {
-		return undefined;
-	}
-
-	try {
-		return (await invoke(command, args)) as T;
-	} catch (error) {
-		console.error(`[project-files] ${command} failed.`, error);
-		return undefined;
-	}
-};
-
-const normalizePath = (value: unknown): string | null => {
-	if (typeof value !== 'string') {
-		return null;
-	}
-	const normalized = value.trim();
-	return normalized.length > 0 ? normalized : null;
-};
-
 const chooseOpenPath = async (): Promise<string | null> => {
-	const selected = await invokeAppCommand<string | null>('open_file_dialog', {
-		allowed_extensions: ['json']
+	return openDesktopFileDialog({
+		allowedExtensions: ['json'],
+		logTag: 'project-files'
 	});
-	return normalizePath(selected);
 };
 
 const chooseSavePath = async (suggestedPath: string | null): Promise<string | null> => {
-	const selected = await invokeAppCommand<string | null>('save_file_dialog', {
-		suggested_path: suggestedPath ?? undefined,
-		allowed_extensions: ['json']
+	return saveDesktopFileDialog({
+		suggestedPath,
+		allowedExtensions: ['json'],
+		logTag: 'project-files'
 	});
-	return normalizePath(selected);
 };
 
 const saveProjectAtPath = async (path: string): Promise<boolean> => {

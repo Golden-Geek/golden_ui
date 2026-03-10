@@ -35,15 +35,17 @@ const CSS_UNITS = new Set<CssUnit>(['px', 'rem', 'em', 'percent', 'vw', 'vh']);
 export const isCssUnit = (value: unknown): value is CssUnit =>
 	typeof value === 'string' && CSS_UNITS.has(value as CssUnit);
 
-const normalizeCssNumber = (value: number): number =>
-	Number.isFinite(value) ? value : 0;
+const normalizeCssNumber = (value: number): number => (Number.isFinite(value) ? value : 0);
 
 const formatCssNumber = (value: number): string => {
 	const normalized = normalizeCssNumber(value);
 	if (Math.abs(normalized) < 1e-9) {
 		return '0';
 	}
-	return normalized.toFixed(4).replace(/\.0+$/, '').replace(/(\.\d*?)0+$/, '$1');
+	return normalized
+		.toFixed(4)
+		.replace(/\.0+$/, '')
+		.replace(/(\.\d*?)0+$/, '$1');
 };
 
 export const formatCssValue = (value: CssValueData): string =>

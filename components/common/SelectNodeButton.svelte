@@ -2,9 +2,9 @@
 	import { appState } from '$lib/golden_ui/store/workbench.svelte';
 	import type { UiNodeDto } from '$lib/golden_ui/types';
 
-    let { node } = $props<{
-        node: UiNodeDto;
-    }>();
+	let { node } = $props<{
+		node: UiNodeDto;
+	}>();
 
 	let session = $derived(appState.session);
 </script>
@@ -13,7 +13,7 @@
 	class="select-node-btn"
 	title="Select Node in Outliner"
 	onclick={(e) => {
-        session?.selectNode(node.node_id, 'REPLACE');
+		session?.selectNode(node.node_id, 'REPLACE');
 		e.stopPropagation(); // Prevents the node from collapsing
 		// Implement the logic to select the node in the outliner here
 	}}>
@@ -25,8 +25,8 @@
 		border: none;
 		padding: 0;
 		cursor: pointer;
-        width: 1rem;
-        height: 1rem;
+		width: 1rem;
+		height: 1rem;
 		background-image: url('../../style/icons/select-node.svg'); /* Replace with your icon path */
 		background-size: contain;
 		background-repeat: no-repeat;

@@ -77,7 +77,10 @@
 			if (step <= 0) {
 				return null;
 			}
-			const base = constraints?.step_base ?? (constraints?.range?.kind === 'uniform' ? constraints.range.min : undefined) ?? 0;
+			const base =
+				constraints?.step_base ??
+				(constraints?.range?.kind === 'uniform' ? constraints.range.min : undefined) ??
+				0;
 			const scaled = (nextValue - base) / step;
 			const nearest = Math.round(scaled);
 			if (policy === 'ClampAdapt') {
@@ -89,10 +92,7 @@
 		return nextValue;
 	};
 
-	const commitValue = async (
-		nextValue: number,
-		nextUnit: CssUnit
-	): Promise<void> => {
+	const commitValue = async (nextValue: number, nextUnit: CssUnit): Promise<void> => {
 		if (!param || param.value.kind !== 'css_value' || readOnly || !enabled) {
 			return;
 		}
@@ -223,7 +223,7 @@
 		height: 100%;
 		box-sizing: border-box;
 		font-size: 0.75rem;
-		width:30%;
+		width: 30%;
 	}
 
 	.css-value-editor.widget-layout .css-value-number {

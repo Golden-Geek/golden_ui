@@ -106,7 +106,8 @@
 			const plotTop = padY + (availableH - plotSize) * 0.5;
 
 			const mapX = (value: number): number => plotLeft + ((value - minValue) / span) * plotSize;
-			const mapY = (value: number): number => plotTop + plotSize - ((value - minValue) / span) * plotSize;
+			const mapY = (value: number): number =>
+				plotTop + plotSize - ((value - minValue) / span) * plotSize;
 
 			context.clearRect(0, 0, width, height);
 			context.fillStyle = 'rgba(255 255 255 / 0.02)';

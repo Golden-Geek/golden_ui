@@ -11,7 +11,11 @@
 		show_rgba_fields?: boolean;
 	}
 
-	let { node, layoutMode = 'default', presentation = {} } = $props<{
+	let {
+		node,
+		layoutMode = 'default',
+		presentation = {}
+	} = $props<{
 		node: UiNodeDto;
 		layoutMode?: 'default' | 'widget';
 		presentation?: ColorEditorPresentation;
@@ -106,7 +110,7 @@
 		forceExpanded={presentation.force_expanded === true}
 		showHex={presentation.show_hex !== false}
 		showRgbaFields={presentation.show_rgba_fields !== false}
-		layoutMode={layoutMode}
+		{layoutMode}
 		color={draftColor}
 		onchange={(nextColor: unknown) => {
 			updateValue(nextColor);

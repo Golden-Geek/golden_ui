@@ -10,7 +10,6 @@
 
 <footer class="gc-footer">
 	{#if session}
-	
 		<div class="footer-description" aria-hidden={hoverInfo === null}>
 			{#if hoverInfo}
 				<span class="description-label">{hoverInfo.label}</span>
@@ -46,8 +45,6 @@
 		padding: 0 1rem;
 		overflow: hidden;
 	}
-
-	
 
 	.footer-description {
 		display: flex;
@@ -107,8 +104,11 @@
 		padding: 0.32rem 0.55rem 0.32rem 0.65rem;
 		border-radius: 0.65rem;
 		border: 0.05rem solid rgb(from var(--gc-color-text) r g b / 16%);
-		background:
-			linear-gradient(135deg, rgb(0 0 0 / 42%), rgb(from var(--gc-color-footer) r g b / 96%));
+		background: linear-gradient(
+			135deg,
+			rgb(0 0 0 / 42%),
+			rgb(from var(--gc-color-footer) r g b / 96%)
+		);
 		box-shadow: 0 0.25rem 0.8rem rgb(0 0 0 / 28%);
 		backdrop-filter: blur(0.6rem);
 	}

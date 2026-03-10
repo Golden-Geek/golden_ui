@@ -6,7 +6,7 @@
 	import { appState } from '$lib/golden_ui/store/workbench.svelte';
 	import { sendPatchMetaIntent } from '$lib/golden_ui/store/ui-intents';
 	import ParameterInspector from './ParameterInspector.svelte';
-	import { getIconURLForNode } from '$lib/golden_ui/store/node-types';
+	import { getContainerColorForNode, getIconURLForNode } from '$lib/golden_ui/store/node-types';
 	import EnableButton from '../../common/EnableButton.svelte';
 	import NodeWarningBadge from '../../common/NodeWarningBadge.svelte';
 	import { resolveNodeInspector, type NodeInspectorOrder } from './node-inspector-registry';
@@ -39,16 +39,7 @@
 	let isRoot = $derived(level === 0);
 	let isFirstLevel = $derived(level === 1);
 
-	//for now default to level
-	let levelColors = [
-		'rgba(255, 99, 132)',
-		'rgba(54, 162, 235)',
-		'rgba(255, 206, 86)',
-		'rgba(255, 100, 0)',
-		'rgba(153, 102, 255)',
-		'rgba(255, 159, 64)'
-	];
-	let color = $derived(levelColors[level % levelColors.length]); // TODO: color by node type
+	let color = $derived(node ? getContainerColorForNode(node) : 'rgba(124, 138, 162, 1)');
 	let children = $derived.by(() => {
 		if (!includeChildren) {
 			return [];

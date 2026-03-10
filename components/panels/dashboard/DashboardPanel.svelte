@@ -187,7 +187,7 @@
 			return;
 		}
 		const parentId = graph.parentById.get(selectedNode.node_id);
-		const parentNode = parentId !== undefined ? graph.nodesById.get(parentId) ?? null : null;
+		const parentNode = parentId !== undefined ? (graph.nodesById.get(parentId) ?? null) : null;
 		if (!parentNode || parentNode.node_type !== 'dashboard') {
 			return;
 		}
@@ -288,7 +288,9 @@
 	{#if dashboards.length === 0}
 		<div class="dashboard-empty-state">
 			<h3>No dashboard nodes are available</h3>
-			<p>Create a <code>dashboard</code> node in the engine tree to start authoring pages and widgets.</p>
+			<p>
+				Create a <code>dashboard</code> node in the engine tree to start authoring pages and widgets.
+			</p>
 		</div>
 	{:else}
 		<div class="dashboard-main">
@@ -318,7 +320,8 @@
 						class="dashboard-mode-toggle"
 						class:active={panelParams.editMode ?? false}
 						aria-pressed={panelParams.editMode ?? false}
-						onclick={toggleEditMode}>{panelParams.editMode ? 'Editing Layout' : 'Run Widgets'}</button>
+						onclick={toggleEditMode}
+						>{panelParams.editMode ? 'Editing Layout' : 'Run Widgets'}</button>
 					{#if selectedDashboard && (panelParams.editMode ?? false)}
 						<NodeAddButton node={selectedDashboard} />
 					{/if}
@@ -354,8 +357,8 @@
 
 	.dashboard-main,
 	.dashboard-empty-state {
-		width:100%;
-		height:100%;
+		width: 100%;
+		height: 100%;
 		box-sizing: border-box;
 	}
 
@@ -372,10 +375,9 @@
 		align-items: center;
 		gap: 0.55rem;
 		padding: 0.45rem 0.6rem;
-		margin-bottom:.25rem;
+		margin-bottom: 0.25rem;
 		border-bottom: solid 0.06rem rgb(from var(--gc-color-panel-outline) r g b / 0.35);
 	}
-
 
 	.dashboard-empty-state h3 {
 		margin: 0;

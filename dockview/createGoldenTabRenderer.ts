@@ -1,21 +1,17 @@
-import type {
-	DockviewIDisposable,
-	ITabRenderer,
-	TabPartInitParameters
-} from "dockview-core";
+import type { DockviewIDisposable, ITabRenderer, TabPartInitParameters } from 'dockview-core';
 
 export const createGoldenTabRenderer = (): ITabRenderer => {
-	const element = document.createElement("div");
-	element.className = "gc-dv-tab";
+	const element = document.createElement('div');
+	element.className = 'gc-dv-tab';
 
-	const label = document.createElement("span");
-	label.className = "gc-dv-tab-label";
+	const label = document.createElement('span');
+	label.className = 'gc-dv-tab-label';
 
-	const closeButton = document.createElement("button");
-	closeButton.type = "button";
-	closeButton.className = "gc-dv-tab-close";
-	closeButton.setAttribute("aria-label", "Close panel");
-	closeButton.setAttribute("title", "Close");
+	const closeButton = document.createElement('button');
+	closeButton.type = 'button';
+	closeButton.className = 'gc-dv-tab-close';
+	closeButton.setAttribute('aria-label', 'Close panel');
+	closeButton.setAttribute('title', 'Close');
 
 	element.append(label, closeButton);
 
@@ -41,15 +37,15 @@ export const createGoldenTabRenderer = (): ITabRenderer => {
 				event.stopPropagation();
 			};
 
-			closeButton.addEventListener("click", onClick);
-			closeButton.addEventListener("mousedown", stopMouseDown);
+			closeButton.addEventListener('click', onClick);
+			closeButton.addEventListener('mousedown', stopMouseDown);
 
 			disposables = [
 				onTitleChange,
 				{
 					dispose: () => {
-						closeButton.removeEventListener("click", onClick);
-						closeButton.removeEventListener("mousedown", stopMouseDown);
+						closeButton.removeEventListener('click', onClick);
+						closeButton.removeEventListener('mousedown', stopMouseDown);
 					}
 				}
 			];

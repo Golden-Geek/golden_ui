@@ -1,18 +1,15 @@
 <script lang="ts">
-	import type {
-		PanelProps,
-		PanelState,
-	} from "../../dockview/panel-types";
+	import type { PanelProps, PanelState } from '../../dockview/panel-types';
 
 	let { panelApi, panelId, panelType, title, params }: PanelProps = $props();
 
 	let panel = $state<PanelState>({
-		panelId: "",
-		panelType: "",
-		title: "",
-		params: {},
+		panelId: '',
+		panelType: '',
+		title: '',
+		params: {}
 	});
-	let publishedTitle = $state("");
+	let publishedTitle = $state('');
 
 	$effect(() => {
 		panel = {
@@ -56,12 +53,8 @@
 		padding: 1rem;
 		box-sizing: border-box;
 		color: var(--gc-color-text);
-		background: linear-gradient(
-				150deg,
-				rgba(255, 255, 255, 0.04),
-				transparent 65%
-			),
-			var(--gc-color-panel-alt);
+		background:
+			linear-gradient(150deg, rgba(255, 255, 255, 0.04), transparent 65%), var(--gc-color-panel-alt);
 	}
 
 	h2,

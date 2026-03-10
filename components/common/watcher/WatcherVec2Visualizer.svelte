@@ -165,8 +165,8 @@
 			xChannel={0}
 			yChannel={1}
 			{timeWindowMs}
-			rangeMin={rangeMin}
-			rangeMax={rangeMax}
+			{rangeMin}
+			{rangeMax}
 			color="#6fd9ff"
 			latestPoint={latestValue}
 			axisLabel="X / Y" />

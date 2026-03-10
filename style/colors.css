@@ -1,6 +1,5 @@
 :root,
 .gc-colors-default {
-
 	/* GENERAL*/
 	--gc-color-background: #151515;
 	--gc-color-header: #181818;
@@ -9,8 +8,6 @@
 	--gc-color-text: #bababa;
 	--gc-color-panel: #1f2021;
 	--gc-color-panel-outline: #7c7c7c4c;
-
-
 
 	/* SELECTION */
 	--gc-color-selection: #d81dac;
@@ -36,19 +33,16 @@
 
 	--gc-color-dropdown-bg: #131313f0;
 
-
 	--gc-color-proxy: #bcd515;
 	--gc-color-binding: #d58d15;
 	--gc-color-context: #13f0e5;
 	--gc-color-expression: #2be75d;
 	--gc-color-animation: #c72ce6;
 
-
 	/* META */
 	--gc-color-warning: #e4901c;
 	--gc-color-success: #95e554;
 	--gc-color-error: #bf4d43;
-
 
 	/* CURVE EDITOR */
 	--gc-color-curve-canvas-bg: rgba(20, 20, 20, 0.5);
@@ -91,7 +85,6 @@
 	--gc-color-curve-toolbar-button-bg: rgba(194, 220, 255, 0.08);
 	--gc-color-curve-toolbar-button-danger-border: rgba(255, 127, 127, 0.35);
 	--gc-color-curve-toolbar-button-danger-bg: rgba(255, 97, 97, 0.12);
-
 
 	/* DOCKVIEW COLORS */
 	--gc-color-dock-surface: transparent;

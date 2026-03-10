@@ -98,11 +98,11 @@
 		if (nextS > HSV_EPS && nextV > HSV_EPS) lastHue = nextHue;
 		if (nextV > HSV_EPS) lastSat = nextS;
 
-		if(onchange === undefined) {
+		if (onchange === undefined) {
 			color = normalized;
 			return;
 		}
-		
+
 		onchange && onchange(normalized);
 	}
 
@@ -208,8 +208,7 @@
 		if (mode === 0) {
 			lastHue = val;
 			setColor(ColorUtil.fromHSV(val, s, v, a));
-		}
-		else if (mode === 1) setColor(ColorUtil.fromHSV(h, val, v, a));
+		} else if (mode === 1) setColor(ColorUtil.fromHSV(h, val, v, a));
 		else if (mode === 2) setColor(ColorUtil.fromHSV(h, s, val, a));
 	}
 
@@ -240,19 +239,19 @@
 	}
 </script>
 
-<div class="cp-container" class:expanded={!previewOnly} class:widget-layout={layoutMode === 'widget'}>
+<div
+	class="cp-container"
+	class:expanded={!previewOnly}
+	class:widget-layout={layoutMode === 'widget'}>
 	<div class="cp-header">
 		{#if !previewOnly}
 			<div class="cp-modes" transition:slide={{ duration: animTime }}>
 				<button class:active={mode === 0} onclick={() => (mode = 0)} title="Saturation-Brightness"
-					>SB</button
-				>
+					>SB</button>
 				<button class:active={mode === 1} onclick={() => (mode = 1)} title="Hue-Brightness"
-					>HB</button
-				>
+					>HB</button>
 				<button class:active={mode === 2} onclick={() => (mode = 2)} title="Hue-Saturation"
-					>HS</button
-				>
+					>HS</button>
 			</div>
 		{/if}
 		<button
@@ -263,8 +262,7 @@
 			onclick={() => {
 				if (previewIsSwitch) userPreviewOnly = !userPreviewOnly;
 			}}
-			title={previewOnly ? 'Switch to Full Picker' : 'Switch to Preview Only'}
-		></button>
+			title={previewOnly ? 'Switch to Full Picker' : 'Switch to Preview Only'}></button>
 	</div>
 
 	{#if !previewOnly}
@@ -286,16 +284,15 @@
 					dragTarget = null;
 					notifyEndEdit();
 				}}
-				role="application"
-			>
+				role="application">
 				<div class="cp-overlay" style="background: {areaOverlay1}"></div>
 				<div class="cp-overlay" style="background: {areaOverlay2}"></div>
 				<div
 					class="cp-cursor"
 					style="left: {cursorX}%; top: {cursorY}%; background-color: {cursorY > 50 && mode === 0
 						? 'white'
-						: 'transparent'}; border-color: {cursorY > 50 && mode === 0 ? 'black' : 'white'};"
-				></div>
+						: 'transparent'}; border-color: {cursorY > 50 && mode === 0 ? 'black' : 'white'};">
+				</div>
 			</div>
 
 			<div class="cp-controls">
@@ -311,13 +308,12 @@
 					}}
 					onpointermove={(e) => handleSlider(e)}
 					onpointerup={() => {
-					dragTarget = null;
+						dragTarget = null;
 						notifyEndEdit();
 					}}
 					role="slider"
 					aria-valuenow={mode === 0 ? h : mode === 1 ? s : v}
-					tabindex="0"
-				>
+					tabindex="0">
 					<div class="cp-thumb" style="left: {sliderPos}%"></div>
 				</div>
 
@@ -337,12 +333,11 @@
 					}}
 					role="slider"
 					aria-valuenow={a}
-					tabindex="0"
-				>
+					tabindex="0">
 					<div
 						class="cp-track-bg"
-						style="background: linear-gradient(to right, transparent, {hex})"
-					></div>
+						style="background: linear-gradient(to right, transparent, {hex})">
+					</div>
 					<div class="cp-thumb" style="left: {a * 100}%"></div>
 				</div>
 			</div>
@@ -358,8 +353,7 @@
 								oninput={handleHexInput}
 								onfocus={notifyStartEdit}
 								onblur={notifyEndEdit}
-								class="cp-input-hex"
-							/>
+								class="cp-input-hex" />
 						{/if}
 						{#if showRgbaFields}
 							<button class="cp-toggle-btn" onclick={() => (showInputs = !showInputs)}>
@@ -380,8 +374,7 @@
 								min="0"
 								max="1"
 								value={Number(solid.r.toFixed(2))}
-								oninput={(e) => updateSingleRGB('r', +(e.target as HTMLInputElement).value)}
-							/>
+								oninput={(e) => updateSingleRGB('r', +(e.target as HTMLInputElement).value)} />
 						</div>
 						<div class="cp-field">
 							<label for="cp-g">G</label>
@@ -392,8 +385,7 @@
 								min="0"
 								max="1"
 								value={Number(solid.g.toFixed(2))}
-								oninput={(e) => updateSingleRGB('g', +(e.target as HTMLInputElement).value)}
-							/>
+								oninput={(e) => updateSingleRGB('g', +(e.target as HTMLInputElement).value)} />
 						</div>
 						<div class="cp-field">
 							<label for="cp-b">B</label>
@@ -404,8 +396,7 @@
 								min="0"
 								max="1"
 								value={Number(solid.b.toFixed(2))}
-								oninput={(e) => updateSingleRGB('b', +(e.target as HTMLInputElement).value)}
-							/>
+								oninput={(e) => updateSingleRGB('b', +(e.target as HTMLInputElement).value)} />
 						</div>
 						<div class="cp-field">
 							<label for="cp-a">A</label>
@@ -419,8 +410,7 @@
 								oninput={(e) => {
 									const nextA = +(e.target as HTMLInputElement).value;
 									setColor({ ...current, a: clamp01(nextA) });
-								}}
-							/>
+								}} />
 						</div>
 					</div>
 				{/if}

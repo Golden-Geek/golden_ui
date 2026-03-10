@@ -130,15 +130,15 @@
 		alignment_state: BezierHandleAlignmentState;
 	}
 
-interface BezierHandleRef {
-	key_id: NodeId;
-	kind: BezierHandleKind;
-}
+	interface BezierHandleRef {
+		key_id: NodeId;
+		kind: BezierHandleKind;
+	}
 
-interface CurveDrawPathPoint {
-	position: number;
-	value: number;
-}
+	interface CurveDrawPathPoint {
+		position: number;
+		value: number;
+	}
 
 	const CURVE_EPSILON = 1e-12;
 	const GRID_MANTISSAS = [1, 2, 5] as const;
@@ -1068,12 +1068,7 @@ interface CurveDrawPathPoint {
 				1
 			);
 			const axis_blend = 0.05;
-			const area_gradient = context.createLinearGradient(
-				0,
-				plot_top,
-				0,
-				plot_top + plot_height
-			);
+			const area_gradient = context.createLinearGradient(0, plot_top, 0, plot_top + plot_height);
 			area_gradient.addColorStop(0, `rgba(${curve_canvas_theme.fill_rgb}, 0.25)`);
 			area_gradient.addColorStop(
 				Math.max(0, zero_axis_ratio - axis_blend),
@@ -1249,11 +1244,7 @@ interface CurveDrawPathPoint {
 
 		if (hoverCurveOwnerKeyId !== null && !selected_curve_owner_key_set.has(hoverCurveOwnerKeyId)) {
 			if (
-				stroke_owned_segment(
-					hoverCurveOwnerKeyId,
-					curve_canvas_theme.hover_segment_underlay,
-					2.55
-				)
+				stroke_owned_segment(hoverCurveOwnerKeyId, curve_canvas_theme.hover_segment_underlay, 2.55)
 			) {
 				stroke_owned_segment(hoverCurveOwnerKeyId, curve_canvas_theme.hover_segment, 1.34);
 			}
@@ -1261,11 +1252,7 @@ interface CurveDrawPathPoint {
 
 		for (const curve_owner_key_id of selectedCurveOwnerKeyIds) {
 			if (
-				stroke_owned_segment(
-					curve_owner_key_id,
-					curve_canvas_theme.selected_segment_underlay,
-					3.1
-				)
+				stroke_owned_segment(curve_owner_key_id, curve_canvas_theme.selected_segment_underlay, 3.1)
 			) {
 				stroke_owned_segment(curve_owner_key_id, curve_canvas_theme.selected_segment, 1.76);
 			}
@@ -1584,17 +1571,9 @@ interface CurveDrawPathPoint {
 					'--gc-color-curve-border-bounded',
 					'rgba(185, 199, 219, 0.82)'
 				),
-				empty_text: css_var_or(
-					styles,
-					'--gc-color-curve-empty-text',
-					'rgba(192, 206, 232, 0.64)'
-				),
+				empty_text: css_var_or(styles, '--gc-color-curve-empty-text', 'rgba(192, 206, 232, 0.64)'),
 				plot_fill: css_var_or(styles, '--gc-color-curve-plot-fill', 'rgba(0, 0, 0, 0.2)'),
-				plot_shadow: css_var_or(
-					styles,
-					'--gc-color-curve-plot-shadow',
-					'rgba(0, 0, 0, 0.5)'
-				),
+				plot_shadow: css_var_or(styles, '--gc-color-curve-plot-shadow', 'rgba(0, 0, 0, 0.5)'),
 				plot_shadow_fill: css_var_or(styles, '--gc-color-curve-plot-shadow-fill', '#000000'),
 				hover_segment_underlay: css_var_or(
 					styles,
@@ -1641,16 +1620,8 @@ interface CurveDrawPathPoint {
 					'--gc-color-curve-handle-hover',
 					'rgba(255, 199, 138, 0.95)'
 				),
-				handle_out: css_var_or(
-					styles,
-					'--gc-color-curve-handle-out',
-					'rgba(172, 235, 220, 0.9)'
-				),
-				handle_in: css_var_or(
-					styles,
-					'--gc-color-curve-handle-in',
-					'rgba(164, 205, 245, 0.9)'
-				),
+				handle_out: css_var_or(styles, '--gc-color-curve-handle-out', 'rgba(172, 235, 220, 0.9)'),
+				handle_in: css_var_or(styles, '--gc-color-curve-handle-in', 'rgba(164, 205, 245, 0.9)'),
 				handle_stroke: css_var_or(
 					styles,
 					'--gc-color-curve-handle-stroke',
@@ -1671,21 +1642,9 @@ interface CurveDrawPathPoint {
 					'--gc-color-curve-key-selected',
 					'rgba(255, 229, 112, 0.98)'
 				),
-				key_hover: css_var_or(
-					styles,
-					'--gc-color-curve-key-hover',
-					'rgba(255, 182, 96, 0.95)'
-				),
-				key_stroke: css_var_or(
-					styles,
-					'--gc-color-curve-key-stroke',
-					'rgba(8, 12, 18, 0.9)'
-				),
-				key_guide: css_var_or(
-					styles,
-					'--gc-color-curve-key-guide',
-					'rgba(255, 226, 117, 0.35)'
-				),
+				key_hover: css_var_or(styles, '--gc-color-curve-key-hover', 'rgba(255, 182, 96, 0.95)'),
+				key_stroke: css_var_or(styles, '--gc-color-curve-key-stroke', 'rgba(8, 12, 18, 0.9)'),
+				key_guide: css_var_or(styles, '--gc-color-curve-key-guide', 'rgba(255, 226, 117, 0.35)'),
 				draw_path_stroke: css_var_or(
 					styles,
 					'--gc-color-curve-draw-path-stroke',
@@ -1696,11 +1655,7 @@ interface CurveDrawPathPoint {
 					'--gc-color-curve-draw-path-point',
 					'rgba(255, 198, 122, 0.98)'
 				),
-				crosshair: css_var_or(
-					styles,
-					'--gc-color-curve-crosshair',
-					'rgba(217, 231, 255, 0)'
-				),
+				crosshair: css_var_or(styles, '--gc-color-curve-crosshair', 'rgba(217, 231, 255, 0)'),
 				selection_fill: css_var_or(
 					styles,
 					'--gc-color-curve-selection-fill',

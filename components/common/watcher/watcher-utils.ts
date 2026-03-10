@@ -58,12 +58,15 @@ export const sanitizeWatcherUiSettings = (
 		: WATCHER_DEFAULT_SETTINGS.decimationMode;
 
 	return {
-		timeWindowSec: WATCHER_WINDOW_OPTIONS_SEC.includes(safeTimeWindow as (typeof WATCHER_WINDOW_OPTIONS_SEC)[number])
+		timeWindowSec: WATCHER_WINDOW_OPTIONS_SEC.includes(
+			safeTimeWindow as (typeof WATCHER_WINDOW_OPTIONS_SEC)[number]
+		)
 			? safeTimeWindow
 			: WATCHER_DEFAULT_SETTINGS.timeWindowSec,
 		rangeMode: safeRangeMode === 'fixed' ? 'fixed' : WATCHER_DEFAULT_SETTINGS.rangeMode,
 		decimationMode: nextDecimationMode,
-		vectorViewMode: safeVectorViewMode === 'curves' ? 'curves' : WATCHER_DEFAULT_SETTINGS.vectorViewMode
+		vectorViewMode:
+			safeVectorViewMode === 'curves' ? 'curves' : WATCHER_DEFAULT_SETTINGS.vectorViewMode
 	};
 };
 

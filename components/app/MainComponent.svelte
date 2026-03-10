@@ -537,8 +537,7 @@
 					referencePanelId: 'dashboard',
 					direction: 'right'
 				}
-			},
-			
+			}
 		];
 	};
 

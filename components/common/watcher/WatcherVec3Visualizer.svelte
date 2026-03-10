@@ -169,8 +169,8 @@
 				xChannel={0}
 				yChannel={1}
 				{timeWindowMs}
-				rangeMin={rangeMin}
-				rangeMax={rangeMax}
+				{rangeMin}
+				{rangeMax}
 				color="#ff5500"
 				latestPoint={[latestValue[0], latestValue[1]]}
 				axisLabel="X / Y" />
@@ -181,8 +181,8 @@
 				xChannel={0}
 				yChannel={2}
 				{timeWindowMs}
-				rangeMin={rangeMin}
-				rangeMax={rangeMax}
+				{rangeMin}
+				{rangeMax}
 				color="#aaff00"
 				latestPoint={[latestValue[0], latestValue[2]]}
 				axisLabel="X / Z" />
@@ -193,8 +193,8 @@
 				xChannel={2}
 				yChannel={1}
 				{timeWindowMs}
-				rangeMin={rangeMin}
-				rangeMax={rangeMax}
+				{rangeMin}
+				{rangeMax}
 				color="#00aaff"
 				latestPoint={[latestValue[2], latestValue[1]]}
 				axisLabel="Z / Y" />

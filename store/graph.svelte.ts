@@ -37,7 +37,10 @@ const createEmptyState = (): GraphState => ({
 	requiresResync: false
 });
 
-const detectRoot = (nodesById: Map<NodeId, UiNodeDto>, childrenById: Map<NodeId, NodeId[]>): NodeId | null => {
+const detectRoot = (
+	nodesById: Map<NodeId, UiNodeDto>,
+	childrenById: Map<NodeId, NodeId[]>
+): NodeId | null => {
 	const childSet = new Set<NodeId>();
 	for (const children of childrenById.values()) {
 		for (const child of children) {
@@ -82,7 +85,11 @@ const stateFromSnapshot = (snapshot: UiSnapshot): GraphState => {
 	};
 };
 
-const removeFromChildren = (childrenById: Map<NodeId, NodeId[]>, parent: NodeId, child: NodeId): void => {
+const removeFromChildren = (
+	childrenById: Map<NodeId, NodeId[]>,
+	parent: NodeId,
+	child: NodeId
+): void => {
 	const existing = childrenById.get(parent);
 	if (!existing) {
 		return;
@@ -93,7 +100,11 @@ const removeFromChildren = (childrenById: Map<NodeId, NodeId[]>, parent: NodeId,
 	);
 };
 
-const addToChildren = (childrenById: Map<NodeId, NodeId[]>, parent: NodeId, child: NodeId): void => {
+const addToChildren = (
+	childrenById: Map<NodeId, NodeId[]>,
+	parent: NodeId,
+	child: NodeId
+): void => {
 	const existing = childrenById.get(parent) ?? [];
 	if (existing.includes(child)) {
 		return;
@@ -263,7 +274,10 @@ const reduceEvent = (state: GraphState, event: UiEventDto): GraphState => {
 			removeFromChildren(next.childrenById, event.kind.old_parent, event.kind.child);
 			addToChildren(next.childrenById, event.kind.new_parent, event.kind.child);
 			next.parentById.set(event.kind.child, event.kind.new_parent);
-			if (!next.nodesById.has(event.kind.old_parent) || !next.nodesById.has(event.kind.new_parent)) {
+			if (
+				!next.nodesById.has(event.kind.old_parent) ||
+				!next.nodesById.has(event.kind.new_parent)
+			) {
 				next.requiresResync = true;
 			} else {
 				syncNodeChildren(next, event.kind.old_parent);

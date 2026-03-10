@@ -8,11 +8,8 @@ import type {
 	UiEditIntent,
 	UiEventBatch,
 	UiEventDto,
-	UiLogRecord,
 	UiNodeDataDto,
 	UiNodeDto,
-	UiHistoryState,
-	UiNodeMetaDto,
 	UiParamControlInfo,
 	UiParameterControlMode,
 	UiParameterControlSpec,
@@ -35,6 +32,29 @@ import type {
 	UiParamControlCandidate,
 	UiParamValueProjection
 } from '../types';
+import type { ParamValue as RustParamValue } from '../generated/rust_protocol/ParamValue';
+import type { ScriptUiState as RustScriptState } from '../generated/rust_protocol/ScriptUiState';
+import type { UiAck as RustUiAck } from '../generated/rust_protocol/UiAck';
+import type { UiDeclaredDescriptionDescriptor as RustUiDeclaredDescriptionDescriptor } from '../generated/rust_protocol/UiDeclaredDescriptionDescriptor';
+import type { UiEditIntent as RustUiEditIntent } from '../generated/rust_protocol/UiEditIntent';
+import type { UiEventBatch as RustUiEventBatch } from '../generated/rust_protocol/UiEventBatch';
+import type { UiEnumDefinition as RustUiSchemaEnumDefinition } from '../generated/rust_protocol/UiEnumDefinition';
+import type { UiEnumVariantDefinition as RustUiSchemaEnumVariantDefinition } from '../generated/rust_protocol/UiEnumVariantDefinition';
+import type { UiNodeDto as RustUiNodeDto } from '../generated/rust_protocol/UiNodeDto';
+import type { UiNodeTypeDescriptor as RustUiNodeTypeDescriptor } from '../generated/rust_protocol/UiNodeTypeDescriptor';
+import type { UiParamControlInfoDto as RustUiParamControlInfoResponse } from '../generated/rust_protocol/UiParamControlInfoDto';
+import type { UiParamControlInfoRequest as RustParamControlInfoRequest } from '../generated/rust_protocol/UiParamControlInfoRequest';
+import type { UiParamDto as RustUiParamDto } from '../generated/rust_protocol/UiParamDto';
+import type { UiProjectPathRequest as RustProjectPathRequest } from '../generated/rust_protocol/UiProjectPathRequest';
+import type { UiReferenceTargetsDto as RustReferenceTargetsResponse } from '../generated/rust_protocol/UiReferenceTargetsDto';
+import type { UiReferenceTargetsRequest as RustReferenceTargetsRequest } from '../generated/rust_protocol/UiReferenceTargetsRequest';
+import type { UiReplayRequest as RustReplayRequest } from '../generated/rust_protocol/UiReplayRequest';
+import type { UiScriptConfigRequest as RustScriptConfigRequest } from '../generated/rust_protocol/UiScriptConfigRequest';
+import type { UiScriptReloadRequest as RustScriptReloadRequest } from '../generated/rust_protocol/UiScriptReloadRequest';
+import type { UiScriptStateRequest as RustScriptStateRequest } from '../generated/rust_protocol/UiScriptStateRequest';
+import type { UiSnapshot as RustUiSnapshot } from '../generated/rust_protocol/UiSnapshot';
+import type { UiSnapshotRequest as RustSnapshotRequest } from '../generated/rust_protocol/UiSnapshotRequest';
+import type { UiSubscriptionScope as RustUiSubscriptionScope } from '../generated/rust_protocol/UiSubscriptionScope';
 import { isCssUnit } from '../css-value';
 import { wholeGraphScope } from '../types';
 import { getUiClientInstanceId } from './client-instance';
@@ -48,240 +68,12 @@ interface HttpClientOptions {
 	fetchImpl?: typeof fetch;
 }
 
-export type RustScope = string | { subtree: { root: number; max_depth: number } };
+export type RustScope = RustUiSubscriptionScope;
+export type { RustUiEventBatch };
 
-export interface RustSnapshotRequest {
-	scope: RustScope;
-	cancel_active_edit_session?: boolean;
-}
-
-export interface RustReplayRequest {
-	scope: RustScope;
-	from?: EventTime;
-}
-
-export interface RustReferenceTargetsRequest {
-	param: number;
-}
-
-export interface RustReferenceTargetsResponse {
-	allowed_targets?: number[];
-	visible_nodes?: number[];
-	candidates?: unknown[];
-}
-
-export interface RustParamControlInfoRequest {
-	param: number;
-}
-
-export interface RustParamControlInfoResponse {
-	param: number;
-	active_mode?: unknown;
-	available_modes?: unknown[];
-	context_candidates?: unknown[];
-	token_suggestions?: unknown[];
-	proxy_candidates?: unknown[];
-	binding_candidates?: unknown[];
-}
-
-export interface RustScriptStateRequest {
-	node: number;
-}
-
-export interface RustScriptConfigRequest {
-	node: number;
-	config: RustScriptConfig;
-	force_reload?: boolean;
-}
-
-export interface RustScriptReloadRequest {
-	node: number;
-}
-
-interface RustProjectPathRequest {
-	path: string;
-}
-
-export type RustParamValue =
-	| string
-	| {
-			[key: string]: unknown;
-	  };
-
-type RustScriptSource = { kind: 'inline'; text: string } | { kind: 'projectFile'; path: string };
-
-interface RustScriptConfig {
-	source: RustScriptSource;
-}
-
-interface RustScriptManifest {
-	api_version?: number;
-	update_rate_hz?: number;
-	exports?: Array<{
-		name?: string;
-		signature?: {
-			args?: string[];
-			returns?: string;
-		};
-	}>;
-}
-
-interface RustScriptState {
-	config: RustScriptConfig;
-	effective_update_rate_hz?: number;
-	export_names?: string[];
-	manifest?: RustScriptManifest;
-}
-
-interface RustUiParamDto {
-	value: RustParamValue;
-	default_value?: RustParamValue;
-	event_behaviour?: ParamEventBehaviour;
-	read_only?: boolean;
-	constraints?: {
-		range?: {
-			kind?: string;
-			min?: number | number[];
-			max?: number | number[];
-		};
-		step?: number;
-		step_base?: number;
-		enum_options?: Array<{
-			variant_id: string;
-			value: RustParamValue;
-			label: string;
-			tags?: string[];
-			ordering?: number;
-		}>;
-		policy?: ParamConstraintPolicy;
-		reference?: {
-			root?: unknown;
-			target_kind?: string;
-			allowed_node_types?: string[];
-			allowed_parameter_types?: string[];
-			allow_projections?: boolean;
-			custom_filter_key?: string;
-			default_search_filter?: string;
-		};
-		file?: {
-			allowed_types?: string[];
-			allowed_extensions?: string[];
-		};
-	};
-	reference_allowed_targets?: number[];
-	reference_visible_nodes?: number[];
-	ui_hints?: {
-		widget?: string;
-		unit?: string;
-	};
-	control?: unknown;
-	enum_options_id?: string;
-}
-
-interface RustUiLogRecord extends UiLogRecord {}
-
-interface RustUiLoggerState {
-	max_entries: number;
-	records?: RustUiLogRecord[];
-}
-
-interface RustUiNodeDto {
-	node_id: number;
-	uuid: string;
-	decl_id: string;
-	node_type: string;
-	meta: Omit<UiNodeMetaDto, 'tags' | 'user_permissions'> & {
-		tags?: string[];
-		user_permissions?: Partial<UiNodeMetaDto['user_permissions']>;
-	};
-	data: { kind: 'parameter'; param: RustUiParamDto } | { kind: 'node'; node_type: string };
-	user_role?: 'regular' | 'itemRoot';
-	user_item_kind?: string;
-	accepted_user_item_kinds?: string[];
-	creatable_user_items?: Array<{ node_type: string; item_kind: string; label: string }>;
-	children?: number[];
-}
-
-interface RustUiSchemaEnumVariantDefinition {
-	variant_id?: string;
-	value?: RustParamValue;
-	label?: string;
-	tags?: string[];
-	ordering?: number;
-}
-
-interface RustUiSchemaEnumDefinition {
-	enum_id?: string;
-	variants?: RustUiSchemaEnumVariantDefinition[];
-}
-
-interface RustUiNodeTypeDescriptor {
-	node_type?: string;
-	description?: string;
-}
-
-interface RustUiDeclaredDescriptionDescriptor {
-	key?: string;
-	description?: string;
-}
-
-export interface RustUiSnapshot {
-	protocol_version: string;
-	scope: RustScope;
-	at: EventTime;
-	nodes: RustUiNodeDto[];
-	schema: {
-		node_types?: RustUiNodeTypeDescriptor[];
-		declared_descriptions?: RustUiDeclaredDescriptionDescriptor[];
-		enums?: RustUiSchemaEnumDefinition[];
-	};
-	history?: UiHistoryState;
-	logger?: RustUiLoggerState;
-}
-
-type RustUiEventDto =
-	| (Omit<UiEventDto, 'kind'> & {
-			kind:
-				| {
-						kind: 'paramChanged';
-						param: number;
-						old_value: RustParamValue;
-						new_value: RustParamValue;
-				  }
-				| {
-						kind: 'paramControlChanged';
-						param: number;
-						old_state: unknown;
-						new_state: unknown;
-				  }
-				| Exclude<UiEventDto['kind'], { kind: 'paramChanged' } | { kind: 'paramControlChanged' }>;
-	  })
-	| (Omit<UiEventDto, 'kind'> & {
-			kind: UiEventDto['kind']['kind'];
-			param?: number;
-			old_value?: RustParamValue;
-			new_value?: RustParamValue;
-			old_state?: unknown;
-			new_state?: unknown;
-			parent?: number;
-			child?: number;
-			decl_id?: string;
-			old?: number;
-			new?: number;
-			old_parent?: number;
-			new_parent?: number;
-			node?: number;
-			patch?: unknown;
-			topic?: string;
-			origin?: number;
-			payload?: unknown;
-	  });
-
-export interface RustUiEventBatch {
-	from?: EventTime;
-	to?: EventTime;
-	events: RustUiEventDto[];
-}
+type RustUiEventDto = RustUiEventBatch['events'][number];
+type RustScriptConfig = RustScriptConfigRequest['config'];
+type RustScriptSource = RustScriptConfig['source'];
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
 	typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -610,7 +402,9 @@ const toRustScriptConfig = (config: UiScriptConfig): RustScriptConfig => ({
 	source: toRustScriptSource(config.source)
 });
 
-const fromRustScriptManifest = (manifest: unknown): UiScriptManifest | undefined => {
+const fromRustScriptManifest = (
+	manifest: RustScriptState['manifest']
+): UiScriptManifest | undefined => {
 	if (!isRecord(manifest)) {
 		return undefined;
 	}
@@ -625,7 +419,6 @@ const fromRustScriptManifest = (manifest: unknown): UiScriptManifest | undefined
 
 	const exports = Array.isArray(manifest.exports)
 		? manifest.exports
-				.filter((value): value is Record<string, unknown> => isRecord(value))
 				.map((value) => {
 					const signature = isRecord(value.signature) ? value.signature : {};
 					const argsRaw = signature.args;
@@ -637,7 +430,7 @@ const fromRustScriptManifest = (manifest: unknown): UiScriptManifest | undefined
 							? signature.returns
 							: undefined;
 					return {
-						name: String(value.name ?? ''),
+						name: typeof value.name === 'string' ? value.name : '',
 						signature: { args, returns }
 					};
 				})
@@ -705,7 +498,7 @@ const fromRustConstraints = (
 	constraints: RustUiParamDto['constraints'] | undefined,
 	sharedEnumOptions: UiParamConstraints['enum_options'] | undefined
 ): UiParamConstraints => {
-	const payload = constraints ?? {};
+	const payload = (constraints ?? {}) as NonNullable<RustUiParamDto['constraints']>;
 	const step =
 		typeof payload.step === 'number' && Number.isFinite(payload.step) ? payload.step : undefined;
 	const stepBase =
@@ -717,7 +510,7 @@ const fromRustConstraints = (
 		value: fromRustParamValue(option.value),
 		label: option.label,
 		tags: [...(option.tags ?? [])],
-		ordering: option.ordering
+		ordering: option.ordering ?? undefined
 	}));
 	const enumOptions =
 		inlineEnumOptions.length > 0 ? inlineEnumOptions : [...(sharedEnumOptions ?? [])];
@@ -1027,7 +820,10 @@ const fromRustParam = (param: RustUiParamDto, enumOptionsById: EnumOptionsById):
 		event_behaviour: param.event_behaviour === 'Append' ? 'Append' : 'Coalesce',
 		read_only: Boolean(param.read_only),
 		constraints: fromRustConstraints(param.constraints, sharedEnumOptions),
-		ui_hints: { ...(param.ui_hints ?? {}) },
+		ui_hints: {
+			widget: param.ui_hints?.widget ?? undefined,
+			unit: param.ui_hints?.unit ?? undefined
+		},
 		control: fromRustControlState(param.control),
 		reference_allowed_targets: [...(param.reference_allowed_targets ?? [])],
 		reference_visible_nodes: [...(param.reference_visible_nodes ?? [])]
@@ -1070,6 +866,26 @@ const fromRustNode = (node: RustUiNodeDto, enumOptionsById: EnumOptionsById): Ui
 		description_overridden: Boolean(node.meta.description_overridden),
 		tags: [...(node.meta.tags ?? [])],
 		presentation: node.meta.presentation
+			? {
+					color: node.meta.presentation.color
+						? {
+								r: node.meta.presentation.color.r,
+								g: node.meta.presentation.color.g,
+								b: node.meta.presentation.color.b,
+								a: node.meta.presentation.color.a
+							}
+						: undefined,
+					warnings: Array.isArray(node.meta.presentation.warnings)
+						? node.meta.presentation.warnings.map((warning) => ({
+								id: warning.id ?? undefined,
+								message: warning.message,
+								detail: warning.detail ?? undefined
+							}))
+						: undefined,
+					show_child_warnings_max_depth:
+						node.meta.presentation.show_child_warnings_max_depth ?? undefined
+				}
+			: undefined
 	},
 	data: fromRustNodeData(node.data, enumOptionsById),
 	user_role: node.user_role ?? 'regular',
@@ -1108,11 +924,11 @@ const fromRustEvent = (event: RustUiEventDto): UiEventDto => {
 				}
 			};
 		}
-		return event as UiEventDto;
+		return event as unknown as UiEventDto;
 	}
 
 	if (typeof nestedKind !== 'string') {
-		return event as UiEventDto;
+		return event as unknown as UiEventDto;
 	}
 
 	if (nestedKind === 'paramChanged') {
@@ -1171,14 +987,22 @@ export const fromRustSnapshot = (snapshot: RustUiSnapshot): UiSnapshot => {
 		},
 		logger: {
 			max_entries: snapshot.logger?.max_entries ?? 0,
-			records: [...(snapshot.logger?.records ?? [])]
+			records: (snapshot.logger?.records ?? []).map((record) => ({
+				id: record.id,
+				timestamp_ms: record.timestamp_ms,
+				level: record.level,
+				tag: record.tag,
+				message: record.message,
+				repeat_count: record.repeat_count ?? undefined,
+				origin: record.origin ?? undefined
+			}))
 		}
 	};
 };
 
 export const fromRustEventBatch = (batch: RustUiEventBatch): UiEventBatch => ({
-	from: batch.from,
-	to: batch.to,
+	from: batch.from ?? undefined,
+	to: batch.to ?? undefined,
 	events: batch.events.map(fromRustEvent)
 });
 
@@ -1203,13 +1027,13 @@ export const fromRustReferenceTargets = (
 });
 
 export const fromRustParamControlInfo = (
-	payload: RustParamControlInfoResponse
+	payload: RustUiParamControlInfoResponse
 ): UiParamControlInfo => {
 	const activeMode: UiParameterControlMode = isUiParameterControlMode(payload.active_mode)
 		? payload.active_mode
 		: 'manual';
 	const availableModes = Array.isArray(payload.available_modes)
-		? payload.available_modes.filter((mode): mode is UiParameterControlMode =>
+		? payload.available_modes.filter((mode: unknown): mode is UiParameterControlMode =>
 				isUiParameterControlMode(mode)
 			)
 		: [];
@@ -1223,33 +1047,51 @@ export const fromRustParamControlInfo = (
 		available_modes: availableModes,
 		context_candidates: Array.isArray(payload.context_candidates)
 			? payload.context_candidates
-					.map((candidate) => fromRustUserContextCandidate(candidate))
-					.filter((candidate): candidate is UiUserContextCandidate => candidate !== null)
+					.map((candidate: unknown) => fromRustUserContextCandidate(candidate))
+					.filter(
+						(candidate: UiUserContextCandidate | null): candidate is UiUserContextCandidate =>
+							candidate !== null
+					)
 			: [],
 		token_suggestions: Array.isArray(payload.token_suggestions)
 			? payload.token_suggestions
-					.map((entry) => fromRustTokenSuggestion(entry))
-					.filter((entry): entry is UiTokenSuggestion => entry !== null)
+					.map((entry: unknown) => fromRustTokenSuggestion(entry))
+					.filter((entry: UiTokenSuggestion | null): entry is UiTokenSuggestion => entry !== null)
 			: [],
 		proxy_candidates: Array.isArray(payload.proxy_candidates)
 			? payload.proxy_candidates
-					.map((entry) => fromRustParamControlCandidate(entry))
-					.filter((entry): entry is UiParamControlCandidate => entry !== null)
+					.map((entry: unknown) => fromRustParamControlCandidate(entry))
+					.filter(
+						(entry: UiParamControlCandidate | null): entry is UiParamControlCandidate =>
+							entry !== null
+					)
 			: [],
 		binding_candidates: Array.isArray(payload.binding_candidates)
 			? payload.binding_candidates
-					.map((entry) => fromRustParamControlCandidate(entry))
-					.filter((entry): entry is UiParamControlCandidate => entry !== null)
+					.map((entry: unknown) => fromRustParamControlCandidate(entry))
+					.filter(
+						(entry: UiParamControlCandidate | null): entry is UiParamControlCandidate =>
+							entry !== null
+					)
 			: []
 	};
 };
 
-export const toRustIntent = (intent: UiEditIntent): unknown => {
+const fromRustAck = (ack: RustUiAck): UiAck => ({
+	success: ack.success,
+	status: ack.status,
+	error_code: ack.error_code ?? undefined,
+	error_message: ack.error_message ?? undefined,
+	earliest_event_time: ack.earliest_event_time ?? undefined,
+	history: ack.history
+});
+
+export const toRustIntent = (intent: UiEditIntent): RustUiEditIntent => {
 	if (intent.kind === 'setParam') {
 		return {
 			...intent,
 			value: toRustParamValue(intent.value)
-		};
+		} as RustUiEditIntent;
 	}
 	if (intent.kind === 'createUserItem' && intent.initial_params) {
 		return {
@@ -1258,7 +1100,7 @@ export const toRustIntent = (intent: UiEditIntent): unknown => {
 				...entry,
 				value: toRustParamValue(entry.value)
 			}))
-		};
+		} as RustUiEditIntent;
 	}
 	if (intent.kind === 'setParamControlState') {
 		return {
@@ -1267,9 +1109,9 @@ export const toRustIntent = (intent: UiEditIntent): unknown => {
 				mode: intent.state.mode,
 				spec: intent.state.spec
 			}
-		};
+		} as RustUiEditIntent;
 	}
-	return intent;
+	return intent as RustUiEditIntent;
 };
 
 const formatError = (context: string, response: Response, body: unknown): Error => {
@@ -1364,8 +1206,8 @@ export const createHttpUiClient = (options: HttpClientOptions = {}): UiClient =>
 		},
 
 		async sendIntent(intent: UiEditIntent): Promise<UiAck> {
-			const ack = await postJson<UiAck>('/intent', toRustIntent(intent));
-			return ack;
+			const ack = await postJson<RustUiAck>('/intent', toRustIntent(intent));
+			return fromRustAck(ack);
 		},
 
 		async sendIntents(intents: UiEditIntent[]): Promise<UiAck[]> {
@@ -1376,11 +1218,11 @@ export const createHttpUiClient = (options: HttpClientOptions = {}): UiClient =>
 				return [await client.sendIntent(intents[0])];
 			}
 			const payload = intents.map((intent) => toRustIntent(intent));
-			const acks = await postJson<UiAck[]>('/intent/batch', payload);
+			const acks = await postJson<RustUiAck[]>('/intent/batch', payload);
 			if (!Array.isArray(acks)) {
 				throw new Error('POST /intent/batch returned invalid payload');
 			}
-			return acks;
+			return acks.map(fromRustAck);
 		},
 
 		async replay(scope: UiSubscriptionScope, from?: EventTime): Promise<UiEventBatch> {
@@ -1397,7 +1239,10 @@ export const createHttpUiClient = (options: HttpClientOptions = {}): UiClient =>
 
 		async paramControlInfo(paramNodeId: number): Promise<UiParamControlInfo> {
 			const request: RustParamControlInfoRequest = { param: paramNodeId };
-			const response = await postJson<RustParamControlInfoResponse>('/param-control-info', request);
+			const response = await postJson<RustUiParamControlInfoResponse>(
+				'/param-control-info',
+				request
+			);
 			return fromRustParamControlInfo(response);
 		},
 

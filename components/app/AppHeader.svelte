@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { WorkbenchSession } from '$lib/golden_ui/store/workbench.svelte';
+	import { hasDesktopHost, invokeDesktopCommand } from '$lib/golden_ui/host/desktop';
 	import { onMount } from 'svelte';
 	import { clearPersistedUiState } from '../../store/ui-persistence';
 	import { platform } from '../../store/platform.svelte';
@@ -11,37 +12,28 @@
 		session?: WorkbenchSession | null;
 	}>();
 
-	const invokeAppCommand = async (
-		command: string,
-		args?: Record<string, unknown>
-	): Promise<unknown | undefined> => {
-		const invoke = window.__TAURI_INTERNALS__?.invoke;
-		if (!invoke) {
-			return undefined;
-		}
-
-		try {
-			return await invoke(command, args);
-		} catch (error) {
-			console.error(`[window-controls] ${command} failed.`, error);
-			return undefined;
-		}
-	};
-
 	const refreshMaximizeState = async (): Promise<void> => {
-		const maximized = await invokeAppCommand('window_is_maximized');
+		const maximized = await invokeDesktopCommand(
+			'window_is_maximized',
+			undefined,
+			'window-controls'
+		);
 		isWindowMaximized = Boolean(maximized);
 	};
 
 	const minimizeWindow = async (): Promise<void> => {
-		const result = await invokeAppCommand('window_minimize');
+		const result = await invokeDesktopCommand('window_minimize', undefined, 'window-controls');
 		if (result === undefined) {
 			console.error('[window-controls] Tauri window API unavailable (minimize).');
 		}
 	};
 
 	const toggleWindowMaximize = async (): Promise<void> => {
-		const result = await invokeAppCommand('window_toggle_maximize');
+		const result = await invokeDesktopCommand(
+			'window_toggle_maximize',
+			undefined,
+			'window-controls'
+		);
 		if (result === undefined) {
 			console.error('[window-controls] Tauri window API unavailable (toggle maximize).');
 			return;
@@ -50,7 +42,7 @@
 	};
 
 	const closeWindow = async (): Promise<void> => {
-		const result = await invokeAppCommand('window_close');
+		const result = await invokeDesktopCommand('window_close', undefined, 'window-controls');
 		if (result === undefined) {
 			console.error('[window-controls] Tauri window API unavailable (close).');
 		}
@@ -58,7 +50,7 @@
 
 	const startDrag = async (): Promise<void> => {
 		if (platform.isWindows) return; //handle natively
-		const result = await invokeAppCommand('start_drag');
+		const result = await invokeDesktopCommand('start_drag', undefined, 'window-controls');
 		if (result === undefined) {
 			console.error('[window-controls] Tauri window API unavailable (start drag)');
 		}
@@ -72,7 +64,7 @@
 	};
 
 	onMount(() => {
-		hasTauriWindowApi = Boolean(window.__TAURI_INTERNALS__?.invoke);
+		hasTauriWindowApi = hasDesktopHost();
 		if (!hasTauriWindowApi) {
 			return;
 		}

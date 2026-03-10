@@ -1,8 +1,4 @@
-import type {
-	PanelHandle,
-	PanelQuery,
-	PanelSpawnRequest
-} from '../dockview/panel-types';
+import type { PanelHandle, PanelQuery, PanelSpawnRequest } from '../dockview/panel-types';
 import { appState } from './workbench.svelte';
 
 export const accessPanel = (query: PanelQuery): PanelHandle | null => {

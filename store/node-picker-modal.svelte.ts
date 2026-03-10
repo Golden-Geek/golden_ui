@@ -43,7 +43,9 @@ export const nodePickerModalState = $state({
 	request: null as NodePickerModalRequest | null
 });
 
-const toAnchorRect = (rect: DOMRect | ViewportAnchorRect | null | undefined): ViewportAnchorRect | null => {
+const toAnchorRect = (
+	rect: DOMRect | ViewportAnchorRect | null | undefined
+): ViewportAnchorRect | null => {
 	if (!rect) {
 		return null;
 	}
@@ -59,7 +61,8 @@ const toAnchorRect = (rect: DOMRect | ViewportAnchorRect | null | undefined): Vi
 
 const normalizeOptions = (options: NodePickerModalOptions): NodePickerModalOptions => {
 	const anchorRect =
-		options.anchorRect ?? (options.anchorElement ? toAnchorRect(options.anchorElement.getBoundingClientRect()) : null);
+		options.anchorRect ??
+		(options.anchorElement ? toAnchorRect(options.anchorElement.getBoundingClientRect()) : null);
 	return {
 		selectedNodeId: null,
 		selectedProjection: null,
@@ -91,7 +94,9 @@ const settle = (result: NodePickerModalResult): void => {
 	active.resolve(result);
 };
 
-export const openNodePickerModal = (options: NodePickerModalOptions): Promise<NodePickerModalResult> => {
+export const openNodePickerModal = (
+	options: NodePickerModalOptions
+): Promise<NodePickerModalResult> => {
 	if (nodePickerModalState.request) {
 		settle({ kind: 'cancel' });
 	}

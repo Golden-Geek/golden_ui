@@ -51,7 +51,9 @@
 	let vectorViewMode = $state<WatcherVectorViewMode>(WATCHER_DEFAULT_SETTINGS.vectorViewMode);
 
 	let timeWindowMs = $derived(timeWindowSec * 1000);
-	let streamKey = $derived(param ? `${liveNode.node_id}:${param.value.kind}` : `${liveNode.node_id}:none`);
+	let streamKey = $derived(
+		param ? `${liveNode.node_id}:${param.value.kind}` : `${liveNode.node_id}:none`
+	);
 	let visualizer = $derived.by((): WatcherVisualizerEntry | null => {
 		if (!defaultVisualizer || !param) {
 			return null;
@@ -188,7 +190,9 @@
 							type="button"
 							class:selected={rangeMode === 'fixed'}
 							disabled={!fixedRange}
-							title={fixedRange ? 'Use parameter min/max constraints' : 'No min/max constraints available'}
+							title={fixedRange
+								? 'Use parameter min/max constraints'
+								: 'No min/max constraints available'}
 							onclick={() => {
 								if (fixedRange) {
 									setRangeMode('fixed');
@@ -233,10 +237,10 @@
 		<visualizer.component
 			sampleValue={param.value}
 			constraints={param.constraints}
-			timeWindowMs={timeWindowMs}
-			rangeMode={rangeMode}
+			{timeWindowMs}
+			{rangeMode}
 			unit={param.ui_hints.unit ?? ''}
-			decimationMode={decimationMode}
+			{decimationMode}
 			{streamKey} />
 	</section>
 {/if}

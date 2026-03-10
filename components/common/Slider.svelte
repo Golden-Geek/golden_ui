@@ -49,7 +49,7 @@
 
 	let pointerLockId = $state(null as number | null);
 
-	async function startDrag(e: MouseEvent)  {
+	async function startDrag(e: MouseEvent) {
 		if (disabled || readOnly) {
 			return;
 		}

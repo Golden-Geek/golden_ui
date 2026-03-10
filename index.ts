@@ -8,6 +8,12 @@ export type {
 } from './store/workbench.svelte';
 export type { NodeIconSet } from './store/node-types';
 
+export {
+	createDefaultUiClient,
+	type UiTransportConnectionState,
+	type UiTransportFactory,
+	type UiTransportOptions
+} from './transport';
 export { createHttpUiClient } from './transport/http';
 export { createWebSocketUiClient } from './transport/ws';
 

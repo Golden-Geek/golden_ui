@@ -11,10 +11,7 @@ export class MultiSeriesRingBuffer {
 		this.capacity = Math.max(16, Math.floor(capacity));
 		this.seriesCount = Math.max(1, Math.floor(seriesCount));
 		this.timestamps = new Float64Array(this.capacity);
-		this.series = Array.from(
-			{ length: this.seriesCount },
-			() => new Float64Array(this.capacity)
-		);
+		this.series = Array.from({ length: this.seriesCount }, () => new Float64Array(this.capacity));
 	}
 
 	get length(): number {

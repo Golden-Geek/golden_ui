@@ -82,7 +82,10 @@
 		}
 	};
 
-	const colorAt = (buffer: MultiSeriesRingBuffer, sampleIndex: number): [number, number, number, number] => [
+	const colorAt = (
+		buffer: MultiSeriesRingBuffer,
+		sampleIndex: number
+	): [number, number, number, number] => [
 		buffer.valueAt(0, sampleIndex),
 		buffer.valueAt(1, sampleIndex),
 		buffer.valueAt(2, sampleIndex),

@@ -6,7 +6,11 @@
 	} from '$lib/golden_ui/store/ui-intents';
 	import type { UiNodeDto } from '$lib/golden_ui/types';
 
-	let { node, layoutMode = 'default', insideLabel = null } = $props<{
+	let {
+		node,
+		layoutMode = 'default',
+		insideLabel = null
+	} = $props<{
 		node: UiNodeDto;
 		layoutMode?: 'default' | 'widget';
 		insideLabel?: string | null;
@@ -21,10 +25,7 @@
 		if (!param || param.value.kind !== 'str') {
 			return '';
 		}
-		if (
-			param.control.mode === 'templateText' &&
-			param.control.spec.mode === 'templateText'
-		) {
+		if (param.control.mode === 'templateText' && param.control.spec.mode === 'templateText') {
 			return param.control.spec.template;
 		}
 		return param.value.value;
@@ -61,7 +62,10 @@
 				break;
 			}
 
-			const token = chars.slice(index + 1, end).join('').trim();
+			const token = chars
+				.slice(index + 1, end)
+				.join('')
+				.trim();
 			if (token.length > 0) {
 				return true;
 			}
@@ -208,5 +212,4 @@
 		min-inline-size: 0;
 		outline: none;
 	}
-
 </style>
