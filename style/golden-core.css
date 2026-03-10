@@ -268,7 +268,7 @@ select {
 	-webkit-padding-end: 30px;
 }
 
-.arrow {
+/* .arrow {
 	width: 1rem;
 	height: 1rem;
 	background: url('icons/arrow.svg') center center no-repeat;
@@ -279,7 +279,7 @@ select {
 		opacity 0.2s;
 	cursor: pointer;
 }
-
+/*  */
 .arrow:hover {
 	opacity: 1;
 }
@@ -294,7 +294,7 @@ select {
 
 .arrow.left {
 	transform: rotate(180deg);
-}
+} */
 
 /* Dragging cursor hiding */
 .slider-hide-cursor * {

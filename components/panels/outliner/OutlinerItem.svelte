@@ -8,6 +8,7 @@
 	import NodeWarningBadge from '$lib/golden_ui/components/common/NodeWarningBadge.svelte';
 	import EnableButton from '../../common/EnableButton.svelte';
 	import { beginDashboardNodeDrag } from '../dashboard/dashboard-drag';
+	import Arrow from '../../common/Arrow.svelte';
 
 	const EMPTY_AUTO_EXPAND_ANCESTORS: ReadonlySet<NodeId> = new Set<NodeId>();
 
@@ -168,7 +169,7 @@
 </script>
 
 {#if node && isVisible}
-	<div class="outliner-item">
+	<div class="outliner-item" style="--node-accent-color: {accentColor}">
 		{#if showRow}
 			<div
 				class="outliner-item-content"
@@ -178,14 +179,13 @@
 				class:current-reference={isCurrentReference}
 				data-node-id={node.node_id}
 				class:non-selectable={!rowSelectable}
-				style="--node-accent-color: {accentColor}"
 				onpointerenter={handlePointerEnter}
 				onpointerleave={handlePointerLeave}>
 				{#if hasArrow}
 					<div
-						class="outliner-expand arrow {isExpanded ? 'down' : ''}"
 						aria-hidden="true"
 						onclick={() => (isExpanded = !isExpanded)}>
+						<Arrow direction={isExpanded ? 'down' : 'right'} color={accentColor} />
 					</div>
 				{/if}
 				<img class="outliner-item-icon" src={iconURL} alt="" aria-hidden="true" />
@@ -244,10 +244,8 @@
 	.outliner-item-content {
 		display: flex;
 		align-items: center;
-		padding: 0.05rem 0 0.05rem 0.25rem;
+		padding: 0.05rem 0 0.05rem 0.25rem 0rem;
 		gap: 0.25rem;
-		border-left: solid 0.1rem rgba(from var(--node-accent-color) r g b / 0.45);
-		border-radius: 0.3rem;
 	}
 
 	.outliner-item-content.non-selectable {
@@ -264,9 +262,10 @@
 		margin-left: -0.5rem;
 	}
 
-	.outliner-expand {
-		width: 1rem;
-		height: 1rem;
+	.outliner-item-content:not(.has-arrow) {
+		border-left: solid 0.1rem rgba(from var(--node-accent-color) r g b / 0.45);
+		border-radius: 0.3rem;
+		padding-left: 0.6rem;
 	}
 
 	.outliner-item-icon {
@@ -322,6 +321,6 @@
 
 	.outliner-children {
 		padding-left: 0.7rem;
-		border-left: 0.025rem dashed var(--gc-color-outliner-border);
+		border-left: 0.025rem dashed var(--node-accent-color);
 	}
 </style>
