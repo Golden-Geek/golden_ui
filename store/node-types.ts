@@ -199,6 +199,16 @@ const getDerivedColorKeyForNode = (node: UiNodeDto): string => {
 };
 
 const getDerivedColorForNode = (node: UiNodeDto): UiColorDto => {
+	let autoColor = node.data.kind === 'parameter';
+	if (!autoColor) {
+		if (node.node_type === 'folder') {
+			return { r: .8, g: .8, b: .8, a: 0.5 };
+		} else if (node.user_item_kind.trim().length > 0) {
+			return { r: 1, g: .5, b: .8, a: 0.5 };
+		}
+	}
+
+
 	const hash = hashString(getDerivedColorKeyForNode(node));
 	const hue = hash % 360;
 	const saturation = 0.52 + ((hash >>> 9) % 18) / 100;
@@ -208,7 +218,7 @@ const getDerivedColorForNode = (node: UiNodeDto): UiColorDto => {
 
 export const getContainerColorForNode = (node: UiNodeDto | null): string => {
 	if (!node) {
-		return 'rgba(124, 138, 162, 1)';
+		return 'rgba(100,100,100, 1)';
 	}
 
 	const explicitColor = normalizeNodeColor(node.meta.presentation?.color);

@@ -11,7 +11,7 @@
 	import type { PanelProps, PanelState } from '../../../dockview/panel-types.ts';
 	import type { NodeId } from '$lib/golden_ui/types';
 	import { slide } from 'svelte/transition';
-	import { getIconURLForNode } from '$lib/golden_ui/store/node-types';
+	import { getContainerColorForNode, getIconURLForNode } from '$lib/golden_ui/store/node-types';
 	import { sendPatchMetaIntent } from '$lib/golden_ui/store/ui-intents';
 	import EnableButton from '../../common/EnableButton.svelte';
 	import Watcher from '../../common/Watcher.svelte';
@@ -58,6 +58,9 @@
 	let inspectedNodes = $derived(node ? [node] : []);
 
 	let iconURL = $derived(node ? getIconURLForNode(node) : null);
+	let headerAccentColor = $derived(
+		node ? getContainerColorForNode(node) : 'rgba(124, 138, 162, 1)'
+	);
 	let isNameChangeable = $derived(node?.meta.user_permissions.can_edit_name ?? false);
 	let warnings = $derived(node ? session?.getNodeVisibleWarnings(node.node_id) : null);
 	let parentNodeId = $derived.by((): NodeId | null => {
@@ -414,6 +417,7 @@
 		class="inspector-header"
 		role="group"
 		data-node-id={node?.node_id}
+		style="--node-accent-color: {headerAccentColor}"
 		onpointerenter={handleHeaderPointerEnter}
 		onpointerleave={handleHeaderPointerLeave}>
 		{#if node == null}
@@ -578,17 +582,29 @@
 	}
 
 	.inspector-header {
-		border-bottom: solid 1px rgba(255, 255, 255, 0.1);
+		border-bottom: solid 1px rgba(from var(--node-accent-color) r g b / 0.24);
 		display: flex;
 		align-items: center;
 		gap: 0.5rem;
 		padding: 0.25rem 0;
 	}
 
+	.inspector-header .header-icon {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 1.7rem;
+		height: 1.7rem;
+		border-radius: 0.4rem;
+		background: rgba(from var(--node-accent-color) r g b / 0.12);
+		box-shadow: inset 0 0 0 1px rgba(from var(--node-accent-color) r g b / 0.16);
+	}
+
 	.inspector-header .header-icon img {
 		width: 1.2rem;
 		height: 1.2rem;
 		vertical-align: middle;
+		filter: drop-shadow(0 0 0.25rem rgba(from var(--node-accent-color) r g b / 0.28));
 	}
 
 	.inspector-header .title-text {

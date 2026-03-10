@@ -3,7 +3,7 @@
 	import { appState } from '$lib/golden_ui/store/workbench.svelte';
 	import type { NodeId, UiNodeDto } from '$lib/golden_ui/types';
 	import Self from './OutlinerItem.svelte';
-	import { getIconURLForNode } from '$lib/golden_ui/store/node-types';
+	import { getContainerColorForNode, getIconURLForNode } from '$lib/golden_ui/store/node-types';
 	import { slide } from 'svelte/transition';
 	import NodeWarningBadge from '$lib/golden_ui/components/common/NodeWarningBadge.svelte';
 	import EnableButton from '../../common/EnableButton.svelte';
@@ -42,6 +42,7 @@
 	let meta = $derived(node?.meta ?? null);
 	let isOutlinerMode = $derived(mode === 'outliner');
 	let iconURL = $derived(getIconURLForNode(node));
+	let accentColor = $derived(node ? getContainerColorForNode(node) : 'rgba(124, 138, 162, 1)');
 
 	const selectNode = (next: UiNodeDto, event: MouseEvent): void => {
 		if (!nodeSelectable(next)) {
@@ -177,6 +178,7 @@
 				class:current-reference={isCurrentReference}
 				data-node-id={node.node_id}
 				class:non-selectable={!rowSelectable}
+				style="--node-accent-color: {accentColor}"
 				onpointerenter={handlePointerEnter}
 				onpointerleave={handlePointerLeave}>
 				{#if hasArrow}
@@ -242,8 +244,10 @@
 	.outliner-item-content {
 		display: flex;
 		align-items: center;
-		padding: 0.05rem 0rem;
+		padding: 0.05rem 0 0.05rem 0.25rem;
 		gap: 0.25rem;
+		border-left: solid 0.1rem rgba(from var(--node-accent-color) r g b / 0.45);
+		border-radius: 0.3rem;
 	}
 
 	.outliner-item-content.non-selectable {
@@ -270,6 +274,7 @@
 		width: 1.2rem;
 		height: 1.2rem;
 		flex: 0 0 auto;
+		filter: drop-shadow(0 0 0.2rem rgba(from var(--node-accent-color) r g b / 0.28));
 	}
 
 	.outliner-item-label {
