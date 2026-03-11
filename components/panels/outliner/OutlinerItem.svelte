@@ -182,9 +182,7 @@
 				onpointerenter={handlePointerEnter}
 				onpointerleave={handlePointerLeave}>
 				{#if hasArrow}
-					<div
-						aria-hidden="true"
-						onclick={() => (isExpanded = !isExpanded)}>
+					<div aria-hidden="true" onclick={() => (isExpanded = !isExpanded)}>
 						<Arrow direction={isExpanded ? 'down' : 'right'} color={accentColor} />
 					</div>
 				{/if}

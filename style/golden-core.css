@@ -294,7 +294,8 @@ select {
 
 .arrow.left {
 	transform: rotate(180deg);
-} */
+}
+*/
 
 /* Dragging cursor hiding */
 .slider-hide-cursor * {

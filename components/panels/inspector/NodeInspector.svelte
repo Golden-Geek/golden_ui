@@ -12,6 +12,7 @@
 	import { resolveNodeInspector, type NodeInspectorOrder } from './node-inspector-registry';
 	import NodeAddButton from '../../common/NodeAddButton.svelte';
 	import type { Snippet } from 'svelte';
+	import Arrow from '../../common/Arrow.svelte';
 
 	let {
 		nodes = [],
@@ -203,7 +204,7 @@
 							}
 						}}>
 						{#if hasChildren}
-							<span class="arrow {collapsed ? '' : 'down'}"></span>
+							<Arrow direction={collapsed ? 'right' : 'down'} />
 						{/if}
 						<span class="header-icon">
 							<img src={iconURL} alt="" />
