@@ -1,9 +1,9 @@
 <script lang="ts">
 	import { onDestroy } from 'svelte';
 	import ColorPicker from '../../../common/ColorPicker.svelte';
-	import { appState } from '$lib/golden_ui/store/workbench.svelte';
-	import { createUiEditSession, sendSetParamIntent } from '$lib/golden_ui/store/ui-intents';
-	import type { UiNodeDto } from '$lib/golden_ui/types';
+	import { appState } from '../../../../store/workbench.svelte';
+	import { createUiEditSession, sendSetParamIntent } from '../../../../store/ui-intents';
+	import type { UiNodeDto } from '../../../../types';
 
 	interface ColorEditorPresentation {
 		force_expanded?: boolean;

@@ -1,10 +1,10 @@
 <script lang="ts">
 	import { onDestroy, untrack } from 'svelte';
-	import { registerCommandHandler } from '$lib/golden_ui/store/commands.svelte';
-	import { appState } from '$lib/golden_ui/store/workbench.svelte';
-	import { createUiEditSession, sendSetParamIntent } from '$lib/golden_ui/store/ui-intents';
-	import type { UiNodeDto, UiRangeConstraint } from '$lib/golden_ui/types';
-	import { formatWatcherNumber } from '$lib/golden_ui/components/common/watcher/watcher-utils';
+	import { registerCommandHandler } from '../../../../store/commands.svelte';
+	import { appState } from '../../../../store/workbench.svelte';
+	import { createUiEditSession, sendSetParamIntent } from '../../../../store/ui-intents';
+	import type { UiNodeDto, UiRangeConstraint } from '../../../../types';
+	import { formatWatcherNumber } from '../../../common/watcher/watcher-utils';
 
 	interface Bounds {
 		xMin: number;

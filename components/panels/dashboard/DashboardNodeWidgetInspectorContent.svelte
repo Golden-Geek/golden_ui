@@ -1,8 +1,8 @@
 <script lang="ts">
-	import type { UiNodeDto } from '$lib/golden_ui/types';
-	import { appState } from '$lib/golden_ui/store/workbench.svelte';
-	import EnableButton from '$lib/golden_ui/components/common/EnableButton.svelte';
-	import NodeInspector from '$lib/golden_ui/components/panels/inspector/NodeInspector.svelte';
+	import type { UiNodeDto } from '../../../types';
+	import { appState } from '../../../store/workbench.svelte';
+	import EnableButton from '../../common/EnableButton.svelte';
+	import NodeInspector from '../inspector/NodeInspector.svelte';
 
 	let {
 		targetNode,

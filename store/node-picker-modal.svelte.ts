@@ -1,4 +1,4 @@
-import type { NodeId, UiNodeDto, UiParamValueProjection } from '$lib/golden_ui/types';
+import type { NodeId, UiNodeDto, UiParamValueProjection } from '../types';
 
 export interface ViewportAnchorRect {
 	left: number;

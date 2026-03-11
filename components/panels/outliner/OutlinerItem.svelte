@@ -1,11 +1,11 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
-	import { appState } from '$lib/golden_ui/store/workbench.svelte';
-	import type { NodeId, UiNodeDto } from '$lib/golden_ui/types';
+	import { appState } from '../../../store/workbench.svelte';
+	import type { NodeId, UiNodeDto } from '../../../types';
 	import Self from './OutlinerItem.svelte';
-	import { getContainerColorForNode, getIconURLForNode } from '$lib/golden_ui/store/node-types';
+	import { getContainerColorForNode, getIconURLForNode } from '../../../store/node-types';
 	import { slide } from 'svelte/transition';
-	import NodeWarningBadge from '$lib/golden_ui/components/common/NodeWarningBadge.svelte';
+	import NodeWarningBadge from '../../common/NodeWarningBadge.svelte';
 	import EnableButton from '../../common/EnableButton.svelte';
 	import { beginDashboardNodeDrag } from '../dashboard/dashboard-drag';
 	import Arrow from '../../common/Arrow.svelte';

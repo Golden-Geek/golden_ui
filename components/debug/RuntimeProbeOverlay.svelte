@@ -3,7 +3,7 @@
 		clearRuntimeProbe,
 		runtimeProbe,
 		setRuntimeProbeOverlayEnabled
-	} from '$lib/golden_ui/debug/runtime-probe.svelte';
+	} from '../../debug/runtime-probe.svelte';
 
 	let expanded = $state(false);
 	const visible = $derived(runtimeProbe.overlayEnabled);

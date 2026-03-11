@@ -1,4 +1,4 @@
-import type { ParamValue, UiParamConstraints } from '$lib/golden_ui/types';
+import type { ParamValue, UiParamConstraints } from '../../../types';
 
 export type WatcherRangeMode = 'adaptive' | 'fixed';
 export type WatcherDecimationMode = 'off' | 'auto' | 'minmax';

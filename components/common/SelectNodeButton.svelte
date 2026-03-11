@@ -1,6 +1,6 @@
 <script lang="ts">
-	import { appState } from '$lib/golden_ui/store/workbench.svelte';
-	import type { UiNodeDto } from '$lib/golden_ui/types';
+	import { appState } from '../../store/workbench.svelte';
+	import type { UiNodeDto } from '../../types';
 
 	let { node } = $props<{
 		node: UiNodeDto;

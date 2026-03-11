@@ -1,16 +1,12 @@
-import type { GraphState } from '$lib/golden_ui/store/graph.svelte';
+import type { GraphState } from '../../../store/graph.svelte';
 import type {
 	NodeId,
 	ParamValue,
 	UiNodeDto,
 	UiParamDto,
 	UiParamValueProjection
-} from '$lib/golden_ui/types';
-import {
-	cssValueFromParamValue,
-	formatCssValue,
-	type CssValueData
-} from '$lib/golden_ui/css-value';
+} from '../../../types';
+import { cssValueFromParamValue, formatCssValue, type CssValueData } from '../../../css-value';
 
 export type DashboardLayoutKind =
 	| 'free'

@@ -1,6 +1,6 @@
 <script lang="ts">
-	import { sendCreateUserItemIntent } from '$lib/golden_ui/store/ui-intents';
-	import type { UiCreatableUserItem, UiNodeDto } from '$lib/golden_ui/types';
+	import { sendCreateUserItemIntent } from '../../store/ui-intents';
+	import type { UiCreatableUserItem, UiNodeDto } from '../../types';
 	import ContextMenu from './ContextMenu.svelte';
 	import type { ContextMenuAnchor, ContextMenuItem } from './context-menu';
 	import addIcon from '../../style/icons/node/add.svg';

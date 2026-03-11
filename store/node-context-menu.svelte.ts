@@ -1,4 +1,4 @@
-import type { NodeId } from '$lib/golden_ui/types';
+import type { NodeId } from '../types';
 
 export const nodeContextMenuState = $state({
 	nodeId: null as NodeId | null,

@@ -1,8 +1,8 @@
 <script lang="ts">
-	import { appState } from '$lib/golden_ui/store/workbench.svelte';
-	import EnableButton from '$lib/golden_ui/components/common/EnableButton.svelte';
-	import type { UiNodeDto } from '$lib/golden_ui/types';
-	import Vec2PadEditor from '$lib/golden_ui/components/panels/inspector/parameters/Vec2PadEditor.svelte';
+	import { appState } from '../../../store/workbench.svelte';
+	import EnableButton from '../../common/EnableButton.svelte';
+	import type { UiNodeDto } from '../../../types';
+	import Vec2PadEditor from '../inspector/parameters/Vec2PadEditor.svelte';
 	import {
 		getEffectiveWidgetVectorRange,
 		getEnabledWidgetNumberOption

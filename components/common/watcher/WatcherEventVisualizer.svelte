@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { ParamValue, UiParamConstraints } from '$lib/golden_ui/types';
+	import type { ParamValue, UiParamConstraints } from '../../../types';
 	import { TimeRingBuffer } from './watcher-buffers';
 	import {
 		extractEventLabel,

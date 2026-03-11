@@ -1,12 +1,12 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
 	import { slide, type SlideParams } from 'svelte/transition';
-	import type { UiNodeDto } from '$lib/golden_ui/types';
+	import type { UiNodeDto } from '../../../types';
 	import Self from './NodeInspector.svelte';
-	import { appState } from '$lib/golden_ui/store/workbench.svelte';
-	import { sendPatchMetaIntent } from '$lib/golden_ui/store/ui-intents';
+	import { appState } from '../../../store/workbench.svelte';
+	import { sendPatchMetaIntent } from '../../../store/ui-intents';
 	import ParameterInspector from './ParameterInspector.svelte';
-	import { getContainerColorForNode, getIconURLForNode } from '$lib/golden_ui/store/node-types';
+	import { getContainerColorForNode, getIconURLForNode } from '../../../store/node-types';
 	import EnableButton from '../../common/EnableButton.svelte';
 	import NodeWarningBadge from '../../common/NodeWarningBadge.svelte';
 	import { resolveNodeInspector, type NodeInspectorOrder } from './node-inspector-registry';

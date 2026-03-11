@@ -1,4 +1,4 @@
-import type { NodeId, UiNodeDto } from '$lib/golden_ui/types';
+import type { NodeId, UiNodeDto } from '../../../types';
 
 export const DASHBOARD_DRAG_MIME = 'application/x-golden-dashboard-drag';
 

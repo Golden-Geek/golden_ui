@@ -1,22 +1,18 @@
-import type { GraphState } from '$lib/golden_ui/store/graph.svelte';
+import type { GraphState } from '../../../store/graph.svelte';
 import type {
 	NodeId,
 	ParamValue,
 	UiCreateUserItemInitialParam,
 	UiNodeDto,
 	UiParamDto
-} from '$lib/golden_ui/types';
+} from '../../../types';
 import {
 	createUiEditSession,
 	sendCreateUserItemByTypeIntent,
 	sendMoveNodeIntent,
 	sendSetParamIntent
-} from '$lib/golden_ui/store/ui-intents';
-import {
-	cssValueToPx,
-	type CssUnitConversionContext,
-	type CssValueData
-} from '$lib/golden_ui/css-value';
+} from '../../../store/ui-intents';
+import { cssValueToPx, type CssUnitConversionContext, type CssValueData } from '../../../css-value';
 
 import {
 	createReferenceValue,

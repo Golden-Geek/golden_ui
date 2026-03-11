@@ -9,7 +9,7 @@
 		getMainViewportBounds,
 		remToPx
 	} from './floating-panel';
-	import { getCommandShortcutHint } from '$lib/golden_ui/store/commands.svelte';
+	import { getCommandShortcutHint } from '../../store/commands.svelte';
 	import {
 		normalizeContextMenuItems,
 		type ContextMenuAnchor,

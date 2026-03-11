@@ -9,10 +9,10 @@
 		writePanelPersistedState
 	} from '../../../dockview/panel-persistence';
 	import type { PanelProps, PanelState } from '../../../dockview/panel-types.ts';
-	import type { NodeId } from '$lib/golden_ui/types';
+	import type { NodeId } from '../../../types';
 	import { slide } from 'svelte/transition';
-	import { getContainerColorForNode, getIconURLForNode } from '$lib/golden_ui/store/node-types';
-	import { sendPatchMetaIntent } from '$lib/golden_ui/store/ui-intents';
+	import { getContainerColorForNode, getIconURLForNode } from '../../../store/node-types';
+	import { sendPatchMetaIntent } from '../../../store/ui-intents';
 	import EnableButton from '../../common/EnableButton.svelte';
 	import Watcher from '../../common/Watcher.svelte';
 	import type { WatcherUiSettings } from '../../common/watcher/watcher-utils';

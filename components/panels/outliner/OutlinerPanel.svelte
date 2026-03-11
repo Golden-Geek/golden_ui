@@ -1,7 +1,7 @@
 <script lang="ts">
 	import type { PanelProps, PanelState } from '../../../dockview/panel-types';
 	import type { UiNodeDto } from '../../../types';
-	import { appState } from '$lib/golden_ui/store/workbench.svelte';
+	import { appState } from '../../../store/workbench.svelte';
 	import { tick } from 'svelte';
 	import OutlinerItem from './OutlinerItem.svelte';
 	import { collectOutlinerAncestorNodeIds, scrollOutlinerNodeIntoView } from './navigation';

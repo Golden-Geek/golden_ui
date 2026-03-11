@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { PanelDefinition } from '$lib/golden_ui/dockview/panel-types';
+	import type { PanelDefinition } from '../../dockview/panel-types';
 	import ContextMenu from '../common/ContextMenu.svelte';
 	import type { ContextMenuAnchor, ContextMenuItem } from '../common/context-menu';
 	import addTabIcon from '../../style/icons/panels/add_tab.svg';

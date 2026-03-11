@@ -1,5 +1,5 @@
-import type { GraphState } from '$lib/golden_ui/store/graph.svelte';
-import type { ParamValue, UiNodeDto, UiRangeConstraint } from '$lib/golden_ui/types';
+import type { GraphState } from '../../../store/graph.svelte';
+import type { ParamValue, UiNodeDto, UiRangeConstraint } from '../../../types';
 import { getDirectParam } from './dashboard-model';
 
 const getWidgetParamValue = (

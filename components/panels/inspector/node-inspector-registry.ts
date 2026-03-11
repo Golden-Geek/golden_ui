@@ -1,5 +1,5 @@
 import type { Snippet } from 'svelte';
-import type { UiNodeDto } from '$lib/golden_ui/types';
+import type { UiNodeDto } from '../../../types';
 import ScriptNodeInspector from './nodes/ScriptNodeInspector.svelte';
 import AnimationCurveNodeInspector from './nodes/AnimationCurveNodeInspector.svelte';
 

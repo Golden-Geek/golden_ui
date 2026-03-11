@@ -3,19 +3,19 @@
 	import { slide } from 'svelte/transition';
 	import ContextMenu from './ContextMenu.svelte';
 	import ColorPicker from './ColorPicker.svelte';
-	import { appState } from '$lib/golden_ui/store/workbench.svelte';
-	import { sendPatchMetaIntent } from '$lib/golden_ui/store/ui-intents';
+	import { appState } from '../../store/workbench.svelte';
+	import { sendPatchMetaIntent } from '../../store/ui-intents';
 	import type { ContextMenuAnchor, ContextMenuItem } from './context-menu';
 	import {
 		closeNodeContextMenu,
 		nodeContextMenuState,
 		openNodeContextMenu
-	} from '$lib/golden_ui/store/node-context-menu.svelte';
-	import type { NodeId, UiColorDto, UiNodeDto } from '$lib/golden_ui/types';
-	import { getMainViewportBounds, remToPx } from '$lib/golden_ui/components/common/floating-panel';
-	import { getPanelByType, showPanel } from '$lib/golden_ui/store/ui-panels';
-	import { PERSISTED_PANEL_STATE_KEY } from '$lib/golden_ui/dockview/panel-persistence';
-	import { copyTextToClipboard } from '$lib/golden_ui/utils/clipboard';
+	} from '../../store/node-context-menu.svelte';
+	import type { NodeId, UiColorDto, UiNodeDto } from '../../types';
+	import { getMainViewportBounds, remToPx } from './floating-panel';
+	import { getPanelByType, showPanel } from '../../store/ui-panels';
+	import { PERSISTED_PANEL_STATE_KEY } from '../../dockview/panel-persistence';
+	import { copyTextToClipboard } from '../../utils/clipboard';
 	import copyPathIcon from '../../style/icons/copy.svg';
 	import colorIcon from '../../style/icons/parameter/color.svg';
 	import settingsIcon from '../../style/icons/settings.svg';

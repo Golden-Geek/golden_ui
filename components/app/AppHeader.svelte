@@ -1,6 +1,6 @@
 <script lang="ts">
-	import type { WorkbenchSession } from '$lib/golden_ui/store/workbench.svelte';
-	import { hasDesktopHost, invokeDesktopCommand } from '$lib/golden_ui/host/desktop';
+	import type { WorkbenchSession } from '../../store/workbench.svelte';
+	import { hasDesktopHost, invokeDesktopCommand } from '../../host/desktop';
 	import { onMount } from 'svelte';
 	import { clearPersistedUiState } from '../../store/ui-persistence';
 	import { platform } from '../../store/platform.svelte';

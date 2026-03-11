@@ -1,8 +1,8 @@
-import { browser } from '$app/environment';
+const isBrowser = typeof window !== 'undefined';
 
 export const platform = $state({
 	get name() {
-		return browser ? window.__PLATFORM__ || '?' : 'unknown';
+		return isBrowser ? window.__PLATFORM__ || '?' : 'unknown';
 	},
 	get isLinux() {
 		return this.name === 'linux';

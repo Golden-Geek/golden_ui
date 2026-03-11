@@ -1,4 +1,4 @@
-import { browser } from '$app/environment';
+const isBrowser = typeof window !== 'undefined';
 
 export type RuntimeProbeEntrySource = 'error' | 'unhandledrejection';
 
@@ -77,7 +77,7 @@ const normalizeErrorLike = (
 };
 
 const readOverlayEnabled = (): boolean => {
-	if (!browser) {
+	if (!isBrowser) {
 		return false;
 	}
 	const url = new URL(window.location.href);
@@ -116,7 +116,7 @@ export const clearRuntimeProbe = (): void => {
 
 export const setRuntimeProbeOverlayEnabled = (enabled: boolean): void => {
 	runtimeProbe.overlayEnabled = enabled;
-	if (!browser) {
+	if (!isBrowser) {
 		return;
 	}
 	if (enabled) {
@@ -127,7 +127,7 @@ export const setRuntimeProbeOverlayEnabled = (enabled: boolean): void => {
 };
 
 export const ensureRuntimeProbeInstalled = (): void => {
-	if (!browser) {
+	if (!isBrowser) {
 		return;
 	}
 	runtimeProbe.overlayEnabled = readOverlayEnabled();

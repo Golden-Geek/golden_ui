@@ -1,13 +1,13 @@
 <script lang="ts">
-	import { registerCommandHandler } from '$lib/golden_ui/store/commands.svelte';
+	import { registerCommandHandler } from '../../../store/commands.svelte';
 	import {
 		readPanelPersistedState,
 		writePanelPersistedState
-	} from '$lib/golden_ui/dockview/panel-persistence';
-	import type { PanelProps, PanelState } from '$lib/golden_ui/dockview/panel-types';
-	import type { NodeId, UiNodeDto } from '$lib/golden_ui/types';
-	import { appState } from '$lib/golden_ui/store/workbench.svelte';
-	import NodeAddButton from '$lib/golden_ui/components/common/NodeAddButton.svelte';
+	} from '../../../dockview/panel-persistence';
+	import type { PanelProps, PanelState } from '../../../dockview/panel-types';
+	import type { NodeId, UiNodeDto } from '../../../types';
+	import { appState } from '../../../store/workbench.svelte';
+	import NodeAddButton from '../../common/NodeAddButton.svelte';
 
 	import DashboardCanvas from './DashboardCanvas.svelte';
 	import { getDirectItemChildren } from './dashboard-model';

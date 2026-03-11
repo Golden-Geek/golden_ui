@@ -1,10 +1,10 @@
 <script lang="ts">
 	import { onDestroy } from 'svelte';
 	import Slider from '../../../common/Slider.svelte';
-	import { appState } from '$lib/golden_ui/store/workbench.svelte';
-	import { createUiEditSession, sendSetParamIntent } from '$lib/golden_ui/store/ui-intents';
-	import { CSS_UNIT_OPTIONS } from '$lib/golden_ui/css-value';
-	import type { CssUnit, UiNodeDto } from '$lib/golden_ui/types';
+	import { appState } from '../../../../store/workbench.svelte';
+	import { createUiEditSession, sendSetParamIntent } from '../../../../store/ui-intents';
+	import { CSS_UNIT_OPTIONS } from '../../../../css-value';
+	import type { CssUnit, UiNodeDto } from '../../../../types';
 
 	let { node, layoutMode = 'default' } = $props<{
 		node: UiNodeDto;

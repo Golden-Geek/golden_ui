@@ -1,8 +1,8 @@
 <script lang="ts">
-	import { appState } from '$lib/golden_ui/store/workbench.svelte';
-	import { sendSetParamIntent } from '$lib/golden_ui/store/ui-intents';
-	import { hasDesktopHost, openDesktopFileDialog } from '$lib/golden_ui/host/desktop';
-	import type { UiFileTypeGroup, UiNodeDto } from '$lib/golden_ui/types';
+	import { appState } from '../../../../store/workbench.svelte';
+	import { sendSetParamIntent } from '../../../../store/ui-intents';
+	import { hasDesktopHost, openDesktopFileDialog } from '../../../../host/desktop';
+	import type { UiFileTypeGroup, UiNodeDto } from '../../../../types';
 
 	let { node } = $props<{
 		node: UiNodeDto;

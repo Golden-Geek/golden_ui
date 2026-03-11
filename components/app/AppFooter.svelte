@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { WorkbenchSession } from '$lib/golden_ui/store/workbench.svelte';
+	import type { WorkbenchSession } from '../../store/workbench.svelte';
 
 	const { session } = $props<{
 		session?: WorkbenchSession | null;

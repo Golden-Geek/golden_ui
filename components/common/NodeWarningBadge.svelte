@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { fade, slide } from 'svelte/transition';
-	import { showPanel } from '$lib/golden_ui/store/ui-panels';
-	import type { NodeWarningRecord } from '$lib/golden_ui/store/workbench.svelte';
+	import { showPanel } from '../../store/ui-panels';
+	import type { NodeWarningRecord } from '../../store/workbench.svelte';
 
 	let { warnings = [] } = $props<{
 		warnings?: NodeWarningRecord[] | null;

@@ -182,132 +182,141 @@ const shouldIgnoreTransportResync = (payload: unknown): boolean => {
 	return reason === 'script_config_updated' || reason === 'script_reload_requested';
 };
 
-const reduceEvent = (state: GraphState, event: UiEventDto): GraphState => {
-	const next: GraphState = {
-		...state,
-		nodesById: new Map(state.nodesById),
-		childrenById: new Map(state.childrenById),
-		parentById: new Map(state.parentById),
-		paramsById: new Map(state.paramsById),
-		lastEventTime: event.time
-	};
+const cloneState = (state: GraphState): GraphState => ({
+	...state,
+	nodesById: new Map(state.nodesById),
+	childrenById: new Map(state.childrenById),
+	parentById: new Map(state.parentById),
+	paramsById: new Map(state.paramsById)
+});
 
+const reduceEventInPlace = (
+	state: GraphState,
+	event: UiEventDto
+): { requiresRootRecompute: boolean } => {
+	state.lastEventTime = event.time;
+	let requiresRootRecompute = false;
 	switch (event.kind.kind) {
 		case 'paramChanged': {
-			const node = next.nodesById.get(event.kind.param);
+			const node = state.nodesById.get(event.kind.param);
 			if (!node || node.data.kind !== 'parameter') {
-				next.requiresResync = true;
+				state.requiresResync = true;
 				break;
 			}
 			const updatedParam = {
 				...node.data.param,
 				value: event.kind.new_value
 			};
-			next.paramsById.set(event.kind.param, updatedParam);
-			next.nodesById.set(event.kind.param, {
+			state.paramsById.set(event.kind.param, updatedParam);
+			state.nodesById.set(event.kind.param, {
 				...node,
 				data: { kind: 'parameter', param: updatedParam }
 			});
 			break;
 		}
 		case 'paramControlChanged': {
-			const node = next.nodesById.get(event.kind.param);
+			const node = state.nodesById.get(event.kind.param);
 			if (!node || node.data.kind !== 'parameter') {
-				next.requiresResync = true;
+				state.requiresResync = true;
 				break;
 			}
 			const updatedParam = {
 				...node.data.param,
 				control: event.kind.new_state
 			};
-			next.paramsById.set(event.kind.param, updatedParam);
-			next.nodesById.set(event.kind.param, {
+			state.paramsById.set(event.kind.param, updatedParam);
+			state.nodesById.set(event.kind.param, {
 				...node,
 				data: { kind: 'parameter', param: updatedParam }
 			});
 			break;
 		}
 		case 'childAdded': {
-			addToChildren(next.childrenById, event.kind.parent, event.kind.child);
-			next.parentById.set(event.kind.child, event.kind.parent);
-			if (!next.nodesById.has(event.kind.parent)) {
-				next.requiresResync = true;
+			addToChildren(state.childrenById, event.kind.parent, event.kind.child);
+			state.parentById.set(event.kind.child, event.kind.parent);
+			requiresRootRecompute = true;
+			if (!state.nodesById.has(event.kind.parent)) {
+				state.requiresResync = true;
 			} else {
-				syncNodeChildren(next, event.kind.parent);
+				syncNodeChildren(state, event.kind.parent);
 			}
-			if (!next.nodesById.has(event.kind.child)) {
-				next.requiresResync = true;
+			if (!state.nodesById.has(event.kind.child)) {
+				state.requiresResync = true;
 			}
 			break;
 		}
 		case 'childRemoved': {
-			removeFromChildren(next.childrenById, event.kind.parent, event.kind.child);
-			next.parentById.delete(event.kind.child);
-			if (!next.nodesById.has(event.kind.parent)) {
-				next.requiresResync = true;
+			removeFromChildren(state.childrenById, event.kind.parent, event.kind.child);
+			state.parentById.delete(event.kind.child);
+			requiresRootRecompute = true;
+			if (!state.nodesById.has(event.kind.parent)) {
+				state.requiresResync = true;
 			} else {
-				syncNodeChildren(next, event.kind.parent);
+				syncNodeChildren(state, event.kind.parent);
 			}
-			if (next.nodesById.has(event.kind.child)) {
-				removeSubtree(next, event.kind.child);
+			if (state.nodesById.has(event.kind.child)) {
+				removeSubtree(state, event.kind.child);
 			}
 			break;
 		}
 		case 'childReplaced': {
-			replaceInChildren(next.childrenById, event.kind.parent, event.kind.old, event.kind.new);
-			next.parentById.delete(event.kind.old);
-			next.parentById.set(event.kind.new, event.kind.parent);
-			if (!next.nodesById.has(event.kind.parent)) {
-				next.requiresResync = true;
+			replaceInChildren(state.childrenById, event.kind.parent, event.kind.old, event.kind.new);
+			state.parentById.delete(event.kind.old);
+			state.parentById.set(event.kind.new, event.kind.parent);
+			requiresRootRecompute = true;
+			if (!state.nodesById.has(event.kind.parent)) {
+				state.requiresResync = true;
 			} else {
-				syncNodeChildren(next, event.kind.parent);
+				syncNodeChildren(state, event.kind.parent);
 			}
-			if (next.nodesById.has(event.kind.old)) {
-				removeSubtree(next, event.kind.old);
+			if (state.nodesById.has(event.kind.old)) {
+				removeSubtree(state, event.kind.old);
 			}
-			if (!next.nodesById.has(event.kind.new)) {
-				next.requiresResync = true;
+			if (!state.nodesById.has(event.kind.new)) {
+				state.requiresResync = true;
 			}
 			break;
 		}
 		case 'childMoved': {
-			removeFromChildren(next.childrenById, event.kind.old_parent, event.kind.child);
-			addToChildren(next.childrenById, event.kind.new_parent, event.kind.child);
-			next.parentById.set(event.kind.child, event.kind.new_parent);
+			removeFromChildren(state.childrenById, event.kind.old_parent, event.kind.child);
+			addToChildren(state.childrenById, event.kind.new_parent, event.kind.child);
+			state.parentById.set(event.kind.child, event.kind.new_parent);
+			requiresRootRecompute = true;
 			if (
-				!next.nodesById.has(event.kind.old_parent) ||
-				!next.nodesById.has(event.kind.new_parent)
+				!state.nodesById.has(event.kind.old_parent) ||
+				!state.nodesById.has(event.kind.new_parent)
 			) {
-				next.requiresResync = true;
+				state.requiresResync = true;
 			} else {
-				syncNodeChildren(next, event.kind.old_parent);
-				syncNodeChildren(next, event.kind.new_parent);
+				syncNodeChildren(state, event.kind.old_parent);
+				syncNodeChildren(state, event.kind.new_parent);
 			}
 			break;
 		}
 		case 'childReordered': {
-			next.requiresResync = true;
+			state.requiresResync = true;
 			break;
 		}
 		case 'nodeCreated': {
-			if (!next.nodesById.has(event.kind.node)) {
-				next.requiresResync = true;
+			if (!state.nodesById.has(event.kind.node)) {
+				state.requiresResync = true;
 			}
 			break;
 		}
 		case 'nodeDeleted': {
-			if (next.nodesById.has(event.kind.node)) {
-				removeSubtree(next, event.kind.node);
+			if (state.nodesById.has(event.kind.node)) {
+				removeSubtree(state, event.kind.node);
+				requiresRootRecompute = true;
 			}
 			break;
 		}
 		case 'metaChanged': {
-			const node = next.nodesById.get(event.kind.node);
+			const node = state.nodesById.get(event.kind.node);
 			if (!node) {
-				next.requiresResync = true;
+				state.requiresResync = true;
 				break;
 			}
-			next.nodesById.set(event.kind.node, applyMetaPatch(node, event.kind.patch));
+			state.nodesById.set(event.kind.node, applyMetaPatch(node, event.kind.patch));
 			break;
 		}
 		case 'custom': {
@@ -315,14 +324,12 @@ const reduceEvent = (state: GraphState, event: UiEventDto): GraphState => {
 				if (shouldIgnoreTransportResync(event.kind.payload)) {
 					break;
 				}
-				next.requiresResync = true;
+				state.requiresResync = true;
 			}
 			break;
 		}
 	}
-
-	next.rootId = detectRoot(next.nodesById, next.childrenById);
-	return next;
+	return { requiresRootRecompute };
 };
 
 export const createGraphStore = (): GraphStore => {
@@ -336,15 +343,30 @@ export const createGraphStore = (): GraphStore => {
 			state = stateFromSnapshot(snapshot);
 		},
 		applyEvent(event: UiEventDto): void {
-			state = reduceEvent(state, event);
+			let next = cloneState(state);
+			if (reduceEventInPlace(next, event).requiresRootRecompute) {
+				next.rootId = detectRoot(next.nodesById, next.childrenById);
+			}
+			state = next;
 		},
 		applyBatch(batch: UiEventBatch): void {
-			let next = state;
+			if (batch.events.length === 0) {
+				if (batch.to) {
+					state = { ...state, lastEventTime: batch.to };
+				}
+				return;
+			}
+			let next = cloneState(state);
+			let requiresRootRecompute = false;
 			for (const event of batch.events) {
-				next = reduceEvent(next, event);
+				const result = reduceEventInPlace(next, event);
+				requiresRootRecompute = requiresRootRecompute || result.requiresRootRecompute;
 			}
 			if (batch.to) {
 				next = { ...next, lastEventTime: batch.to };
+			}
+			if (requiresRootRecompute) {
+				next.rootId = detectRoot(next.nodesById, next.childrenById);
 			}
 			state = next;
 		},

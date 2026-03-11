@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import type { NodeId, UiLogRecord } from '$lib/golden_ui/types';
+	import type { NodeId, UiLogRecord } from '../../../types';
 	import type { PanelProps, PanelState } from '../../../dockview/panel-types';
 	import { appState } from '../../../store/workbench.svelte';
 	import {

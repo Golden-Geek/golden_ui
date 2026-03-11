@@ -1,4 +1,4 @@
-import type { UiNodeDto } from '$lib/golden_ui/types';
+import type { UiNodeDto } from '../../../types';
 import DashboardNodeWidgetInspectorContent from './DashboardNodeWidgetInspectorContent.svelte';
 import DashboardNodeWidgetNumberRotaryContent from './DashboardNodeWidgetNumberRotaryContent.svelte';
 import DashboardNodeWidgetNumberSliderContent from './DashboardNodeWidgetNumberSliderContent.svelte';

@@ -8,7 +8,7 @@ import TriggerEditor from './parameters/TriggerEditor.svelte';
 import ReferenceEditor from './parameters/ReferenceEditor.svelte';
 import MultiNumberEditor from './parameters/MultiNumberEditor.svelte';
 import FilePathEditor from './parameters/FilePathEditor.svelte';
-import type { UiNodeDto } from '$lib/golden_ui/types';
+import type { UiNodeDto } from '../../../types';
 
 export const propertiesInspectorClass: Record<string, { component: any; useFullSpace?: boolean }> =
 	{

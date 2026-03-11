@@ -31,7 +31,7 @@
 		PanelState,
 		UserPanelDefinition,
 		UserPanelDefinitionMap
-	} from '$lib/golden_ui/dockview/panel-types';
+	} from '../../dockview/panel-types';
 	import { configureNodeIcons, type NodeIconSet } from '../../store/node-types';
 	import { loadPersistedDockLayout, savePersistedDockLayout } from '../../store/ui-persistence';
 	import { appState } from '../../store/workbench.svelte';

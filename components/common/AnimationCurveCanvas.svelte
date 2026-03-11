@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { NodeId } from '$lib/golden_ui/types';
+	import type { NodeId } from '../../types';
 
 	interface ParsedCurveKeyLike {
 		node_id: NodeId;

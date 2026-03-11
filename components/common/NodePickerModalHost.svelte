@@ -1,23 +1,23 @@
 <script lang="ts">
 	import { onDestroy, tick } from 'svelte';
-	import { appState } from '$lib/golden_ui/store/workbench.svelte';
-	import OutlinerItem from '$lib/golden_ui/components/panels/outliner/OutlinerItem.svelte';
+	import { appState } from '../../store/workbench.svelte';
+	import OutlinerItem from '../panels/outliner/OutlinerItem.svelte';
 	import {
 		closeNodePickerModal,
 		nodePickerModalState,
 		resolveNodePickerModal
-	} from '$lib/golden_ui/store/node-picker-modal.svelte';
-	import type { UiNodeDto, UiParamValueProjection } from '$lib/golden_ui/types';
+	} from '../../store/node-picker-modal.svelte';
+	import type { UiNodeDto, UiParamValueProjection } from '../../types';
 	import { fade, slide } from 'svelte/transition';
 	import {
 		computeAnchoredModalPlacement,
 		getMainViewportBounds,
 		type ViewportRect
-	} from '$lib/golden_ui/components/common/floating-panel';
+	} from './floating-panel';
 	import {
 		collectOutlinerAncestorNodeIds,
 		scrollOutlinerNodeIntoView
-	} from '$lib/golden_ui/components/panels/outliner/navigation';
+	} from '../panels/outliner/navigation';
 
 	let request = $derived(nodePickerModalState.request);
 	let options = $derived(request?.options ?? null);

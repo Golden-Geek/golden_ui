@@ -14,7 +14,7 @@
 	import AppFooter from './AppFooter.svelte';
 	import type { PanelSpawnRequest, UserPanelDefinitionMap } from '../../dockview/panel-types';
 	import type { NodeIconSet } from '../../store/node-types';
-	import { platform } from '$lib/golden_ui/store/platform.svelte';
+	import { platform } from '../../store/platform.svelte';
 
 	const props = $props<{
 		wsUrl?: string;

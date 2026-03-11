@@ -1,6 +1,6 @@
 <script lang="ts">
-	import type { UiNodeDto, UiParamDto } from '$lib/golden_ui/types';
-	import { appState } from '$lib/golden_ui/store/workbench.svelte';
+	import type { UiNodeDto, UiParamDto } from '../../types';
+	import { appState } from '../../store/workbench.svelte';
 	import { watcherVisualizerRegistry } from './watcher/watcher-registry';
 	import WatcherValueVisualizer from './watcher/WatcherValueVisualizer.svelte';
 	import {

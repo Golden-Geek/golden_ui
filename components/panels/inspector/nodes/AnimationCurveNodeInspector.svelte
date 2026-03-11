@@ -1,6 +1,6 @@
 <script lang="ts">
-	import { appState } from '$lib/golden_ui/store/workbench.svelte';
-	import type { NodeId, UiNodeDto } from '$lib/golden_ui/types';
+	import { appState } from '../../../../store/workbench.svelte';
+	import type { NodeId, UiNodeDto } from '../../../../types';
 	import type { NodeInspectorComponentProps } from '../node-inspector-registry';
 	import NodeInspector from '../NodeInspector.svelte';
 	import SelectNodeButton from '../../../common/SelectNodeButton.svelte';

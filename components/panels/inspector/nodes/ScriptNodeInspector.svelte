@@ -1,9 +1,9 @@
 <script lang="ts">
-	import { appState } from '$lib/golden_ui/store/workbench.svelte';
-	import { sendReloadScript, sendSetScriptConfig } from '$lib/golden_ui/store/ui-intents';
-	import { hasDesktopHost, openDesktopFileDialog } from '$lib/golden_ui/host/desktop';
+	import { appState } from '../../../../store/workbench.svelte';
+	import { sendReloadScript, sendSetScriptConfig } from '../../../../store/ui-intents';
+	import { hasDesktopHost, openDesktopFileDialog } from '../../../../host/desktop';
 	import type { NodeInspectorComponentProps } from '../node-inspector-registry';
-	import type { UiNodeDto, UiScriptConfig, UiScriptState } from '$lib/golden_ui/types';
+	import type { UiNodeDto, UiScriptConfig, UiScriptState } from '../../../../types';
 	import SelectNodeButton from '../../../common/SelectNodeButton.svelte';
 	import CodeEditor from '../../../common/CodeEditor.svelte';
 

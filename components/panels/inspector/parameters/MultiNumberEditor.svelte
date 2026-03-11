@@ -1,9 +1,9 @@
 <script lang="ts">
 	import { onDestroy } from 'svelte';
-	import Slider from '$lib/golden_ui/components/common/Slider.svelte';
-	import { appState } from '$lib/golden_ui/store/workbench.svelte';
-	import { createUiEditSession, sendSetParamIntent } from '$lib/golden_ui/store/ui-intents';
-	import type { UiNodeDto, UiRangeConstraint } from '$lib/golden_ui/types';
+	import Slider from '../../../common/Slider.svelte';
+	import { appState } from '../../../../store/workbench.svelte';
+	import { createUiEditSession, sendSetParamIntent } from '../../../../store/ui-intents';
+	import type { UiNodeDto, UiRangeConstraint } from '../../../../types';
 
 	interface VectorEditorPresentation {
 		layout?: 'inline' | 'column';

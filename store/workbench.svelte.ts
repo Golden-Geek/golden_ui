@@ -22,19 +22,15 @@ import type {
 	UiParameterControlState
 } from '../types';
 import { wholeGraphScope } from '../types';
-import type { PanelController } from '../dockview/panel-types';
-import { loadPersistedSelection, savePersistedSelection } from './ui-persistence';
 import { DEFAULT_LOG_UI_UPDATE_HZ, normalizeLogUiUpdateHz } from './logger-ui-config';
-import { handleCommandShortcut, registerCommandHandler, type CommandId } from './commands.svelte';
-import {
-	createNewProjectFile,
-	openProjectFile,
-	reopenLastProjectFile,
-	saveProjectFile,
-	saveProjectFileAs
-} from './project-files.svelte';
+import { handleCommandShortcut } from './commands.svelte';
+import { createWorkbenchSelectionStore } from './session/selection.svelte';
+import { createWorkbenchWarningStore } from './session/warnings.svelte';
+import { createWorkbenchCommandSuite } from './session/commands.svelte';
+import type { NodeWarningRecord, SelectionMode } from './session/types';
+export type { NodeWarningRecord, SelectionMode } from './session/types';
 
-export type SelectionMode = 'REPLACE' | 'ADD' | 'REMOVE' | 'TOGGLE';
+export { appState } from './app-state.svelte';
 
 export interface WorkbenchSessionOptions {
 	wsUrl?: string;
@@ -60,17 +56,6 @@ export interface FooterHoverInfo {
 	label: string;
 	node_type: string;
 	description: string;
-}
-
-export interface NodeWarningRecord {
-	targetNodeId: NodeId;
-	targetNodeLabel: string;
-	sourceNodeId: NodeId;
-	sourceNodeLabel: string;
-	warningId: string;
-	message: string;
-	detail?: string;
-	distance: number;
 }
 
 export interface WorkbenchSession {
@@ -122,7 +107,6 @@ interface QueuedIntent {
 }
 
 const DEFAULT_RETRY_MS = 1000;
-const DEFAULT_WARNING_ID = '';
 const MAX_TOASTS = 3;
 const DEFAULT_TOAST_DURATION_MS = 5000;
 const UI_LOG_TAG_INTENT = 'intent';
@@ -132,11 +116,6 @@ type PendingLogMutation =
 	| { kind: 'clear' }
 	| { kind: 'replaceRecord'; record: UiLogRecord }
 	| { kind: 'append'; records: UiLogRecord[] };
-
-interface NodeClipboardEntry {
-	node_type: string;
-	label: string;
-}
 
 interface FooterHoverEntry {
 	token: symbol;
@@ -225,47 +204,6 @@ const asUiLogRecord = (payload: unknown): UiLogRecord | null => {
 	};
 };
 
-interface NormalizedNodeWarning {
-	id: string;
-	message: string;
-	detail?: string;
-}
-
-interface VisibleWarningCacheEntry {
-	version: number;
-	warnings: NodeWarningRecord[];
-}
-
-const normalizeWarningId = (warningId: string | undefined): string =>
-	typeof warningId === 'string' ? warningId : DEFAULT_WARNING_ID;
-
-const normalizeNodeWarning = (warning: UiNodeWarningDto): NormalizedNodeWarning | null => {
-	const message = String(warning.message ?? '').trim();
-	if (message.length === 0) {
-		return null;
-	}
-
-	const detailText = typeof warning.detail === 'string' ? warning.detail.trim() : '';
-	return {
-		id: normalizeWarningId(warning.id),
-		message,
-		detail: detailText.length > 0 ? detailText : undefined
-	};
-};
-
-const normalizeWarningDepth = (value: unknown): number => {
-	const rawDepth = Number(value);
-	if (!Number.isFinite(rawDepth)) {
-		return 0;
-	}
-	return Math.max(0, Math.floor(rawDepth));
-};
-
-export const appState = $state({
-	session: null as WorkbenchSession | null,
-	panels: null as PanelController | null
-});
-
 export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): WorkbenchSession => {
 	const scope = options.scope ?? wholeGraphScope;
 	const retryMs = Math.max(100, options.bootstrapRetryMs ?? DEFAULT_RETRY_MS);
@@ -288,10 +226,8 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 	};
 
 	let status = $state<WorkbenchConnectionStatus>('connecting');
-	let selectedNodeIds = $state<NodeId[]>([]);
-	let nodeClipboard = $state<NodeClipboardEntry[]>([]);
-	const persistedSelection = loadPersistedSelection();
-	let shouldRestorePersistedSelection = persistedSelection.length > 0;
+	const selection = createWorkbenchSelectionStore(graph);
+	const warnings = createWorkbenchWarningStore(graph);
 	let historyBusy = $state(false);
 	let canUndo = $state(false);
 	let canRedo = $state(false);
@@ -602,204 +538,8 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 	};
 	const client = (options.transportFactory ?? createDefaultUiClient)(transportOptions);
 
-	let warningCacheVersion = 0;
-	let activeWarningsCacheVersion = -1;
-	let activeWarningsCache: NodeWarningRecord[] = [];
-	const visibleWarningsCache = new Map<NodeId, VisibleWarningCacheEntry>();
-
-	const invalidateWarningCaches = (): void => {
-		warningCacheVersion += 1;
-		activeWarningsCacheVersion = -1;
-		activeWarningsCache = [];
-		visibleWarningsCache.clear();
-	};
-
-	const batchAffectsWarnings = (batch: UiEventBatch): boolean => {
-		for (const event of batch.events) {
-			switch (event.kind.kind) {
-				case 'metaChanged':
-				case 'childAdded':
-				case 'childRemoved':
-				case 'childReplaced':
-				case 'childMoved':
-				case 'childReordered':
-				case 'nodeCreated':
-				case 'nodeDeleted':
-					return true;
-				default:
-					break;
-			}
-		}
-		return false;
-	};
-
 	const getNodeData = (nodeId: NodeId): UiNodeDto | null => {
 		return graph.state.nodesById.get(nodeId) ?? null;
-	};
-
-	const getMetaWarningsForNode = (node: UiNodeDto): Map<string, NormalizedNodeWarning> => {
-		const rawEntries = node.meta.presentation?.warnings;
-		const entries = Array.isArray(rawEntries) ? rawEntries : [];
-		const warningsById = new Map<string, NormalizedNodeWarning>();
-		for (const rawWarning of entries) {
-			const normalized = normalizeNodeWarning(rawWarning);
-			if (!normalized) {
-				continue;
-			}
-			warningsById.set(normalized.id, normalized);
-		}
-		return warningsById;
-	};
-
-	const getNodeOwnWarnings = (nodeId: NodeId): NormalizedNodeWarning[] => {
-		const node = graph.state.nodesById.get(nodeId);
-		if (!node) {
-			return [];
-		}
-		return [...getMetaWarningsForNode(node).values()];
-	};
-
-	const getNodeWarningChildDepth = (nodeId: NodeId): number => {
-		const node = graph.state.nodesById.get(nodeId);
-		if (!node) {
-			return 0;
-		}
-		return normalizeWarningDepth(node.meta.presentation?.show_child_warnings_max_depth ?? 0);
-	};
-
-	const labelForNode = (nodeId: NodeId): string => {
-		return graph.state.nodesById.get(nodeId)?.meta.label ?? `Node ${nodeId}`;
-	};
-
-	const computeNodeVisibleWarnings = (nodeId: NodeId): NodeWarningRecord[] => {
-		const targetNode = graph.state.nodesById.get(nodeId);
-		if (!targetNode) {
-			return [];
-		}
-
-		const maxDepth = getNodeWarningChildDepth(nodeId);
-		const pending: Array<{ nodeId: NodeId; depth: number }> = [{ nodeId, depth: 0 }];
-		const seenMinDepth = new Map<NodeId, number>();
-		const warningRecordsByKey = new Map<string, NodeWarningRecord>();
-
-		while (pending.length > 0) {
-			const current = pending.shift();
-			if (!current) {
-				continue;
-			}
-
-			const knownDepth = seenMinDepth.get(current.nodeId);
-			if (knownDepth !== undefined && knownDepth <= current.depth) {
-				continue;
-			}
-			seenMinDepth.set(current.nodeId, current.depth);
-
-			const ownWarnings = getNodeOwnWarnings(current.nodeId);
-			for (const warning of ownWarnings) {
-				const key = `${current.nodeId}:${warning.id}`;
-				if (warningRecordsByKey.has(key)) {
-					continue;
-				}
-				warningRecordsByKey.set(key, {
-					targetNodeId: nodeId,
-					targetNodeLabel: targetNode.meta.label,
-					sourceNodeId: current.nodeId,
-					sourceNodeLabel: labelForNode(current.nodeId),
-					warningId: warning.id,
-					message: warning.message,
-					detail: warning.detail,
-					distance: current.depth
-				});
-			}
-
-			if (current.depth >= maxDepth) {
-				continue;
-			}
-
-			const children = graph.state.childrenById.get(current.nodeId) ?? [];
-			for (const childNodeId of children) {
-				pending.push({ nodeId: childNodeId, depth: current.depth + 1 });
-			}
-		}
-
-		return [...warningRecordsByKey.values()].sort((left, right) => {
-			if (left.distance !== right.distance) {
-				return left.distance - right.distance;
-			}
-			const byLabel = left.sourceNodeLabel.localeCompare(right.sourceNodeLabel);
-			if (byLabel !== 0) {
-				return byLabel;
-			}
-			const byWarningId = left.warningId.localeCompare(right.warningId);
-			if (byWarningId !== 0) {
-				return byWarningId;
-			}
-			return left.message.localeCompare(right.message);
-		});
-	};
-
-	const getNodeVisibleWarnings = (nodeId: NodeId): NodeWarningRecord[] => {
-		// Keep Svelte dependency on graph state even when serving from cache.
-		void graph.state.lastEventTime;
-
-		const cached = visibleWarningsCache.get(nodeId);
-		if (cached && cached.version === warningCacheVersion) {
-			return cached.warnings;
-		}
-
-		const warnings = computeNodeVisibleWarnings(nodeId);
-		visibleWarningsCache.set(nodeId, {
-			version: warningCacheVersion,
-			warnings
-		});
-		return warnings;
-	};
-
-	const computeActiveWarnings = (): NodeWarningRecord[] => {
-		const allWarnings: NodeWarningRecord[] = [];
-		for (const node of graph.state.nodesById.values()) {
-			for (const warning of getNodeOwnWarnings(node.node_id)) {
-				allWarnings.push({
-					targetNodeId: node.node_id,
-					targetNodeLabel: node.meta.label,
-					sourceNodeId: node.node_id,
-					sourceNodeLabel: node.meta.label,
-					warningId: warning.id,
-					message: warning.message,
-					detail: warning.detail,
-					distance: 0
-				});
-			}
-		}
-
-		return allWarnings.sort((left, right) => {
-			const byLabel = left.sourceNodeLabel.localeCompare(right.sourceNodeLabel);
-			if (byLabel !== 0) {
-				return byLabel;
-			}
-			const byWarningId = left.warningId.localeCompare(right.warningId);
-			if (byWarningId !== 0) {
-				return byWarningId;
-			}
-			return left.message.localeCompare(right.message);
-		});
-	};
-
-	const getActiveWarnings = (): NodeWarningRecord[] => {
-		// Keep Svelte dependency on graph state even when serving from cache.
-		void graph.state.lastEventTime;
-
-		if (activeWarningsCacheVersion === warningCacheVersion) {
-			return activeWarningsCache;
-		}
-
-		activeWarningsCache = computeActiveWarnings();
-		activeWarningsCacheVersion = warningCacheVersion;
-		return activeWarningsCache;
-	};
-
-	const hasNodeWarnings = (nodeId: NodeId): boolean => {
-		return getNodeVisibleWarnings(nodeId).length > 0;
 	};
 
 	const isNodeEnabledInHierarchy = (nodeId: NodeId): boolean => {
@@ -815,37 +555,6 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 			current = graph.state.parentById.get(current);
 		}
 		return true;
-	};
-
-	const persistSelection = (): void => {
-		savePersistedSelection(selectedNodeIds);
-	};
-
-	const setSelection = (nextSelection: NodeId[]): void => {
-		selectedNodeIds = nextSelection;
-		persistSelection();
-	};
-
-	const restorePersistedSelection = (): void => {
-		if (!shouldRestorePersistedSelection) {
-			return;
-		}
-
-		shouldRestorePersistedSelection = false;
-		const validSelection = persistedSelection.filter((nodeId) => graph.state.nodesById.has(nodeId));
-		setSelection(validSelection);
-	};
-
-	const reconcileSelection = (): void => {
-		const nextSelection = selectedNodeIds.filter((nodeId) => graph.state.nodesById.has(nodeId));
-		if (
-			nextSelection.length === selectedNodeIds.length &&
-			nextSelection.every((nodeId, index) => nodeId === selectedNodeIds[index])
-		) {
-			return;
-		}
-
-		setSelection(nextSelection);
 	};
 
 	const clearPendingLogFlush = (): void => {
@@ -944,392 +653,6 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 		}
 	};
 
-	const getSelectedNodes = (): UiNodeDto[] =>
-		selectedNodeIds
-			.map((nodeId) => graph.state.nodesById.get(nodeId))
-			.filter((node): node is UiNodeDto => node !== undefined);
-
-	const getFirstSelectedNode = (): UiNodeDto | null => {
-		const firstId = selectedNodeIds[0];
-		if (firstId === undefined) {
-			return null;
-		}
-		return graph.state.nodesById.get(firstId) ?? null;
-	};
-
-	const isNodeSelected = (nodeId: NodeId): boolean => selectedNodeIds.includes(nodeId);
-
-	const clearSelection = (): void => {
-		setSelection([]);
-	};
-
-	const selectNodes = (nodeIds: NodeId[], selectionMode: SelectionMode = 'REPLACE'): void => {
-		const validUniqueIds: NodeId[] = [];
-		for (const nodeId of nodeIds) {
-			if (!graph.state.nodesById.has(nodeId)) {
-				continue;
-			}
-			if (validUniqueIds.includes(nodeId)) {
-				continue;
-			}
-			validUniqueIds.push(nodeId);
-		}
-
-		if (selectionMode === 'REPLACE') {
-			setSelection(validUniqueIds);
-			return;
-		}
-
-		if (selectionMode === 'REMOVE') {
-			setSelection(selectedNodeIds.filter((id) => !validUniqueIds.includes(id)));
-			return;
-		}
-
-		if (selectionMode === 'TOGGLE') {
-			const toggled = new Set(selectedNodeIds);
-			for (const nodeId of validUniqueIds) {
-				if (toggled.has(nodeId)) {
-					toggled.delete(nodeId);
-				} else {
-					toggled.add(nodeId);
-				}
-			}
-			setSelection(Array.from(toggled));
-			return;
-		}
-
-		const merged = [...selectedNodeIds];
-		for (const nodeId of validUniqueIds) {
-			if (!merged.includes(nodeId)) {
-				merged.push(nodeId);
-			}
-		}
-		setSelection(merged);
-	};
-
-	const selectNode = (nodeId: NodeId | null, selectionMode: SelectionMode = 'REPLACE'): void => {
-		if (nodeId === null) {
-			clearSelection();
-			return;
-		}
-		selectNodes([nodeId], selectionMode);
-	};
-
-	const getNodeDepth = (nodeId: NodeId): number => {
-		let depth = 0;
-		let current = graph.state.parentById.get(nodeId);
-		while (current !== undefined) {
-			depth += 1;
-			current = graph.state.parentById.get(current);
-		}
-		return depth;
-	};
-
-	const isNodeRemovable = (node: UiNodeDto): boolean => {
-		if (graph.state.rootId === node.node_id) {
-			return false;
-		}
-		return node.meta.user_permissions.can_remove_and_duplicate;
-	};
-
-	const isFolderNode = (node: UiNodeDto): boolean => node.node_type === 'folder';
-
-	const canParentCreateNodeType = (parentId: NodeId, nodeType: string): boolean => {
-		const parent = graph.state.nodesById.get(parentId);
-		if (!parent) {
-			return false;
-		}
-		return parent.creatable_user_items.some((item) => item.node_type === nodeType);
-	};
-
-	const nextLabelInParent = (parentId: NodeId, baseLabel: string): string => {
-		const parent = graph.state.nodesById.get(parentId);
-		if (!parent) {
-			return baseLabel;
-		}
-		const usedLabels = new Set<string>();
-		for (const childId of parent.children) {
-			const sibling = graph.state.nodesById.get(childId);
-			if (!sibling) {
-				continue;
-			}
-			const label = sibling.meta.label.trim();
-			if (label.length > 0) {
-				usedLabels.add(label);
-			}
-		}
-
-		if (!usedLabels.has(baseLabel)) {
-			return baseLabel;
-		}
-
-		let suffix = 2;
-		while (usedLabels.has(`${baseLabel} ${suffix}`)) {
-			suffix += 1;
-		}
-		return `${baseLabel} ${suffix}`;
-	};
-
-	const waitForCreatedChild = async (
-		parentId: NodeId,
-		knownChildren: Set<NodeId>,
-		expectedNodeType: string
-	): Promise<NodeId | null> => {
-		const deadline = Date.now() + 450;
-		while (Date.now() <= deadline) {
-			const parent = graph.state.nodesById.get(parentId);
-			if (parent) {
-				for (const childId of parent.children) {
-					if (knownChildren.has(childId)) {
-						continue;
-					}
-					const child = graph.state.nodesById.get(childId);
-					if (!child) {
-						continue;
-					}
-					if (child.node_type === expectedNodeType) {
-						return childId;
-					}
-				}
-			}
-			await new Promise((resolve) => {
-				setTimeout(resolve, 16);
-			});
-		}
-		return null;
-	};
-
-	const waitForCreatedChildLabel = async (
-		parentId: NodeId,
-		knownChildren: Set<NodeId>,
-		expectedLabel: string
-	): Promise<NodeId | null> => {
-		const deadline = Date.now() + 450;
-		while (Date.now() <= deadline) {
-			const parent = graph.state.nodesById.get(parentId);
-			if (parent) {
-				for (const childId of parent.children) {
-					if (knownChildren.has(childId)) {
-						continue;
-					}
-					const child = graph.state.nodesById.get(childId);
-					if (!child) {
-						continue;
-					}
-					if (child.meta.label.trim() === expectedLabel.trim()) {
-						return childId;
-					}
-				}
-			}
-			await new Promise((resolve) => {
-				setTimeout(resolve, 16);
-			});
-		}
-		return null;
-	};
-
-	const createNodeUnderParent = async (
-		parentId: NodeId,
-		nodeType: string,
-		label: string,
-		insertAfterNodeId: NodeId | null
-	): Promise<NodeId | null> => {
-		const parentBefore = graph.state.nodesById.get(parentId);
-		if (!parentBefore) {
-			return null;
-		}
-		const knownChildren = new Set(parentBefore.children);
-		await sendIntent({
-			kind: 'createUserItem',
-			parent: parentId,
-			node_type: nodeType,
-			label
-		});
-		const createdNodeId = await waitForCreatedChild(parentId, knownChildren, nodeType);
-		if (createdNodeId === null || insertAfterNodeId === null) {
-			return createdNodeId;
-		}
-		await sendIntent({
-			kind: 'moveNode',
-			node: createdNodeId,
-			new_parent: parentId,
-			new_prev_sibling: insertAfterNodeId
-		});
-		return createdNodeId;
-	};
-
-	const removeSelectedNodesCommand = async (): Promise<boolean> => {
-		const selected = getSelectedNodes();
-		if (selected.length === 0) {
-			return false;
-		}
-
-		const removable = selected.filter((node) => isNodeRemovable(node));
-		if (removable.length === 0) {
-			return false;
-		}
-
-		removable.sort((left, right) => getNodeDepth(right.node_id) - getNodeDepth(left.node_id));
-		await sendIntent({
-			kind: 'removeNodes',
-			nodes: removable.map((node) => node.node_id)
-		});
-		return true;
-	};
-
-	const selectSiblingNodesCommand = (): boolean => {
-		const anchorNode = getFirstSelectedNode();
-		if (!anchorNode) {
-			return false;
-		}
-		const parentId = graph.state.parentById.get(anchorNode.node_id);
-		if (parentId === undefined) {
-			return false;
-		}
-		const parent = graph.state.nodesById.get(parentId);
-		if (!parent || parent.children.length === 0) {
-			return false;
-		}
-		selectNodes([...parent.children], 'REPLACE');
-		return true;
-	};
-
-	const copySelectedNodesCommand = (): boolean => {
-		const selected = getSelectedNodes();
-		if (selected.length === 0) {
-			return false;
-		}
-		nodeClipboard = selected.map((node) => ({
-			node_type: node.node_type,
-			label: node.meta.label.trim().length > 0 ? node.meta.label.trim() : node.node_type
-		}));
-		return true;
-	};
-
-	const cutSelectedNodesCommand = async (): Promise<boolean> => {
-		if (!copySelectedNodesCommand()) {
-			return false;
-		}
-		return removeSelectedNodesCommand();
-	};
-
-	const duplicateSelectedNodesCommand = async (): Promise<boolean> => {
-		const selectedSet = new Set(selectedNodeIds);
-		const anchorNode = getFirstSelectedNode();
-		if (!anchorNode) {
-			return false;
-		}
-		const parentId = graph.state.parentById.get(anchorNode.node_id);
-		if (parentId === undefined) {
-			return false;
-		}
-		const parent = graph.state.nodesById.get(parentId);
-		if (!parent) {
-			return false;
-		}
-
-		const selectedSiblingIds = parent.children.filter((childId) => selectedSet.has(childId));
-		if (selectedSiblingIds.length === 0) {
-			return false;
-		}
-
-		let insertAfterNodeId: NodeId | null =
-			selectedSiblingIds[selectedSiblingIds.length - 1] ?? null;
-		const createdNodeIds: NodeId[] = [];
-		for (const sourceId of selectedSiblingIds) {
-			const source = graph.state.nodesById.get(sourceId);
-			if (!source) {
-				continue;
-			}
-			if (!source.meta.user_permissions.can_remove_and_duplicate) {
-				continue;
-			}
-			if (!canParentCreateNodeType(parentId, source.node_type)) {
-				continue;
-			}
-
-			const baseLabel =
-				source.meta.label.trim().length > 0
-					? `${source.meta.label.trim()} Copy`
-					: `${source.node_type} Copy`;
-			const label = nextLabelInParent(parentId, baseLabel);
-			const parentBefore = graph.state.nodesById.get(parentId);
-			if (!parentBefore) {
-				continue;
-			}
-			const knownChildren = new Set(parentBefore.children);
-			await sendIntent({
-				kind: 'duplicateNode',
-				source: sourceId,
-				new_parent: parentId,
-				new_prev_sibling: insertAfterNodeId,
-				label
-			});
-			const createdNodeId = await waitForCreatedChildLabel(parentId, knownChildren, label);
-			if (createdNodeId === null) {
-				continue;
-			}
-			createdNodeIds.push(createdNodeId);
-			insertAfterNodeId = createdNodeId;
-		}
-
-		if (createdNodeIds.length === 0) {
-			return false;
-		}
-		selectNodes(createdNodeIds, 'REPLACE');
-		return true;
-	};
-
-	const pasteNodesCommand = async (): Promise<boolean> => {
-		if (nodeClipboard.length === 0) {
-			return false;
-		}
-
-		const anchorNode = getFirstSelectedNode();
-		if (!anchorNode) {
-			return false;
-		}
-
-		let targetParentId: NodeId | undefined;
-		let insertAfterNodeId: NodeId | null = null;
-		if (isFolderNode(anchorNode)) {
-			targetParentId = anchorNode.node_id;
-		} else {
-			targetParentId = graph.state.parentById.get(anchorNode.node_id);
-			insertAfterNodeId = anchorNode.node_id;
-		}
-		if (targetParentId === undefined) {
-			return false;
-		}
-
-		const createdNodeIds: NodeId[] = [];
-		for (const entry of nodeClipboard) {
-			if (!canParentCreateNodeType(targetParentId, entry.node_type)) {
-				continue;
-			}
-			const label = nextLabelInParent(targetParentId, entry.label);
-			const createdNodeId = await createNodeUnderParent(
-				targetParentId,
-				entry.node_type,
-				label,
-				insertAfterNodeId
-			);
-			if (createdNodeId === null) {
-				continue;
-			}
-			createdNodeIds.push(createdNodeId);
-			if (insertAfterNodeId !== null) {
-				insertAfterNodeId = createdNodeId;
-			}
-		}
-
-		if (createdNodeIds.length === 0) {
-			return false;
-		}
-		selectNodes(createdNodeIds, 'REPLACE');
-		return true;
-	};
-
 	const applyHistoryState = (history: UiHistoryState | undefined): void => {
 		if (!history) {
 			return;
@@ -1349,9 +672,9 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 		rebuildDeclaredDescriptions(snapshot.schema.declared_descriptions);
 		pruneFooterHoverStack();
 		hasLoadedSnapshot = true;
-		invalidateWarningCaches();
-		restorePersistedSelection();
-		reconcileSelection();
+		warnings.invalidate();
+		selection.restorePersistedSelection();
+		selection.reconcileSelection();
 		applyHistoryState(snapshot.history);
 		resetPendingLogMutations();
 		logMaxEntries = snapshot.logger.max_entries;
@@ -1476,7 +799,7 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 		}
 
 		if (graphEvents.length > 0) {
-			const warningDataChanged = batchAffectsWarnings({
+			const warningDataChanged = warnings.batchAffectsWarnings({
 				from: batch.from,
 				to: batch.to,
 				events: graphEvents
@@ -1488,9 +811,9 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 			});
 			pruneFooterHoverStack();
 			if (warningDataChanged) {
-				invalidateWarningCaches();
+				warnings.invalidate();
 			}
-			reconcileSelection();
+			selection.reconcileSelection();
 			if (graph.state.requiresResync) {
 				void resyncSnapshot('Snapshot resynced.');
 			}
@@ -1725,51 +1048,16 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 		}
 	};
 
-	const registerWorkbenchCommandHandlers = (): (() => void) => {
-		type CommandHandlerResult = boolean | void | Promise<boolean | void>;
-		const cleanups: Array<() => void> = [];
-		const bind = (
-			commandId: CommandId,
-			handler: () => CommandHandlerResult,
-			priority = 10
-		): void => {
-			cleanups.push(registerCommandHandler(commandId, () => handler(), { priority }));
-		};
-
-		bind(
-			'edit.undo',
-			() => {
-				void undo();
-				return true;
-			},
-			20
-		);
-		bind(
-			'edit.redo',
-			() => {
-				void redo();
-				return true;
-			},
-			20
-		);
-		bind('edit.deleteSelection', () => removeSelectedNodesCommand(), 10);
-		bind('select.all', () => selectSiblingNodesCommand(), 10);
-		bind('edit.copy', () => copySelectedNodesCommand(), 10);
-		bind('edit.cut', () => cutSelectedNodesCommand(), 10);
-		bind('edit.duplicate', () => duplicateSelectedNodesCommand(), 10);
-		bind('edit.paste', () => pasteNodesCommand(), 10);
-		bind('file.new', () => createNewProjectFile(), 15);
-		bind('file.save', () => saveProjectFile(), 15);
-		bind('file.saveAs', () => saveProjectFileAs(), 15);
-		bind('file.open', () => openProjectFile(), 15);
-		bind('file.reopenLast', () => reopenLastProjectFile(), 15);
-
-		return (): void => {
-			for (const cleanup of cleanups) {
-				cleanup();
-			}
-		};
-	};
+	const commandSuite = createWorkbenchCommandSuite({
+		graph,
+		sendIntent,
+		getSelectedNodes: () => selection.getSelectedNodes(),
+		getFirstSelectedNode: () => selection.getFirstSelectedNode(),
+		getSelectedNodeIds: () => selection.selectedNodeIds,
+		selectNodes: (nodeIds, selectionMode) => selection.selectNodes(nodeIds, selectionMode),
+		undo,
+		redo
+	});
 
 	const mount = (): (() => void) => {
 		if (mountedCleanup !== null) {
@@ -1855,7 +1143,7 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 			void handleCommandShortcut(event);
 		};
 
-		unregisterCommands = registerWorkbenchCommandHandlers();
+		unregisterCommands = commandSuite.registerCommandHandlers();
 		if (typeof window !== 'undefined') {
 			window.addEventListener('keydown', onWindowKeydown, true);
 		}
@@ -1871,13 +1159,13 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 			unregisterCommands();
 			unsubscribe();
 			graph.reset();
-			invalidateWarningCaches();
+			warnings.reset();
 			resetPendingLogMutations();
 			nodeTypeDescriptions = new Map();
 			declaredDescriptions = new Map();
 			footerHoverStack = [];
-			selectedNodeIds = [];
-			nodeClipboard = [];
+			selection.reset();
+			commandSuite.reset();
 			uiGeneratedLogIds.clear();
 			clearToasts();
 			logRecords = [];
@@ -1909,10 +1197,10 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 			return logUiUpdateHz;
 		},
 		get selectedNodesIds(): NodeId[] {
-			return selectedNodeIds;
+			return selection.selectedNodeIds;
 		},
 		get selectedNodeId(): NodeId | null {
-			return selectedNodeIds[0] ?? null;
+			return selection.selectedNodeId;
 		},
 		get status(): WorkbenchConnectionStatus {
 			return status;
@@ -1936,20 +1224,20 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 			return editSessionEpoch;
 		},
 		getNodeData,
-		getSelectedNodes,
-		getFirstSelectedNode,
+		getSelectedNodes: () => selection.getSelectedNodes(),
+		getFirstSelectedNode: () => selection.getFirstSelectedNode(),
 		getNodeDescription,
 		getFooterHoverInfo,
-		getNodeVisibleWarnings,
-		getActiveWarnings,
-		hasNodeWarnings,
+		getNodeVisibleWarnings: (nodeId) => warnings.getNodeVisibleWarnings(nodeId),
+		getActiveWarnings: () => warnings.getActiveWarnings(),
+		hasNodeWarnings: (nodeId) => warnings.hasNodeWarnings(nodeId),
 		isNodeEnabledInHierarchy,
-		isNodeSelected,
+		isNodeSelected: (nodeId) => selection.isNodeSelected(nodeId),
 		setFooterHover,
 		clearFooterHover,
-		selectNode,
-		selectNodes,
-		clearSelection,
+		selectNode: (nodeId, selectionMode) => selection.selectNode(nodeId, selectionMode),
+		selectNodes: (nodeIds, selectionMode) => selection.selectNodes(nodeIds, selectionMode),
+		clearSelection: () => selection.clearSelection(),
 		sendIntent,
 		setLogUiUpdateHz,
 		dismissToast,

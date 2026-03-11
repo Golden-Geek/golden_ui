@@ -1,15 +1,15 @@
 <script lang="ts">
-	import { appState } from '$lib/golden_ui/store/workbench.svelte';
-	import { openNodePickerModal } from '$lib/golden_ui/store/node-picker-modal.svelte';
-	import { sendSetParamIntent } from '$lib/golden_ui/store/ui-intents';
-	import { projectionLabel } from '$lib/golden_ui/projection-labels';
+	import { appState } from '../../../../store/workbench.svelte';
+	import { openNodePickerModal } from '../../../../store/node-picker-modal.svelte';
+	import { sendSetParamIntent } from '../../../../store/ui-intents';
+	import { projectionLabel } from '../../../../projection-labels';
 	import type {
 		NodeId,
 		UiNodeDto,
 		UiParamValueProjection,
 		UiReferenceConstraints,
 		UiReferenceTargetCandidate
-	} from '$lib/golden_ui/types';
+	} from '../../../../types';
 
 	let {
 		node,

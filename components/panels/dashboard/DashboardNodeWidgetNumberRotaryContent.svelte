@@ -1,9 +1,9 @@
 <script lang="ts">
 	import { onDestroy } from 'svelte';
-	import { appState } from '$lib/golden_ui/store/workbench.svelte';
-	import EnableButton from '$lib/golden_ui/components/common/EnableButton.svelte';
-	import { createUiEditSession, sendSetParamIntent } from '$lib/golden_ui/store/ui-intents';
-	import type { UiNodeDto } from '$lib/golden_ui/types';
+	import { appState } from '../../../store/workbench.svelte';
+	import EnableButton from '../../common/EnableButton.svelte';
+	import { createUiEditSession, sendSetParamIntent } from '../../../store/ui-intents';
+	import type { UiNodeDto } from '../../../types';
 	import {
 		clampWidgetMaxDecimals,
 		getEffectiveWidgetScalarRange,

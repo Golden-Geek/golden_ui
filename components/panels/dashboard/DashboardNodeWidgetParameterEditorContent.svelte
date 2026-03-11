@@ -1,17 +1,17 @@
 <script lang="ts">
-	import { appState } from '$lib/golden_ui/store/workbench.svelte';
-	import EnableButton from '$lib/golden_ui/components/common/EnableButton.svelte';
-	import type { UiNodeDto } from '$lib/golden_ui/types';
-	import CheckboxEditor from '$lib/golden_ui/components/panels/inspector/parameters/CheckboxEditor.svelte';
-	import ColorPickerEditor from '$lib/golden_ui/components/panels/inspector/parameters/ColorPickerEditor.svelte';
-	import CssValueEditor from '$lib/golden_ui/components/panels/inspector/parameters/CssValueEditor.svelte';
-	import DropdownEditor from '$lib/golden_ui/components/panels/inspector/parameters/DropdownEditor.svelte';
-	import { propertiesInspectorClass } from '$lib/golden_ui/components/panels/inspector/inspector.svelte';
-	import MultiNumberEditor from '$lib/golden_ui/components/panels/inspector/parameters/MultiNumberEditor.svelte';
-	import NumberEditor from '$lib/golden_ui/components/panels/inspector/parameters/NumberEditor.svelte';
-	import ReferenceEditor from '$lib/golden_ui/components/panels/inspector/parameters/ReferenceEditor.svelte';
-	import TextInputEditor from '$lib/golden_ui/components/panels/inspector/parameters/TextInputEditor.svelte';
-	import TriggerEditor from '$lib/golden_ui/components/panels/inspector/parameters/TriggerEditor.svelte';
+	import { appState } from '../../../store/workbench.svelte';
+	import EnableButton from '../../common/EnableButton.svelte';
+	import type { UiNodeDto } from '../../../types';
+	import CheckboxEditor from '../inspector/parameters/CheckboxEditor.svelte';
+	import ColorPickerEditor from '../inspector/parameters/ColorPickerEditor.svelte';
+	import CssValueEditor from '../inspector/parameters/CssValueEditor.svelte';
+	import DropdownEditor from '../inspector/parameters/DropdownEditor.svelte';
+	import { propertiesInspectorClass } from '../inspector/inspector.svelte';
+	import MultiNumberEditor from '../inspector/parameters/MultiNumberEditor.svelte';
+	import NumberEditor from '../inspector/parameters/NumberEditor.svelte';
+	import ReferenceEditor from '../inspector/parameters/ReferenceEditor.svelte';
+	import TextInputEditor from '../inspector/parameters/TextInputEditor.svelte';
+	import TriggerEditor from '../inspector/parameters/TriggerEditor.svelte';
 	import {
 		clampWidgetMaxDecimals,
 		getEffectiveWidgetScalarRange,

@@ -1,9 +1,9 @@
 <script lang="ts">
 	import { onDestroy } from 'svelte';
-	import { registerCommandHandler } from '$lib/golden_ui/store/commands.svelte';
-	import { appState, type SelectionMode } from '$lib/golden_ui/store/workbench.svelte';
-	import { createUiEditSession, sendSetParamIntent } from '$lib/golden_ui/store/ui-intents';
-	import type { NodeId, ParamEventBehaviour, ParamValue, UiNodeDto } from '$lib/golden_ui/types';
+	import { registerCommandHandler } from '../../../store/commands.svelte';
+	import { appState, type SelectionMode } from '../../../store/workbench.svelte';
+	import { createUiEditSession, sendSetParamIntent } from '../../../store/ui-intents';
+	import type { NodeId, ParamEventBehaviour, ParamValue, UiNodeDto } from '../../../types';
 	import {
 		cssValueToPx,
 		formatCssValue,
@@ -11,10 +11,10 @@
 		pxToCssValue,
 		type CssUnitConversionContext,
 		type CssValueData
-	} from '$lib/golden_ui/css-value';
+	} from '../../../css-value';
 	import DashboardCanvasSelf from './DashboardCanvas.svelte';
 	import { resolveDashboardNodeWidgetType } from './dashboard-node-widget-registry';
-	import Slider from '$lib/golden_ui/components/common/Slider.svelte';
+	import Slider from '../../common/Slider.svelte';
 
 	import {
 		bindDashboardGenericWidgetTarget,

@@ -1,4 +1,4 @@
-import type { ParamValue } from '$lib/golden_ui/types';
+import type { ParamValue } from '../../../types';
 import WatcherColorVisualizer from './WatcherColorVisualizer.svelte';
 import WatcherEventVisualizer from './WatcherEventVisualizer.svelte';
 import WatcherValueVisualizer from './WatcherValueVisualizer.svelte';

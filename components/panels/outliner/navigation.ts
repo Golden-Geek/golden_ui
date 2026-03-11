@@ -1,5 +1,5 @@
-import type { GraphState } from '$lib/golden_ui/store/graph.svelte';
-import type { NodeId } from '$lib/golden_ui/types';
+import type { GraphState } from '../../../store/graph.svelte';
+import type { NodeId } from '../../../types';
 
 const EMPTY_NODE_ID_SET: ReadonlySet<NodeId> = new Set<NodeId>();
 

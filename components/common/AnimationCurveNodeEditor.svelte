@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { appState } from '$lib/golden_ui/store/workbench.svelte';
+	import { appState } from '../../store/workbench.svelte';
 	import {
 		createUiEditSession,
 		sendCreateUserItemIntent,
@@ -7,13 +7,10 @@
 		sendRemoveNodesIntent,
 		sendSetParamIntent,
 		type UiEditSession
-	} from '$lib/golden_ui/store/ui-intents';
-	import { registerCommandHandler } from '$lib/golden_ui/store/commands.svelte';
-	import {
-		curveClipboardState,
-		type CurveClipboardKey
-	} from '$lib/golden_ui/store/curve-clipboard.svelte';
-	import type { NodeId, ParamValue, UiNodeDto, UiParamConstraints } from '$lib/golden_ui/types';
+	} from '../../store/ui-intents';
+	import { registerCommandHandler } from '../../store/commands.svelte';
+	import { curveClipboardState, type CurveClipboardKey } from '../../store/curve-clipboard.svelte';
+	import type { NodeId, ParamValue, UiNodeDto, UiParamConstraints } from '../../types';
 	import AnimationCurveCanvas from './AnimationCurveCanvas.svelte';
 	import ContextMenu from './ContextMenu.svelte';
 	import type { ContextMenuAnchor, ContextMenuItem } from './context-menu';
