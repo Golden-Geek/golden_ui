@@ -19,7 +19,8 @@ SvelteKit source.
   files through `$lib/golden_ui/...`.
 - Package-internal imports now use relative paths only so the package is physically self-contained.
 - Keep session/state logic in focused stores with a thin facade instead of growing
-  `workbench.svelte.ts`; `store/session/` is the current split point.
+  `workbench.svelte.ts`; `store/session/` is the current split point for selection, warnings,
+  descriptions, footer hover, history, logger, and command state.
 - Keep transport wiring behind `transport/` interfaces. Session state should not know about a
   concrete websocket implementation.
 
