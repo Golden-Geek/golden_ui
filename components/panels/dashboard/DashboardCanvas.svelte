@@ -90,6 +90,17 @@
 		knownChildIds: NodeId[];
 		knownDirectChildIds: NodeId[];
 	};
+	type NonFreeSurfaceFlowRenderItem =
+		| {
+				key: string;
+				kind: 'child';
+				child: UiNodeDto;
+		  }
+		| {
+				key: string;
+				kind: 'preview';
+				preview: SurfaceDropPreview;
+		  };
 	type WidgetMovePreviewEventDetail = {
 		surfaceNodeId: NodeId | null;
 		preview: SurfaceDropPreview | null;
@@ -4032,6 +4043,44 @@
 		);
 	};
 
+	const nonFreeSurfaceFlowRenderItems = $derived.by((): NonFreeSurfaceFlowRenderItem[] => {
+		const items: NonFreeSurfaceFlowRenderItem[] = [];
+		const preview = rendersInlineSurfaceDropPreview ? displayedSurfaceDropPreview : null;
+		let previewInserted = false;
+
+		for (const child of childWidgets) {
+			if (
+				preview &&
+				!previewInserted &&
+				!isHiddenSourceSurfaceChild(child) &&
+				preview.targetIndex !== null &&
+				childPreviewInsertionIndexByNodeId.get(child.node_id) === preview.targetIndex
+			) {
+				items.push({
+					key: '__surface-drop-preview__',
+					kind: 'preview',
+					preview
+				});
+				previewInserted = true;
+			}
+			items.push({
+				key: `child-${String(child.node_id)}`,
+				kind: 'child',
+				child
+			});
+		}
+
+		if (preview && !previewInserted) {
+			items.push({
+				key: '__surface-drop-preview__',
+				kind: 'preview',
+				preview
+			});
+		}
+
+		return items;
+	});
+
 	const shouldRenderSurfaceDropPreviewAtEnd = (): boolean => {
 		if (!rendersInlineSurfaceDropPreview || !displayedSurfaceDropPreview) {
 			return false;
@@ -4584,7 +4633,7 @@
 				</section>
 			{/if}
 		</div>
-	{:else}
+	{:else if layoutKind === 'free'}
 		<div class="dashboard-layout">
 			{#each childWidgets as child (child.node_id)}
 				{#if shouldRenderSurfaceDropPreviewBeforeChild(child)}
@@ -4608,6 +4657,33 @@
 					layoutKind === 'free' ? '' : 'dashboard-drop-preview-flow'
 				)}
 			{/if}
+		</div>
+	{:else}
+		<div class="dashboard-layout">
+			{#each nonFreeSurfaceFlowRenderItems as item (item.key)}
+				<div
+					class="dashboard-slot"
+					class:dashboard-drop-preview={item.kind === 'preview'}
+					class:dashboard-drop-preview-flow={item.kind === 'preview'}
+					class:is-committing={
+						item.kind === 'preview' && pendingSurfaceDrop !== null && surfaceDropPreview === null
+					}
+					class:dashboard-hidden-drag-source={
+						item.kind === 'child' && isHiddenSourceSurfaceChild(item.child)
+					}
+					style={item.kind === 'preview' ? inlineSurfaceDropPreviewStyle() : slotStyle(item.child)}
+					aria-hidden={item.kind === 'preview'}>
+					<div class="dashboard-slot-fill">
+						{#if item.kind === 'preview'}
+							<div class="dashboard-drop-preview-fill">
+								{@render dashboardSurfaceDropPreviewContent(item.preview)}
+							</div>
+						{:else}
+							<DashboardCanvasSelf node={item.child} {editMode} />
+						{/if}
+					</div>
+				</div>
+			{/each}
 		</div>
 	{/if}
 
