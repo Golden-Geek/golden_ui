@@ -16,6 +16,8 @@ export type DashboardLayoutKind =
 	| 'accordion'
 	| 'tabs';
 
+export type DashboardGridDirection = 'row' | 'column';
+
 export type DashboardLabelPlacement = 'left' | 'right' | 'top' | 'bottom' | 'inside';
 
 export interface DashboardPlacement {
@@ -23,8 +25,7 @@ export interface DashboardPlacement {
 	position: { x: number; y: number };
 	anchor: DashboardAnchor;
 	size: { width: CssValueData; height: CssValueData };
-	columnSpan: number;
-	rowSpan: number;
+	sizeEnabled: { width: boolean; height: boolean };
 }
 
 export type DashboardAnchor =
@@ -52,6 +53,11 @@ export interface DashboardPageSize {
 export interface DashboardSnapGrid {
 	enabled: boolean;
 	step: number;
+}
+
+export interface DashboardGridSettings {
+	direction: DashboardGridDirection;
+	lineCount: number;
 }
 
 export const getLiveNode = (graph: GraphState | null, node: UiNodeDto): UiNodeDto => {
@@ -100,14 +106,10 @@ export const getDirectParamNode = (
 		return null;
 	}
 
-	const stack = [...node.children];
+	const stack = getDirectChildren(graph, node).filter((child) => child.user_role !== 'itemRoot');
 	let basenameMatch: UiNodeDto | null = null;
 	while (stack.length > 0) {
-		const childId = stack.shift();
-		if (childId === undefined) {
-			continue;
-		}
-		const child = graph.nodesById.get(childId);
+		const child = stack.shift();
 		if (!child) {
 			continue;
 		}
@@ -119,7 +121,11 @@ export const getDirectParamNode = (
 				basenameMatch = child;
 			}
 		}
-		stack.unshift(...child.children);
+		for (const structuralChild of getDirectChildren(graph, child)) {
+			if (structuralChild.user_role !== 'itemRoot') {
+				stack.unshift(structuralChild);
+			}
+		}
 	}
 
 	return basenameMatch;
@@ -193,6 +199,8 @@ export const getDashboardPlacement = (
 ): DashboardPlacement => {
 	const anchorParam = getDirectParam(graph, node, 'anchor');
 	const labelPlacementNode = getDirectParamNode(graph, node, 'label_placement');
+	const widthNode = getDirectParamNode(graph, node, 'width');
+	const heightNode = getDirectParamNode(graph, node, 'height');
 	const anchor =
 		anchorParam?.value.kind === 'enum' &&
 		[
@@ -220,20 +228,22 @@ export const getDashboardPlacement = (
 		},
 		anchor,
 		size: {
-			width: cssValueFromParamValue(getDirectParam(graph, node, 'width')?.value, {
+			width: cssValueFromParamValue(widthNode?.data.kind === 'parameter' ? widthNode.data.param.value : undefined, {
 				value: 12,
 				unit: 'rem'
 			}),
-			height: cssValueFromParamValue(getDirectParam(graph, node, 'height')?.value, {
+			height: cssValueFromParamValue(
+				heightNode?.data.kind === 'parameter' ? heightNode.data.param.value : undefined,
+				{
 				value: 4,
 				unit: 'rem'
-			})
+				}
+			)
 		},
-		columnSpan: Math.max(
-			1,
-			Math.round(asNumber(getDirectParam(graph, node, 'column_span')?.value, 1))
-		),
-		rowSpan: Math.max(1, Math.round(asNumber(getDirectParam(graph, node, 'row_span')?.value, 1)))
+		sizeEnabled: {
+			width: widthNode?.meta.enabled ?? false,
+			height: heightNode?.meta.enabled ?? false
+		}
 	};
 };
 
@@ -282,15 +292,22 @@ export const getDashboardSnapGrid = (
 	};
 };
 
-export const getGridColumns = (
+export const getDashboardGridSettings = (
 	graph: GraphState | null,
 	node: UiNodeDto | null,
-	fallback = 12
-): number => {
-	return Math.max(
+	fallback: DashboardGridSettings = { direction: 'row', lineCount: 3 }
+): DashboardGridSettings => {
+	const directionParam = getDirectParam(graph, node, 'grid_direction');
+	const direction =
+		directionParam?.value.kind === 'enum' &&
+		(directionParam.value.value === 'row' || directionParam.value.value === 'column')
+			? directionParam.value.value
+			: fallback.direction;
+	const lineCount = Math.max(
 		1,
-		Math.round(asNumber(getDirectParam(graph, node, 'grid_columns')?.value, fallback))
+		Math.round(asNumber(getDirectParam(graph, node, 'grid_line_count')?.value, fallback.lineCount))
 	);
+	return { direction, lineCount };
 };
 
 export const formatParamValue = (value: ParamValue | null | undefined): string => {

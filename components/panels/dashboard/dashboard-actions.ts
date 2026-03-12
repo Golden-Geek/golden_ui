@@ -9,7 +9,9 @@ import type {
 import {
 	createUiEditSession,
 	sendCreateUserItemByTypeIntent,
+	sendDuplicateNodeIntent,
 	sendMoveNodeIntent,
+	sendPatchMetaIntent,
 	sendSetParamIntent
 } from '../../../store/ui-intents';
 import { cssValueToPx, type CssUnitConversionContext, type CssValueData } from '../../../css-value';
@@ -18,8 +20,11 @@ import {
 	createReferenceValue,
 	formatParamValue,
 	getDashboardLayoutKind,
+	getDashboardPlacement,
+	getDirectItemChildren,
 	getDirectParamNode,
-	type DashboardAnchor
+	type DashboardAnchor,
+	type DashboardLayoutKind
 } from './dashboard-model';
 
 type GraphGetter = () => GraphState | null;
@@ -37,8 +42,7 @@ export interface DashboardWidgetCreationPlacement {
 	anchor: DashboardAnchor;
 	position: { x: number; y: number };
 	size: { width: CssValueData; height: CssValueData };
-	columnSpan: number;
-	rowSpan: number;
+	sizeEnabled?: { width: boolean; height: boolean };
 }
 
 interface DashboardWidgetPlacementOptions {
@@ -50,6 +54,12 @@ interface DashboardWidgetCreationOptions {
 	placement?: DashboardWidgetCreationPlacement;
 }
 
+export interface DashboardContainerWidgetCreationOptions {
+	label?: string;
+	placement?: DashboardWidgetCreationPlacement;
+	layoutKind?: DashboardLayoutKind;
+}
+
 interface DashboardGenericWidgetCreationDefaults {
 	placement: DashboardWidgetCreationPlacement;
 	widgetKind: DashboardGenericWidgetKind;
@@ -59,6 +69,11 @@ interface DashboardGenericWidgetCreationDefaults {
 	valueRange?: [number, number];
 	step?: number;
 	defaultChecked?: boolean;
+}
+
+export interface DashboardWidgetOrderingState {
+	currentIndex: number;
+	itemCount: number;
 }
 
 const clamp = (value: number, min: number, max: number): number =>
@@ -120,8 +135,6 @@ const createPlacement = (
 	const centerPx = options?.centerPx ?? { x: widthPx * 0.5, y: heightPx * 0.5 };
 	const snappedLeft = snapPixel(centerPx.x - widthPx * 0.5, options?.snapPx);
 	const snappedTop = snapPixel(centerPx.y - heightPx * 0.5, options?.snapPx);
-	const widthRem = widthPx / Math.max(context.rootRemPx, 1e-6);
-	const heightRem = heightPx / Math.max(context.rootRemPx, 1e-6);
 
 	return {
 		anchor: 'top-left',
@@ -129,9 +142,7 @@ const createPlacement = (
 			x: snappedLeft,
 			y: snappedTop
 		},
-		size,
-		columnSpan: clamp(Math.round(widthRem / 6), 1, 12),
-		rowSpan: clamp(Math.round(heightRem / 4), 1, 12)
+		size
 	};
 };
 
@@ -141,6 +152,11 @@ const getDefaultSizingContext = (): DashboardWidgetSizingContext => ({
 	surfaceHeightPx: 720,
 	viewportWidthPx: 1280,
 	viewportHeightPx: 720
+});
+
+const getContainerDefaultSize = (): { width: CssValueData; height: CssValueData } => ({
+	width: remValue(12),
+	height: remValue(8)
 });
 
 const getNodeWidgetDefaultSize = (
@@ -196,6 +212,11 @@ export const getDashboardNodeWidgetCreationDefaults = (
 	options?: DashboardWidgetPlacementOptions
 ): DashboardWidgetCreationPlacement =>
 	createPlacement(getNodeWidgetDefaultSize(targetNode), context, options);
+
+export const getDashboardContainerCreationDefaults = (
+	context: DashboardWidgetSizingContext,
+	options?: DashboardWidgetPlacementOptions
+): DashboardWidgetCreationPlacement => createPlacement(getContainerDefaultSize(), context, options);
 
 const getGenericWidgetDefaults = (
 	targetNode: UiNodeDto,
@@ -378,10 +399,86 @@ const setWidgetParamValue = async (
 	return sendSetParamIntent(target.node.node_id, value, target.param.event_behaviour);
 };
 
+const setWidgetParamEnabled = async (
+	getGraph: GraphGetter,
+	widgetNodeId: NodeId,
+	declId: string,
+	enabled: boolean
+): Promise<boolean> => {
+	const target = await waitForDirectParam(getGraph, widgetNodeId, declId);
+	if (!target) {
+		return false;
+	}
+	return sendPatchMetaIntent(target.node.node_id, { enabled });
+};
+
+const applyDashboardWidgetSizingMode = async (
+	getGraph: GraphGetter,
+	widgetNodeId: NodeId,
+	parentId: NodeId,
+	sizeEnabled?: { width: boolean; height: boolean }
+): Promise<void> => {
+	const graph = getGraph();
+	const parentNode = graph?.nodesById.get(parentId) ?? null;
+	if (!parentNode) {
+		return;
+	}
+
+	const parentLayoutKind = getDashboardLayoutKind(graph, parentNode, 'free');
+	if (parentLayoutKind === 'free') {
+		await setWidgetParamEnabled(getGraph, widgetNodeId, 'width', true);
+		await setWidgetParamEnabled(getGraph, widgetNodeId, 'height', true);
+		return;
+	}
+	if (parentLayoutKind === 'horizontal') {
+		await setWidgetParamEnabled(getGraph, widgetNodeId, 'width', sizeEnabled?.width ?? false);
+		return;
+	}
+	if (parentLayoutKind === 'vertical') {
+		await setWidgetParamEnabled(getGraph, widgetNodeId, 'height', sizeEnabled?.height ?? false);
+	}
+};
+
 const createInitialParam = (decl_id: string, value: ParamValue): UiCreateUserItemInitialParam => ({
 	decl_id,
 	value
 });
+
+export const getNextAvailableChildLabel = (
+	graph: GraphState | null,
+	parentId: NodeId,
+	preferredLabel: string
+): string => {
+	const fallbackLabel = preferredLabel.trim().length > 0 ? preferredLabel.trim() : 'Item';
+	const parent = graph?.nodesById.get(parentId);
+	if (!parent) {
+		return fallbackLabel;
+	}
+
+	const usedLabels = new Set<string>();
+	for (const childId of parent.children) {
+		const child = graph?.nodesById.get(childId);
+		if (!child) {
+			continue;
+		}
+		const label = child.meta.label.trim();
+		if (label.length > 0) {
+			usedLabels.add(label);
+		}
+	}
+
+	if (!usedLabels.has(fallbackLabel)) {
+		return fallbackLabel;
+	}
+
+	let suffix = 2;
+	let candidate = `${fallbackLabel} ${suffix}`;
+	while (usedLabels.has(candidate)) {
+		suffix += 1;
+		candidate = `${fallbackLabel} ${suffix}`;
+	}
+	return candidate;
+};
 
 const buildDashboardWidgetPlacementInitialParams = (
 	graph: GraphState | null,
@@ -390,18 +487,30 @@ const buildDashboardWidgetPlacementInitialParams = (
 ): UiCreateUserItemInitialParam[] => {
 	const parentNode = graph?.nodesById.get(parentId) ?? null;
 	const parentLayoutKind = getDashboardLayoutKind(graph, parentNode, 'free');
-	const params: UiCreateUserItemInitialParam[] = [
-		createInitialParam('layout/width', {
-			kind: 'css_value',
-			value: placement.size.width.value,
-			unit: placement.size.width.unit
-		}),
-		createInitialParam('layout/height', {
-			kind: 'css_value',
-			value: placement.size.height.value,
-			unit: placement.size.height.unit
-		})
-	];
+	const params: UiCreateUserItemInitialParam[] = [];
+
+	if (parentLayoutKind === 'free' || parentLayoutKind === 'horizontal') {
+		params.push(
+			createInitialParam('layout/width', {
+				kind: 'css_value',
+				value: placement.size.width.value,
+				unit: placement.size.width.unit
+			})
+		);
+	}
+
+	if (
+		parentLayoutKind === 'free' ||
+		parentLayoutKind === 'vertical'
+	) {
+		params.push(
+			createInitialParam('layout/height', {
+				kind: 'css_value',
+				value: placement.size.height.value,
+				unit: placement.size.height.unit
+			})
+		);
+	}
 
 	if (parentLayoutKind === 'free') {
 		params.push(
@@ -416,19 +525,24 @@ const buildDashboardWidgetPlacementInitialParams = (
 		);
 	}
 
-	if (parentLayoutKind === 'grid') {
+	return params;
+};
+
+const buildDashboardContainerWidgetInitialParams = (
+	graph: GraphState | null,
+	parentId: NodeId,
+	placement: DashboardWidgetCreationPlacement,
+	layoutKind?: DashboardLayoutKind
+): UiCreateUserItemInitialParam[] => {
+	const params = buildDashboardWidgetPlacementInitialParams(graph, parentId, placement);
+	if (layoutKind) {
 		params.push(
-			createInitialParam('layout/column_span', {
-				kind: 'int',
-				value: placement.columnSpan
-			}),
-			createInitialParam('layout/row_span', {
-				kind: 'int',
-				value: placement.rowSpan
+			createInitialParam('layout/layout_kind', {
+				kind: 'enum',
+				value: layoutKind
 			})
 		);
 	}
-
 	return params;
 };
 
@@ -614,13 +728,14 @@ export const createDashboardNodeWidget = async (
 	if (!parent) {
 		return false;
 	}
+	const knownChildIds = new Set(parent.children);
 	const editSession = createUiEditSession('Create dashboard node widget', 'dashboard-create');
 	await editSession.begin();
 	try {
 		const placement =
 			options?.placement ??
 			getDashboardNodeWidgetCreationDefaults(targetNode, getDefaultSizingContext());
-		return sendCreateUserItemByTypeIntent(
+		const created = await sendCreateUserItemByTypeIntent(
 			parentId,
 			'dashboard_node_widget',
 			targetNode.meta.label,
@@ -633,6 +748,19 @@ export const createDashboardNodeWidget = async (
 				)
 			}
 		);
+		if (!created) {
+			return false;
+		}
+		const createdWidget = await waitForDirectItemChild(
+			getGraph,
+			parentId,
+			knownChildIds,
+			(child) => child.node_type === 'dashboard_node_widget'
+		);
+		if (createdWidget) {
+			await applyDashboardWidgetSizingMode(getGraph, createdWidget.node_id, parentId);
+		}
+		return true;
 	} finally {
 		await editSession.end();
 	}
@@ -652,13 +780,14 @@ export const createDashboardGenericWidget = async (
 	if (!parent) {
 		return false;
 	}
+	const knownChildIds = new Set(parent.children);
 	const editSession = createUiEditSession('Create dashboard parameter widget', 'dashboard-create');
 	await editSession.begin();
 	try {
 		const placement =
 			options?.placement ??
 			getDashboardGenericWidgetCreationDefaults(targetNode, getDefaultSizingContext()).placement;
-		return sendCreateUserItemByTypeIntent(
+		const created = await sendCreateUserItemByTypeIntent(
 			parentId,
 			'dashboard_generic_widget',
 			targetNode.meta.label,
@@ -671,9 +800,301 @@ export const createDashboardGenericWidget = async (
 				)
 			}
 		);
+		if (!created) {
+			return false;
+		}
+		const createdWidget = await waitForDirectItemChild(
+			getGraph,
+			parentId,
+			knownChildIds,
+			(child) => child.node_type === 'dashboard_generic_widget'
+		);
+		if (createdWidget) {
+			await applyDashboardWidgetSizingMode(getGraph, createdWidget.node_id, parentId);
+		}
+		return true;
 	} finally {
 		await editSession.end();
 	}
+};
+
+const waitForDirectItemChild = async (
+	getGraph: GraphGetter,
+	parentId: NodeId,
+	knownChildIds: ReadonlySet<NodeId>,
+	predicate: (child: UiNodeDto) => boolean,
+	timeoutMs = 1200
+): Promise<UiNodeDto | null> => {
+	return waitFor(() => {
+		const graph = getGraph();
+		const parent = graph?.nodesById.get(parentId);
+		if (!graph || !parent) {
+			return null;
+		}
+
+		for (const childId of parent.children) {
+			if (knownChildIds.has(childId)) {
+				continue;
+			}
+			const child = graph.nodesById.get(childId);
+			if (!child || child.user_role !== 'itemRoot') {
+				continue;
+			}
+			if (predicate(child)) {
+				return child;
+			}
+		}
+
+		return null;
+	}, timeoutMs);
+};
+
+export const createDashboardContainerWidget = async (
+	getGraph: GraphGetter,
+	parentId: NodeId,
+	options?: DashboardContainerWidgetCreationOptions
+): Promise<NodeId | null> => {
+	const graph = getGraph();
+	const parent = graph?.nodesById.get(parentId);
+	if (!parent) {
+		return null;
+	}
+
+	const knownChildIds = new Set(parent.children);
+	const editSession = createUiEditSession('Create dashboard container', 'dashboard-create');
+	await editSession.begin();
+	try {
+		const placement =
+			options?.placement ?? getDashboardContainerCreationDefaults(getDefaultSizingContext());
+		const label = options?.label?.trim().length
+			? options.label.trim()
+			: getNextAvailableChildLabel(graph, parentId, 'Container');
+		const created = await sendCreateUserItemByTypeIntent(
+			parentId,
+			'dashboard_widget_container',
+			label,
+			{
+				initial_params: buildDashboardContainerWidgetInitialParams(
+					graph,
+					parentId,
+					placement,
+					options?.layoutKind
+				)
+			}
+		);
+		if (!created) {
+			return null;
+		}
+
+		const container = await waitForDirectItemChild(
+			getGraph,
+			parentId,
+			knownChildIds,
+			(child) => child.node_type === 'dashboard_widget_container'
+		);
+		if (container) {
+			await applyDashboardWidgetSizingMode(getGraph, container.node_id, parentId);
+		}
+		return container?.node_id ?? null;
+	} finally {
+		await editSession.end();
+	}
+};
+
+const resolveLastDashboardItemChildId = (
+	graph: GraphState | null,
+	parentId: NodeId,
+	excludedNodeId?: NodeId
+): NodeId | undefined => {
+	const children = getDirectItemChildren(graph, graph?.nodesById.get(parentId) ?? null);
+	for (let index = children.length - 1; index >= 0; index -= 1) {
+		const child = children[index];
+		if (child && child.node_id !== excludedNodeId) {
+			return child.node_id;
+		}
+	}
+	return undefined;
+};
+
+const applyDashboardWidgetPlacement = async (
+	getGraph: GraphGetter,
+	widgetNodeId: NodeId,
+	parentId: NodeId,
+	placement: DashboardWidgetCreationPlacement
+): Promise<boolean> => {
+	const graph = getGraph();
+	const parentNode = graph?.nodesById.get(parentId) ?? null;
+	if (!parentNode) {
+		return false;
+	}
+
+	const parentLayoutKind = getDashboardLayoutKind(graph, parentNode, 'free');
+	let success = true;
+
+	if (parentLayoutKind === 'free' || parentLayoutKind === 'horizontal') {
+		success =
+			(await setWidgetParamValue(getGraph, widgetNodeId, 'width', {
+				kind: 'css_value',
+				value: placement.size.width.value,
+				unit: placement.size.width.unit
+			})) && success;
+	}
+
+	if (parentLayoutKind === 'free' || parentLayoutKind === 'vertical') {
+		success =
+			(await setWidgetParamValue(getGraph, widgetNodeId, 'height', {
+				kind: 'css_value',
+				value: placement.size.height.value,
+				unit: placement.size.height.unit
+			})) && success;
+	}
+
+	if (parentLayoutKind === 'free') {
+		success =
+			(await setWidgetParamValue(getGraph, widgetNodeId, 'anchor', {
+				kind: 'enum',
+				value: placement.anchor
+			})) && success;
+		success =
+			(await setWidgetParamValue(getGraph, widgetNodeId, 'position', {
+				kind: 'vec2',
+				value: [placement.position.x, placement.position.y]
+			})) && success;
+	}
+
+	await applyDashboardWidgetSizingMode(getGraph, widgetNodeId, parentId, placement.sizeEnabled);
+
+	return success;
+};
+
+export const moveDashboardWidgetToSurface = async (
+	getGraph: GraphGetter,
+	widgetNodeId: NodeId,
+	newParentId: NodeId,
+	placement?: DashboardWidgetCreationPlacement
+): Promise<boolean> => {
+	const graph = getGraph();
+	const widget = graph?.nodesById.get(widgetNodeId);
+	const newParent = graph?.nodesById.get(newParentId);
+	if (!widget || !newParent) {
+		return false;
+	}
+
+	const editSession = createUiEditSession('Move dashboard widget', 'dashboard-move');
+	await editSession.begin();
+	try {
+		const moved = await sendMoveNodeIntent(
+			widgetNodeId,
+			newParentId,
+			resolveLastDashboardItemChildId(getGraph(), newParentId, widgetNodeId)
+		);
+		if (!moved || !placement) {
+			return moved;
+		}
+		return applyDashboardWidgetPlacement(getGraph, widgetNodeId, newParentId, placement);
+	} finally {
+		await editSession.end();
+	}
+};
+
+interface DashboardWidgetOrderingContext {
+	parentId: NodeId;
+	orderedSiblings: UiNodeDto[];
+	itemSiblings: UiNodeDto[];
+	currentIndex: number;
+}
+
+const getDashboardWidgetOrderingContext = (
+	graph: GraphState | null,
+	widgetNodeId: NodeId
+): DashboardWidgetOrderingContext | null => {
+	const parentId = graph?.parentById.get(widgetNodeId);
+	if (!graph || parentId === undefined) {
+		return null;
+	}
+
+	const parent = graph.nodesById.get(parentId);
+	if (!parent) {
+		return null;
+	}
+
+	const orderedSiblings = parent.children
+		.map((childId) => graph.nodesById.get(childId))
+		.filter((child): child is UiNodeDto => child !== undefined);
+	const itemSiblings = orderedSiblings.filter((child) => child.user_role === 'itemRoot');
+	const currentIndex = itemSiblings.findIndex((child) => child.node_id === widgetNodeId);
+	if (currentIndex < 0) {
+		return null;
+	}
+
+	return {
+		parentId,
+		orderedSiblings,
+		itemSiblings,
+		currentIndex
+	};
+};
+
+const resolvePrevSiblingForItemIndex = (
+	context: DashboardWidgetOrderingContext,
+	widgetNodeId: NodeId,
+	targetIndex: number
+): NodeId | undefined => {
+	const siblingsWithoutNode = context.orderedSiblings.filter(
+		(child) => child.node_id !== widgetNodeId
+	);
+	const itemSiblingsWithoutNode = context.itemSiblings.filter(
+		(child) => child.node_id !== widgetNodeId
+	);
+
+	if (targetIndex === 0) {
+		const firstItemId = itemSiblingsWithoutNode[0]?.node_id;
+		if (firstItemId !== undefined) {
+			const firstItemIndex = siblingsWithoutNode.findIndex(
+				(child) => child.node_id === firstItemId
+			);
+			return firstItemIndex > 0 ? siblingsWithoutNode[firstItemIndex - 1]?.node_id : undefined;
+		}
+		return siblingsWithoutNode.at(-1)?.node_id;
+	}
+
+	return itemSiblingsWithoutNode[targetIndex - 1]?.node_id;
+};
+
+export const getDashboardWidgetOrderingState = (
+	graph: GraphState | null,
+	widgetNodeId: NodeId
+): DashboardWidgetOrderingState | null => {
+	const context = getDashboardWidgetOrderingContext(graph, widgetNodeId);
+	if (!context) {
+		return null;
+	}
+	return {
+		currentIndex: context.currentIndex,
+		itemCount: context.itemSiblings.length
+	};
+};
+
+export const moveDashboardWidgetToIndex = async (
+	getGraph: GraphGetter,
+	widgetNodeId: NodeId,
+	targetIndex: number
+): Promise<boolean> => {
+	const context = getDashboardWidgetOrderingContext(getGraph(), widgetNodeId);
+	if (!context) {
+		return false;
+	}
+
+	const nextIndex = Math.max(0, Math.min(context.itemSiblings.length - 1, targetIndex));
+	if (nextIndex === context.currentIndex) {
+		return false;
+	}
+
+	return sendMoveNodeIntent(
+		widgetNodeId,
+		context.parentId,
+		resolvePrevSiblingForItemIndex(context, widgetNodeId, nextIndex)
+	);
 };
 
 export const moveDashboardWidgetByDelta = async (
@@ -685,9 +1106,54 @@ export const moveDashboardWidgetByDelta = async (
 		return false;
 	}
 
+	const orderingState = getDashboardWidgetOrderingState(getGraph(), widgetNodeId);
+	if (!orderingState) {
+		return false;
+	}
+
+	return moveDashboardWidgetToIndex(getGraph, widgetNodeId, orderingState.currentIndex + delta);
+};
+
+export const moveDashboardWidgetToFront = async (
+	getGraph: GraphGetter,
+	widgetNodeId: NodeId
+): Promise<boolean> => {
+	const orderingState = getDashboardWidgetOrderingState(getGraph(), widgetNodeId);
+	if (!orderingState) {
+		return false;
+	}
+	return moveDashboardWidgetToIndex(getGraph, widgetNodeId, orderingState.itemCount - 1);
+};
+
+export const moveDashboardWidgetToBack = async (
+	getGraph: GraphGetter,
+	widgetNodeId: NodeId
+): Promise<boolean> => {
+	return moveDashboardWidgetToIndex(getGraph, widgetNodeId, 0);
+};
+
+export const duplicateDashboardWidget = async (
+	getGraph: GraphGetter,
+	widgetNodeId: NodeId,
+	label?: string
+): Promise<boolean> => {
 	const graph = getGraph();
 	const parentId = graph?.parentById.get(widgetNodeId);
 	if (!graph || parentId === undefined) {
+		return false;
+	}
+
+	return sendDuplicateNodeIntent(widgetNodeId, parentId, widgetNodeId, label);
+};
+
+export const wrapDashboardWidgetInContainer = async (
+	getGraph: GraphGetter,
+	widgetNodeId: NodeId
+): Promise<boolean> => {
+	const graph = getGraph();
+	const widget = graph?.nodesById.get(widgetNodeId);
+	const parentId = graph?.parentById.get(widgetNodeId);
+	if (!graph || !widget || parentId === undefined) {
 		return false;
 	}
 
@@ -696,38 +1162,45 @@ export const moveDashboardWidgetByDelta = async (
 		return false;
 	}
 
-	const orderedSiblings = parent.children
-		.map((childId) => graph.nodesById.get(childId))
-		.filter((child): child is UiNodeDto => child !== undefined);
-	const itemSiblings = orderedSiblings.filter((child) => child.user_role === 'itemRoot');
-	const currentIndex = itemSiblings.findIndex((child) => child.node_id === widgetNodeId);
-	if (currentIndex < 0) {
+	const widgetChildIndex = parent.children.findIndex((childId) => childId === widgetNodeId);
+	if (widgetChildIndex < 0) {
 		return false;
 	}
 
-	const nextIndex = Math.max(0, Math.min(itemSiblings.length - 1, currentIndex + delta));
-	if (nextIndex === currentIndex) {
-		return false;
-	}
-
-	const siblingsWithoutNode = orderedSiblings.filter((child) => child.node_id !== widgetNodeId);
-	const itemSiblingsWithoutNode = itemSiblings.filter((child) => child.node_id !== widgetNodeId);
-
-	let newPrevSibling: NodeId | undefined;
-	if (nextIndex === 0) {
-		const firstItemId = itemSiblingsWithoutNode[0]?.node_id;
-		if (firstItemId !== undefined) {
-			const firstItemIndex = siblingsWithoutNode.findIndex(
-				(child) => child.node_id === firstItemId
-			);
-			newPrevSibling =
-				firstItemIndex > 0 ? siblingsWithoutNode[firstItemIndex - 1]?.node_id : undefined;
-		} else {
-			newPrevSibling = siblingsWithoutNode.at(-1)?.node_id;
+	const originalPrevSibling =
+		widgetChildIndex > 0 ? parent.children[widgetChildIndex - 1] : undefined;
+	const widgetPlacement = getDashboardPlacement(graph, widget);
+	const containerPlacement: DashboardWidgetCreationPlacement = {
+		anchor: widgetPlacement.anchor,
+		position: { ...widgetPlacement.position },
+		size: {
+			width: { ...widgetPlacement.size.width },
+			height: { ...widgetPlacement.size.height }
 		}
-	} else {
-		newPrevSibling = itemSiblingsWithoutNode[nextIndex - 1]?.node_id;
-	}
+	};
+	const preferredLabel =
+		widget.meta.label.trim().length > 0 ? `${widget.meta.label.trim()} Container` : 'Container';
+	const containerLabel = getNextAvailableChildLabel(graph, parentId, preferredLabel);
 
-	return sendMoveNodeIntent(widgetNodeId, parentId, newPrevSibling);
+	const editSession = createUiEditSession('Wrap dashboard widget in container', 'dashboard-wrap');
+	await editSession.begin();
+	try {
+		const containerId = await createDashboardContainerWidget(getGraph, parentId, {
+			label: containerLabel,
+			placement: containerPlacement,
+			layoutKind: 'vertical'
+		});
+		if (containerId === null) {
+			return false;
+		}
+
+		const positioned = await sendMoveNodeIntent(containerId, parentId, originalPrevSibling);
+		if (!positioned) {
+			return false;
+		}
+
+		return sendMoveNodeIntent(widgetNodeId, containerId);
+	} finally {
+		await editSession.end();
+	}
 };

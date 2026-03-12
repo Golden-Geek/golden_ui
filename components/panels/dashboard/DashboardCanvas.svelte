@@ -2,7 +2,11 @@
 	import { onDestroy } from 'svelte';
 	import { registerCommandHandler } from '../../../store/commands.svelte';
 	import { appState, type SelectionMode } from '../../../store/workbench.svelte';
-	import { createUiEditSession, sendSetParamIntent } from '../../../store/ui-intents';
+	import {
+		createUiEditSession,
+		sendRemoveNodeIntent,
+		sendSetParamIntent
+	} from '../../../store/ui-intents';
 	import type { NodeId, ParamEventBehaviour, ParamValue, UiNodeDto } from '../../../types';
 	import {
 		cssValueToPx,
@@ -14,23 +18,37 @@
 	} from '../../../css-value';
 	import DashboardCanvasSelf from './DashboardCanvas.svelte';
 	import { resolveDashboardNodeWidgetType } from './dashboard-node-widget-registry';
+	import ContextMenu from '../../common/ContextMenu.svelte';
 	import Slider from '../../common/Slider.svelte';
+	import type { ContextMenuAnchor, ContextMenuItem } from '../../common/context-menu';
 
 	import {
 		bindDashboardGenericWidgetTarget,
 		bindDashboardNodeWidgetTarget,
+		createDashboardContainerWidget,
 		createDashboardGenericWidget,
 		createDashboardNodeWidget,
+		duplicateDashboardWidget,
 		type DashboardGenericWidgetKind,
+		getDashboardContainerCreationDefaults,
 		getDashboardGenericWidgetCreationDefaults,
 		getDashboardNodeWidgetCreationDefaults,
-		type DashboardWidgetCreationPlacement
+		getDashboardWidgetOrderingState,
+		getNextAvailableChildLabel,
+		moveDashboardWidgetByDelta,
+		moveDashboardWidgetToBack,
+		moveDashboardWidgetToFront,
+		moveDashboardWidgetToSurface,
+		type DashboardWidgetCreationPlacement,
+		wrapDashboardWidgetInContainer
 	} from './dashboard-actions';
 	import { readDashboardDragPayload, type DashboardDragPayload } from './dashboard-drag';
 	import {
 		type DashboardAnchor,
+		type DashboardGridDirection,
 		type DashboardLabelPlacement,
 		formatParamValue,
+		getDashboardGridSettings,
 		getDashboardLayoutKind,
 		getDashboardPageSize,
 		getDashboardPlacement,
@@ -40,7 +58,6 @@
 		getDirectParamNode,
 		getLiveNode,
 		getGap,
-		getGridColumns,
 		resolveReferenceTarget,
 		type DashboardPlacement,
 		type DashboardLayoutKind
@@ -69,6 +86,15 @@
 	type PendingSurfaceDrop = {
 		preview: SurfaceDropPreview;
 		knownChildIds: NodeId[];
+		knownDirectChildIds: NodeId[];
+	};
+	type DashboardContextMenuScope = 'surface' | 'widget';
+	type DashboardContextMenuState = {
+		open: boolean;
+		scope: DashboardContextMenuScope;
+		x: number;
+		y: number;
+		surfacePlacement: DashboardWidgetCreationPlacement | null;
 	};
 
 	let {
@@ -91,6 +117,7 @@
 	let isContainerWidget = $derived(liveNode.node_type === 'dashboard_widget_container');
 	let isNodeWidget = $derived(liveNode.node_type === 'dashboard_node_widget');
 	let isGenericWidget = $derived(liveNode.node_type === 'dashboard_generic_widget');
+	let isWidget = $derived(isContainerWidget || isNodeWidget || isGenericWidget);
 	let isLayoutSurface = $derived(isPage || isContainerWidget);
 
 	let placement = $derived(getDashboardPlacement(graph, liveNode));
@@ -106,8 +133,57 @@
 	let parentLayoutKind = $derived(getDashboardLayoutKind(graph, parentNode, 'free'));
 	let layoutKind = $derived(getDashboardLayoutKind(graph, liveNode, isPage ? 'free' : 'vertical'));
 	let gap = $derived(getGap(graph, liveNode));
-	let gridColumns = $derived(getGridColumns(graph, liveNode, 12));
+	let gridSettings = $derived(getDashboardGridSettings(graph, liveNode));
 	let childWidgets = $derived(getDirectItemChildren(graph, liveNode));
+	let widgetOrderingState = $derived(getDashboardWidgetOrderingState(graph, liveNode.node_id));
+	let canInsertContainer = $derived.by(() => {
+		if (!editMode || !isLayoutSurface) {
+			return false;
+		}
+		return liveNode.creatable_user_items.some(
+			(candidate) => candidate.node_type === 'dashboard_widget_container'
+		);
+	});
+	let canWrapWidget = $derived.by(() => {
+		if (
+			!editMode ||
+			!isWidget ||
+			!parentNode ||
+			!liveNode.meta.user_permissions.can_remove_and_duplicate
+		) {
+			return false;
+		}
+		return parentNode.creatable_user_items.some(
+			(candidate) => candidate.node_type === 'dashboard_widget_container'
+		);
+	});
+	let canDuplicateWidget = $derived.by(() => {
+		if (
+			!editMode ||
+			!isWidget ||
+			!parentNode ||
+			!liveNode.meta.user_permissions.can_remove_and_duplicate
+		) {
+			return false;
+		}
+		return parentNode.creatable_user_items.some(
+			(candidate) => candidate.node_type === liveNode.node_type
+		);
+	});
+	let canDeleteWidget = $derived(
+		editMode && isWidget && liveNode.meta.user_permissions.can_remove_and_duplicate
+	);
+	let canBringBackward = $derived(
+		editMode && isWidget && (widgetOrderingState?.currentIndex ?? 0) > 0
+	);
+	let canBringToBack = $derived(canBringBackward);
+	let canBringForward = $derived.by(() => {
+		if (!editMode || !isWidget || !widgetOrderingState) {
+			return false;
+		}
+		return widgetOrderingState.currentIndex < widgetOrderingState.itemCount - 1;
+	});
+	let canBringToFront = $derived(canBringForward);
 
 	let activeTabNodeId = $state<NodeId | null>(null);
 	let openAccordionNodeIds = $state<NodeId[]>([]);
@@ -121,6 +197,13 @@
 	let pageViewportResizeFrame = $state<number | null>(null);
 	let surfaceDropPreview = $state<SurfaceDropPreview | null>(null);
 	let pendingSurfaceDrop = $state<PendingSurfaceDrop | null>(null);
+	let dashboardContextMenu = $state<DashboardContextMenuState>({
+		open: false,
+		scope: 'surface',
+		x: 0,
+		y: 0,
+		surfacePlacement: null
+	});
 	let displayedSurfaceDropPreview = $derived(
 		surfaceDropPreview ?? pendingSurfaceDrop?.preview ?? null
 	);
@@ -171,11 +254,17 @@
 		primaryNodeId: NodeId;
 		previews: FreeLayoutTargetPreview[];
 	};
+	type FreeLayoutDropTarget = {
+		surfaceNodeId: NodeId;
+		element: HTMLElement;
+		placement: DashboardWidgetCreationPlacement;
+	};
 	type FreeLayoutInteraction = {
 		pointerId: number;
 		mode: FreeLayoutInteractionMode;
 		resizeEdges: FreeLayoutResizeEdges | null;
 		primaryNodeId: NodeId;
+		sourceSurfaceNodeId: NodeId;
 		selectionRect: FreeLayoutRect;
 		targets: FreeLayoutTarget[];
 		startClient: [number, number];
@@ -219,10 +308,20 @@
 		baseSelection: NodeId[];
 		selectionMode: SelectionMode;
 	};
+	type SurfacePressState = {
+		pointerId: number;
+		surfaceNodeId: NodeId;
+		surfaceElement: HTMLElement;
+		startClient: [number, number];
+		baseSelection: NodeId[];
+		selectionMode: SelectionMode;
+	};
 
 	let freeLayoutInteraction = $state<FreeLayoutInteraction | null>(null);
 	let freeLayoutPreview = $state<FreeLayoutPreviewSet | null>(null);
+	let freeLayoutDropTarget = $state<FreeLayoutDropTarget | null>(null);
 	let marqueeSelection = $state<MarqueeSelectionState | null>(null);
+	let surfacePress = $state<SurfacePressState | null>(null);
 	let pageView = $state<DashboardPageViewState>({
 		pointerId: null,
 		lastClient: null,
@@ -230,9 +329,12 @@
 		panY: 0,
 		zoom: 1
 	});
+	let freeLayoutHoverSurfaceElement: HTMLElement | null = null;
+	let freeLayoutAncestorShells: HTMLElement[] = [];
 
 	const minFreeWidgetWidthRem = 0.5;
 	const minFreeWidgetHeightRem = 0.5;
+	const marqueeDragThresholdPx = 4;
 	const freeLayoutResizeZones: FreeLayoutResizeZone[] = [
 		{ name: 'north-west', edges: { left: true, right: false, top: true, bottom: false } },
 		{ name: 'north', edges: { left: false, right: false, top: true, bottom: false } },
@@ -351,6 +453,192 @@
 		if (viewport instanceof HTMLElement) {
 			viewport.focus();
 		}
+	};
+
+	const clearSurfaceDropState = (): void => {
+		surfaceDragDepth = 0;
+		surfaceDropPreview = null;
+	};
+
+	const pointFallsWithinElement = (
+		element: HTMLElement,
+		clientX: number,
+		clientY: number
+	): boolean => {
+		const rect = element.getBoundingClientRect();
+		return (
+			clientX >= rect.left &&
+			clientX <= rect.right &&
+			clientY >= rect.top &&
+			clientY <= rect.bottom
+		);
+	};
+
+	const resolveOwnedDashboardSurfaceElement = (
+		candidate: HTMLElement,
+		clientX: number,
+		clientY: number
+	): HTMLElement | null => {
+		if (candidate.classList.contains('dashboard-surface')) {
+			return candidate;
+		}
+
+		const containerShell = candidate.closest(
+			'.dashboard-widget-shell.dashboard-container[data-node-id]'
+		);
+		if (containerShell instanceof HTMLElement) {
+			const surfaceNodeId = containerShell.dataset.nodeId;
+			if (surfaceNodeId) {
+				const ownedSurface = containerShell.querySelector<HTMLElement>(
+					`.dashboard-container-surface[data-dashboard-surface-node-id="${surfaceNodeId}"]`
+				);
+				if (ownedSurface && pointFallsWithinElement(containerShell, clientX, clientY)) {
+					return ownedSurface;
+				}
+			}
+		}
+
+		const pageFrame = candidate.closest('.dashboard-page-frame');
+		if (pageFrame instanceof HTMLElement) {
+			const pageSurface = pageFrame.querySelector<HTMLElement>(
+				'.dashboard-page[data-dashboard-surface-node-id]'
+			);
+			if (pageSurface && pointFallsWithinElement(pageSurface, clientX, clientY)) {
+				return pageSurface;
+			}
+		}
+
+		return candidate.closest('.dashboard-surface');
+	};
+
+	const resolveDashboardSurfaceAtPoint = (
+		clientX: number,
+		clientY: number,
+		ignoredWidgetNodeIds: ReadonlySet<NodeId>
+	): { surfaceNodeId: NodeId; element: HTMLElement } | null => {
+		if (typeof document === 'undefined') {
+			return null;
+		}
+
+		type SurfaceCandidate = {
+			surfaceNodeId: NodeId;
+			element: HTMLElement;
+			nestingDepth: number;
+			area: number;
+		};
+
+		const surfaceNestingDepth = (surface: HTMLElement): number => {
+			let depth = 0;
+			let cursor = surface.parentElement;
+			while (cursor) {
+				if (cursor.classList.contains('dashboard-surface')) {
+					depth += 1;
+				}
+				cursor = cursor.parentElement;
+			}
+			return depth;
+		};
+
+		const visited = new Set<HTMLElement>();
+		const candidates: SurfaceCandidate[] = [];
+		for (const candidate of document.elementsFromPoint(clientX, clientY)) {
+			if (!(candidate instanceof HTMLElement)) {
+				continue;
+			}
+			const surface = resolveOwnedDashboardSurfaceElement(candidate, clientX, clientY);
+			if (!(surface instanceof HTMLElement) || visited.has(surface)) {
+				continue;
+			}
+			visited.add(surface);
+			const ownerShell = surface.closest('.dashboard-widget-shell');
+			if (ownerShell instanceof HTMLElement) {
+				const ownerNodeId = Number(ownerShell.dataset.nodeId ?? '');
+				if (Number.isFinite(ownerNodeId) && ignoredWidgetNodeIds.has(ownerNodeId as NodeId)) {
+					continue;
+				}
+			}
+			const surfaceNodeId = Number(surface.dataset.dashboardSurfaceNodeId ?? '');
+			if (!Number.isFinite(surfaceNodeId)) {
+				continue;
+			}
+			const rect = surface.getBoundingClientRect();
+			candidates.push({
+				surfaceNodeId: surfaceNodeId as NodeId,
+				element: surface,
+				nestingDepth: surfaceNestingDepth(surface),
+				area: Math.max(rect.width * rect.height, 0)
+			});
+		}
+		if (candidates.length === 0) {
+			return null;
+		}
+		candidates.sort((left, right) => {
+			if (left.nestingDepth !== right.nestingDepth) {
+				return right.nestingDepth - left.nestingDepth;
+			}
+			if (left.area !== right.area) {
+				return left.area - right.area;
+			}
+			return 0;
+		});
+		return {
+			surfaceNodeId: candidates[0].surfaceNodeId,
+			element: candidates[0].element
+		};
+	};
+
+	const currentSurfaceOwnsDragEvent = (event: DragEvent): boolean => {
+		const currentTarget = event.currentTarget;
+		if (!(currentTarget instanceof HTMLElement)) {
+			return false;
+		}
+		const resolvedSurface = resolveDashboardSurfaceAtPoint(
+			event.clientX,
+			event.clientY,
+			new Set<NodeId>()
+		);
+		if (resolvedSurface) {
+			return resolvedSurface.element === currentTarget;
+		}
+		if (!(event.target instanceof HTMLElement)) {
+			return true;
+		}
+		return (
+			resolveOwnedDashboardSurfaceElement(event.target, event.clientX, event.clientY) ===
+			currentTarget
+		);
+	};
+
+	const setFreeLayoutHoverSurface = (nextSurface: HTMLElement | null): void => {
+		if (freeLayoutHoverSurfaceElement === nextSurface) {
+			return;
+		}
+		freeLayoutHoverSurfaceElement?.classList.remove('dashboard-reparent-target');
+		freeLayoutHoverSurfaceElement = nextSurface;
+		freeLayoutHoverSurfaceElement?.classList.add('dashboard-reparent-target');
+	};
+
+	const setFreeLayoutAncestorShells = (target: EventTarget | null): void => {
+		for (const shell of freeLayoutAncestorShells) {
+			shell.classList.remove('dashboard-descendant-free-layout-active');
+		}
+		freeLayoutAncestorShells = [];
+		if (!(target instanceof Element)) {
+			return;
+		}
+
+		let cursor = target.parentElement?.closest('.dashboard-widget-shell');
+		while (cursor instanceof HTMLElement) {
+			cursor.classList.add('dashboard-descendant-free-layout-active');
+			freeLayoutAncestorShells.push(cursor);
+			cursor = cursor.parentElement?.closest('.dashboard-widget-shell');
+		}
+	};
+
+	const clearFreeLayoutInteractionChrome = (): void => {
+		setFreeLayoutHoverSurface(null);
+		setFreeLayoutAncestorShells(null);
+		freeLayoutDropTarget = null;
 	};
 
 	const normalizeClientRect = (
@@ -581,6 +869,29 @@
 		return Math.round(valuePx / snapPx) * snapPx;
 	};
 
+	const cancelScheduledFreeLayoutCommit = (): void => {
+		if (typeof window !== 'undefined' && freeLayoutCommitFrame !== null) {
+			window.cancelAnimationFrame(freeLayoutCommitFrame);
+		}
+		freeLayoutCommitFrame = null;
+		pendingFreeLayoutCommit = null;
+	};
+
+	const currentDraggedPlacement = (
+		previewSet: FreeLayoutPreviewSet | null
+	): DashboardWidgetCreationPlacement => {
+		const currentPreview = resolveFreeLayoutPreview(previewSet, liveNode.node_id);
+		return {
+			anchor: placement.anchor,
+			position: currentPreview ? currentPreview.position : placement.position,
+			size: currentPreview ? currentPreview.size : placement.size,
+			sizeEnabled: {
+				width: placement.sizeEnabled.width,
+				height: placement.sizeEnabled.height
+			}
+		};
+	};
+
 	const anchorXFromAnchor = (anchor: DashboardAnchor): 'left' | 'center' | 'right' => {
 		if (anchor.endsWith('right')) {
 			return 'right';
@@ -665,6 +976,130 @@
 			top: anchorPointYPx - anchorOffsetPx(anchorY, heightPx),
 			width: widthPx,
 			height: heightPx
+		};
+	};
+
+	const buildFreeLayoutDropPlacement = (
+		targetSurfaceNode: UiNodeDto,
+		targetSurfaceElement: HTMLElement,
+		basePlacement: DashboardWidgetCreationPlacement,
+		clientX: number,
+		clientY: number
+	): DashboardWidgetCreationPlacement => {
+		const targetLayoutKind = getDashboardLayoutKind(graph, targetSurfaceNode, 'free');
+		if (targetLayoutKind !== 'free') {
+			return {
+				anchor: basePlacement.anchor,
+				position: { ...basePlacement.position },
+				size: {
+					width: { ...basePlacement.size.width },
+					height: { ...basePlacement.size.height }
+				},
+				sizeEnabled: basePlacement.sizeEnabled
+					? {
+							width: basePlacement.sizeEnabled.width,
+							height: basePlacement.sizeEnabled.height
+						}
+					: undefined
+			};
+		}
+
+		const layoutElement = getDirectDashboardLayoutElement(targetSurfaceElement) ?? targetSurfaceElement;
+		const rootRemPx = getRootRemPixels();
+		const metrics = getElementSurfaceMetrics(layoutElement, rootRemPx);
+		const rect = layoutElement.getBoundingClientRect();
+		const surfaceContext = {
+			rootRemPx,
+			surfaceWidthPx: metrics.width,
+			surfaceHeightPx: metrics.height,
+			viewportWidthPx: getViewportWidthPx(),
+			viewportHeightPx: getViewportHeightPx()
+		};
+		const widthPx = Math.max(
+			0,
+			cssValueToPx(basePlacement.size.width, 'x', createCssUnitContext(surfaceContext, 'x'))
+		);
+		const heightPx = Math.max(
+			0,
+			cssValueToPx(basePlacement.size.height, 'y', createCssUnitContext(surfaceContext, 'y'))
+		);
+		const localCenterX = (clientX - rect.left) / Math.max(metrics.scaleX, 1e-6);
+		const localCenterY = (clientY - rect.top) / Math.max(metrics.scaleY, 1e-6);
+		const snapGrid = getDashboardSnapGrid(graph, targetSurfaceNode);
+		const snapPx = snapGrid.enabled ? snapGrid.step * rootRemPx : 0;
+		const snappedLeft = snapToGridPx(localCenterX - widthPx * 0.5, snapPx);
+		const snappedTop = snapToGridPx(localCenterY - heightPx * 0.5, snapPx);
+		const anchorX = anchorXFromAnchor(basePlacement.anchor);
+		const anchorY = anchorYFromAnchor(basePlacement.anchor);
+
+		return {
+			anchor: basePlacement.anchor,
+			position: {
+				x:
+					snappedLeft + anchorOffsetPx(anchorX, widthPx) - anchorBasePx(anchorX, metrics.width),
+				y:
+					snappedTop + anchorOffsetPx(anchorY, heightPx) - anchorBasePx(anchorY, metrics.height)
+			},
+			size: {
+				width: { ...basePlacement.size.width },
+				height: { ...basePlacement.size.height }
+			},
+			sizeEnabled: basePlacement.sizeEnabled
+				? {
+						width: basePlacement.sizeEnabled.width,
+						height: basePlacement.sizeEnabled.height
+					}
+				: undefined
+		};
+	};
+
+	const resolveFreeLayoutDropTargetAtPoint = (
+		clientX: number,
+		clientY: number,
+		previewSet: FreeLayoutPreviewSet | null
+	): FreeLayoutDropTarget | null => {
+		if (
+			!graph ||
+			!editMode ||
+			!isWidget ||
+			!freeLayoutInteraction ||
+			freeLayoutInteraction.mode !== 'move' ||
+			freeLayoutInteraction.targets.length !== 1
+		) {
+			return null;
+		}
+
+		const resolvedSurface = resolveDashboardSurfaceAtPoint(
+			clientX,
+			clientY,
+			new Set(freeLayoutInteraction.targets.map((target) => target.nodeId))
+		);
+		if (!resolvedSurface || resolvedSurface.surfaceNodeId === freeLayoutInteraction.sourceSurfaceNodeId) {
+			return null;
+		}
+
+		const targetSurfaceNode = graph.nodesById.get(resolvedSurface.surfaceNodeId);
+		if (!targetSurfaceNode) {
+			return null;
+		}
+		if (
+			!targetSurfaceNode.creatable_user_items.some(
+				(candidate) => candidate.node_type === liveNode.node_type
+			)
+		) {
+			return null;
+		}
+
+		return {
+			surfaceNodeId: resolvedSurface.surfaceNodeId,
+			element: resolvedSurface.element,
+			placement: buildFreeLayoutDropPlacement(
+				targetSurfaceNode,
+				resolvedSurface.element,
+				currentDraggedPlacement(previewSet),
+				clientX,
+				clientY
+			)
 		};
 	};
 
@@ -1198,6 +1633,29 @@
 		session?.selectNode(liveNode.node_id, selectionMode);
 	};
 
+	const selectSurfaceNode = (selectionMode: SelectionMode = 'REPLACE'): void => {
+		if (!editMode || !isLayoutSurface) {
+			return;
+		}
+		session?.selectNode(liveNode.node_id, selectionMode);
+	};
+
+	const beginSurfacePress = (event: PointerEvent, surfaceElement: HTMLElement): void => {
+		const selectionMode = selectionModeFromEvent(event);
+		const baseSelection = [...(session?.selectedNodesIds ?? [])];
+		event.preventDefault();
+		event.stopPropagation();
+		selectSurfaceNode(selectionMode);
+		surfacePress = {
+			pointerId: event.pointerId,
+			surfaceNodeId: liveNode.node_id,
+			surfaceElement,
+			startClient: [event.clientX, event.clientY],
+			baseSelection,
+			selectionMode
+		};
+	};
+
 	const selectWidgetNodeFromKeyboard = (event: KeyboardEvent): void => {
 		if (event.key !== 'Enter' && event.key !== ' ') {
 			return;
@@ -1274,7 +1732,7 @@
 		event: DragEvent,
 		payload: DashboardDragPayload | null
 	): SurfaceDropPreview | null => {
-		if (layoutKind !== 'free' || !payload) {
+		if (!payload) {
 			return null;
 		}
 		const targetNode =
@@ -1284,17 +1742,15 @@
 		if (!targetNode) {
 			return null;
 		}
-		const layoutElement = getDirectDashboardLayoutElement(event.currentTarget);
-		if (!layoutElement) {
+		const surfaceElement =
+			event.currentTarget instanceof HTMLElement ? event.currentTarget : null;
+		const layoutElement = getDirectDashboardLayoutElement(surfaceElement);
+		const metricsElement = layoutKind === 'free' ? layoutElement : (layoutElement ?? surfaceElement);
+		if (!metricsElement) {
 			return null;
 		}
 		const rootRemPx = getRootRemPixels();
-		const metrics = getElementSurfaceMetrics(layoutElement, rootRemPx);
-		const rect = layoutElement.getBoundingClientRect();
-		const centerPx = {
-			x: (event.clientX - rect.left) / Math.max(metrics.scaleX, 1e-6),
-			y: (event.clientY - rect.top) / Math.max(metrics.scaleY, 1e-6)
-		};
+		const metrics = getElementSurfaceMetrics(metricsElement, rootRemPx);
 		const context = {
 			rootRemPx,
 			surfaceWidthPx: metrics.width,
@@ -1302,12 +1758,25 @@
 			viewportWidthPx: getViewportWidthPx(),
 			viewportHeightPx: getViewportHeightPx()
 		};
-		const snapPx = surfaceSnapGrid.enabled ? surfaceSnapGrid.step * rootRemPx : 0;
+		const placementOptions =
+			layoutKind === 'free'
+				? {
+						centerPx: (() => {
+							const rect = metricsElement.getBoundingClientRect();
+							return {
+								x: (event.clientX - rect.left) / Math.max(metrics.scaleX, 1e-6),
+								y: (event.clientY - rect.top) / Math.max(metrics.scaleY, 1e-6)
+							};
+						})(),
+						snapPx: surfaceSnapGrid.enabled ? surfaceSnapGrid.step * rootRemPx : 0
+					}
+				: undefined;
 		if (payload.kind === 'parameter') {
-			const defaults = getDashboardGenericWidgetCreationDefaults(targetNode, context, {
-				centerPx,
-				snapPx
-			});
+			const defaults = getDashboardGenericWidgetCreationDefaults(
+				targetNode,
+				context,
+				placementOptions
+			);
 			return {
 				label: targetNode.meta.label,
 				targetKind: payload.kind,
@@ -1321,7 +1790,7 @@
 		return {
 			label: targetNode.meta.label,
 			targetKind: payload.kind,
-			placement: getDashboardNodeWidgetCreationDefaults(targetNode, context, { centerPx, snapPx }),
+			placement: getDashboardNodeWidgetCreationDefaults(targetNode, context, placementOptions),
 			genericWidgetKind: null,
 			previewText: null,
 			previewPlaceholder: null,
@@ -1332,7 +1801,11 @@
 	const handleSurfaceDragEnter = (event: DragEvent): void => {
 		const payload = readDashboardDragPayload(event);
 		if (!canCreateFromDrop(payload)) {
-			surfaceDropPreview = null;
+			clearSurfaceDropState();
+			return;
+		}
+		if (!currentSurfaceOwnsDragEvent(event)) {
+			clearSurfaceDropState();
 			return;
 		}
 		event.preventDefault();
@@ -1343,7 +1816,11 @@
 	const handleSurfaceDragOver = (event: DragEvent): void => {
 		const payload = readDashboardDragPayload(event);
 		if (!canCreateFromDrop(payload)) {
-			surfaceDropPreview = null;
+			clearSurfaceDropState();
+			return;
+		}
+		if (!currentSurfaceOwnsDragEvent(event)) {
+			clearSurfaceDropState();
 			return;
 		}
 		event.preventDefault();
@@ -1353,7 +1830,11 @@
 		surfaceDropPreview = buildSurfaceDropPreview(event, payload);
 	};
 
-	const handleSurfaceDragLeave = (): void => {
+	const handleSurfaceDragLeave = (event: DragEvent): void => {
+		if (!currentSurfaceOwnsDragEvent(event)) {
+			clearSurfaceDropState();
+			return;
+		}
 		const nextDepth = Math.max(0, surfaceDragDepth - 1);
 		surfaceDragDepth = nextDepth;
 		if (nextDepth === 0) {
@@ -1363,9 +1844,12 @@
 
 	const handleSurfaceDrop = async (event: DragEvent): Promise<void> => {
 		const payload = readDashboardDragPayload(event);
+		if (!currentSurfaceOwnsDragEvent(event)) {
+			clearSurfaceDropState();
+			return;
+		}
 		const dropPreview = buildSurfaceDropPreview(event, payload);
-		surfaceDragDepth = 0;
-		surfaceDropPreview = null;
+		clearSurfaceDropState();
 		if (!canCreateFromDrop(payload)) {
 			return;
 		}
@@ -1378,7 +1862,8 @@
 		pendingSurfaceDrop = dropPreview
 			? {
 					preview: dropPreview,
-					knownChildIds: childWidgets.map((child) => child.node_id)
+					knownChildIds: childWidgets.map((child) => child.node_id),
+					knownDirectChildIds: [...liveNode.children]
 				}
 			: null;
 		if (payload?.kind === 'parameter') {
@@ -1477,6 +1962,251 @@
 		event.stopPropagation();
 	};
 
+	const closeDashboardContextMenu = (): void => {
+		dashboardContextMenu = {
+			open: false,
+			scope: 'surface',
+			x: 0,
+			y: 0,
+			surfacePlacement: null
+		};
+	};
+
+	const openDashboardContextMenu = (
+		scope: DashboardContextMenuScope,
+		x: number,
+		y: number,
+		surfacePlacement: DashboardWidgetCreationPlacement | null = null
+	): void => {
+		dashboardContextMenu = {
+			open: true,
+			scope,
+			x,
+			y,
+			surfacePlacement
+		};
+	};
+
+	const resolveSurfaceContextPlacement = (
+		target: EventTarget | null,
+		clientX: number,
+		clientY: number
+	): DashboardWidgetCreationPlacement | null => {
+		if (!(target instanceof HTMLElement)) {
+			return null;
+		}
+		const layoutElement = getDirectDashboardLayoutElement(target) ?? target;
+		const rootRemPx = getRootRemPixels();
+		const metrics = getElementSurfaceMetrics(layoutElement, rootRemPx);
+		const context = {
+			rootRemPx,
+			surfaceWidthPx: metrics.width,
+			surfaceHeightPx: metrics.height,
+			viewportWidthPx: getViewportWidthPx(),
+			viewportHeightPx: getViewportHeightPx()
+		};
+
+		if (layoutKind !== 'free') {
+			return getDashboardContainerCreationDefaults(context);
+		}
+
+		const rect = layoutElement.getBoundingClientRect();
+		const centerPx = {
+			x: (clientX - rect.left) / Math.max(metrics.scaleX, 1e-6),
+			y: (clientY - rect.top) / Math.max(metrics.scaleY, 1e-6)
+		};
+		const snapPx = surfaceSnapGrid.enabled ? surfaceSnapGrid.step * rootRemPx : 0;
+		return getDashboardContainerCreationDefaults(context, { centerPx, snapPx });
+	};
+
+	const handleSurfaceContextMenu = (event: MouseEvent): void => {
+		if (!editMode || !isLayoutSurface) {
+			return;
+		}
+		const currentTarget = event.currentTarget;
+		if (!(currentTarget instanceof Element)) {
+			return;
+		}
+		const ownerWidgetShell = currentTarget.closest('.dashboard-widget-shell');
+		const childWidgetShell =
+			event.target instanceof Element ? event.target.closest('.dashboard-widget-shell') : null;
+		if (
+			(childWidgetShell !== null && childWidgetShell !== ownerWidgetShell) ||
+			isInteractiveSurfaceTarget(event.target)
+		) {
+			return;
+		}
+		event.preventDefault();
+		event.stopPropagation();
+		openDashboardContextMenu(
+			'surface',
+			event.clientX,
+			event.clientY,
+			resolveSurfaceContextPlacement(currentTarget, event.clientX, event.clientY)
+		);
+	};
+
+	const handleWidgetContextMenu = (event: MouseEvent): void => {
+		if (!editMode || !isWidget) {
+			return;
+		}
+		event.preventDefault();
+		event.stopPropagation();
+		selectWidgetNode('REPLACE');
+		openDashboardContextMenu('widget', event.clientX, event.clientY);
+	};
+
+	const insertContainerFromContextMenu = async (): Promise<void> => {
+		if (!canInsertContainer) {
+			return;
+		}
+		const createdNodeId = await createDashboardContainerWidget(getGraph, liveNode.node_id, {
+			placement: dashboardContextMenu.surfacePlacement ?? undefined
+		});
+		if (createdNodeId !== null) {
+			session?.selectNode(createdNodeId);
+		}
+	};
+
+	const duplicateWidgetFromContextMenu = async (): Promise<void> => {
+		if (!canDuplicateWidget || !parentNode) {
+			return;
+		}
+		const baseLabel =
+			widgetLabelText.length > 0 ? `${widgetLabelText} Copy` : `${liveNode.node_type} Copy`;
+		await duplicateDashboardWidget(
+			getGraph,
+			liveNode.node_id,
+			getNextAvailableChildLabel(graph, parentNode.node_id, baseLabel)
+		);
+	};
+
+	const deleteWidgetFromContextMenu = async (): Promise<void> => {
+		if (!canDeleteWidget) {
+			return;
+		}
+		await sendRemoveNodeIntent(liveNode.node_id);
+	};
+
+	const wrapWidgetFromContextMenu = async (): Promise<void> => {
+		if (!canWrapWidget) {
+			return;
+		}
+		await wrapDashboardWidgetInContainer(getGraph, liveNode.node_id);
+	};
+
+	const dashboardContextMenuItems = $derived.by((): ContextMenuItem[] => {
+		if (!editMode || !dashboardContextMenu.open) {
+			return [];
+		}
+
+		if (dashboardContextMenu.scope === 'surface') {
+			return [
+				{
+					id: 'insert-container',
+					label: 'Insert Container',
+					disabled: !canInsertContainer,
+					action: () => {
+						void insertContainerFromContextMenu();
+					}
+				}
+			];
+		}
+
+		return [
+			{
+				id: 'wrap-in-container',
+				label: 'Wrap In Container',
+				disabled: !canWrapWidget,
+				action: () => {
+					void wrapWidgetFromContextMenu();
+				}
+			},
+			{
+				id: 'duplicate-widget',
+				label: 'Duplicate',
+				disabled: !canDuplicateWidget,
+				action: () => {
+					void duplicateWidgetFromContextMenu();
+				}
+			},
+			{
+				id: 'delete-widget',
+				label: 'Delete',
+				disabled: !canDeleteWidget,
+				color: 'color-mix(in srgb, #ff8b8b 82%, white 18%)',
+				hoverColor: 'color-mix(in srgb, #ff5c5c 23%, transparent)',
+				action: () => {
+					void deleteWidgetFromContextMenu();
+				}
+			},
+			{ separator: true },
+			{
+				id: 'ordering',
+				label: 'Ordering',
+				submenu: [
+					{
+						id: 'bring-forward',
+						label: 'Bring Forward',
+						disabled: !canBringForward,
+						action: () => {
+							void moveDashboardWidgetByDelta(getGraph, liveNode.node_id, 1);
+						}
+					},
+					{
+						id: 'send-backward',
+						label: 'Backward',
+						disabled: !canBringBackward,
+						action: () => {
+							void moveDashboardWidgetByDelta(getGraph, liveNode.node_id, -1);
+						}
+					},
+					{
+						id: 'bring-to-front',
+						label: 'Bring To Front',
+						disabled: !canBringToFront,
+						action: () => {
+							void moveDashboardWidgetToFront(getGraph, liveNode.node_id);
+						}
+					},
+					{
+						id: 'send-to-back',
+						label: 'Bring To Back',
+						disabled: !canBringToBack,
+						action: () => {
+							void moveDashboardWidgetToBack(getGraph, liveNode.node_id);
+						}
+					}
+				]
+			}
+		];
+	});
+
+	const dashboardContextMenuAnchor = $derived.by((): ContextMenuAnchor | null => {
+		if (!dashboardContextMenu.open) {
+			return null;
+		}
+		return {
+			kind: 'point',
+			x: dashboardContextMenu.x,
+			y: dashboardContextMenu.y
+		};
+	});
+
+	$effect(() => {
+		if (editMode || !dashboardContextMenu.open) {
+			return;
+		}
+		closeDashboardContextMenu();
+	});
+
+	$effect(() => {
+		if (!dashboardContextMenu.open || dashboardContextMenuItems.length > 0) {
+			return;
+		}
+		closeDashboardContextMenu();
+	});
+
 	const finishFreeLayoutEditSession = async (): Promise<void> => {
 		const sessionToEnd = freeLayoutEditSession;
 		freeLayoutEditSession = null;
@@ -1566,8 +2296,22 @@
 	};
 
 	const finalizeFreeLayoutInteraction = async (
-		preview: FreeLayoutPreviewSet | null
+		preview: FreeLayoutPreviewSet | null,
+		mode: FreeLayoutInteractionMode | null
 	): Promise<void> => {
+		const dropTarget = freeLayoutDropTarget;
+		clearFreeLayoutInteractionChrome();
+		if (dropTarget && mode === 'move') {
+			cancelScheduledFreeLayoutCommit();
+			await moveDashboardWidgetToSurface(
+				getGraph,
+				liveNode.node_id,
+				dropTarget.surfaceNodeId,
+				dropTarget.placement
+			);
+			await finishFreeLayoutEditSession();
+			return;
+		}
 		if (preview) {
 			scheduleFreeLayoutCommit(preview);
 			await flushFreeLayoutCommitQueue();
@@ -1582,6 +2326,8 @@
 		event.preventDefault();
 		event.stopPropagation();
 		selectWidgetNode('REPLACE');
+		clearFreeLayoutInteractionChrome();
+		setFreeLayoutAncestorShells(event.currentTarget);
 		freeLayoutEditSession = createUiEditSession('Move dashboard widget', 'dashboard-free-layout');
 		void freeLayoutEditSession.begin();
 		const rootRemPx = getRootRemPixels();
@@ -1596,6 +2342,8 @@
 		const targets = buildFreeLayoutTargets(transformNodes, interactionMetrics);
 		const selectionRect = buildSelectionRect(targets);
 		if (targets.length === 0 || !selectionRect) {
+			clearFreeLayoutInteractionChrome();
+			void finishFreeLayoutEditSession();
 			return;
 		}
 		lastCommittedFreeLayoutPreview = buildPreviewSetFromTargets(liveNode.node_id, targets);
@@ -1605,6 +2353,7 @@
 			mode: 'move',
 			resizeEdges: null,
 			primaryNodeId: liveNode.node_id,
+			sourceSurfaceNodeId: parentNode?.node_id ?? liveNode.node_id,
 			selectionRect,
 			targets,
 			startClient: [event.clientX, event.clientY],
@@ -1630,6 +2379,8 @@
 		event.preventDefault();
 		event.stopPropagation();
 		selectWidgetNode('REPLACE');
+		clearFreeLayoutInteractionChrome();
+		setFreeLayoutAncestorShells(event.currentTarget);
 		freeLayoutEditSession = createUiEditSession('Resize dashboard widget', 'dashboard-free-layout');
 		void freeLayoutEditSession.begin();
 		const rootRemPx = getRootRemPixels();
@@ -1644,6 +2395,8 @@
 		const targets = buildFreeLayoutTargets(transformNodes, interactionMetrics);
 		const selectionRect = buildSelectionRect(targets);
 		if (targets.length === 0 || !selectionRect) {
+			clearFreeLayoutInteractionChrome();
+			void finishFreeLayoutEditSession();
 			return;
 		}
 		lastCommittedFreeLayoutPreview = buildPreviewSetFromTargets(liveNode.node_id, targets);
@@ -1653,6 +2406,7 @@
 			mode: 'resize',
 			resizeEdges,
 			primaryNodeId: liveNode.node_id,
+			sourceSurfaceNodeId: parentNode?.node_id ?? liveNode.node_id,
 			selectionRect,
 			targets,
 			startClient: [event.clientX, event.clientY],
@@ -1672,10 +2426,10 @@
 		if (!editMode || event.button !== 0) {
 			return;
 		}
+		event.stopPropagation();
 		const selectionMode = selectionModeFromEvent(event);
 		if (supportsFreePlacement) {
 			if (selectionMode !== 'REPLACE') {
-				event.stopPropagation();
 				selectWidgetNode(selectionMode);
 				return;
 			}
@@ -1694,7 +2448,7 @@
 		if (!editMode || !isLayoutSurface || event.button !== 0) {
 			return;
 		}
-		if (freeLayoutInteraction || marqueeSelection) {
+		if (freeLayoutInteraction || marqueeSelection || surfacePress) {
 			return;
 		}
 		if (!(event.currentTarget instanceof HTMLElement)) {
@@ -1709,24 +2463,12 @@
 		) {
 			return;
 		}
-		event.preventDefault();
-		event.stopPropagation();
 		const surfaceElement =
 			isPage && event.currentTarget instanceof HTMLElement
 				? ((event.currentTarget.closest('.dashboard-page-scene') as HTMLElement | null) ??
 					event.currentTarget)
 				: event.currentTarget;
-		const selection: MarqueeSelectionState = {
-			pointerId: event.pointerId,
-			surfaceNodeId: liveNode.node_id,
-			surfaceElement: surfaceElement,
-			startClient: [event.clientX, event.clientY],
-			currentClient: [event.clientX, event.clientY],
-			baseSelection: [...(session?.selectedNodesIds ?? [])],
-			selectionMode: selectionModeFromEvent(event)
-		};
-		marqueeSelection = selection;
-		applyMarqueeSelection(selection);
+		beginSurfacePress(event, surfaceElement);
 	};
 
 	const handlePageScenePointerDown = (event: PointerEvent): void => {
@@ -1734,7 +2476,7 @@
 		if (!isPage || !editMode || event.button !== 0) {
 			return;
 		}
-		if (freeLayoutInteraction || marqueeSelection) {
+		if (freeLayoutInteraction || marqueeSelection || surfacePress) {
 			return;
 		}
 		if (!(event.currentTarget instanceof HTMLElement)) {
@@ -1744,20 +2486,55 @@
 		if (!(sceneElement instanceof HTMLElement)) {
 			return;
 		}
-		event.preventDefault();
-		event.stopPropagation();
-		const selection: MarqueeSelectionState = {
-			pointerId: event.pointerId,
-			surfaceNodeId: liveNode.node_id,
-			surfaceElement: sceneElement,
-			startClient: [event.clientX, event.clientY],
-			currentClient: [event.clientX, event.clientY],
-			baseSelection: [...(session?.selectedNodesIds ?? [])],
-			selectionMode: selectionModeFromEvent(event)
-		};
-		marqueeSelection = selection;
-		applyMarqueeSelection(selection);
+		beginSurfacePress(event, sceneElement);
 	};
+
+	$effect(() => {
+		if (!surfacePress) {
+			return;
+		}
+
+		const handlePointerMove = (event: PointerEvent): void => {
+			if (!surfacePress || event.pointerId !== surfacePress.pointerId) {
+				return;
+			}
+			const deltaX = event.clientX - surfacePress.startClient[0];
+			const deltaY = event.clientY - surfacePress.startClient[1];
+			if (Math.hypot(deltaX, deltaY) < marqueeDragThresholdPx) {
+				return;
+			}
+			event.preventDefault();
+			const selection: MarqueeSelectionState = {
+				pointerId: surfacePress.pointerId,
+				surfaceNodeId: surfacePress.surfaceNodeId,
+				surfaceElement: surfacePress.surfaceElement,
+				startClient: surfacePress.startClient,
+				currentClient: [event.clientX, event.clientY],
+				baseSelection: surfacePress.baseSelection,
+				selectionMode: surfacePress.selectionMode
+			};
+			surfacePress = null;
+			marqueeSelection = selection;
+			applyMarqueeSelection(selection);
+		};
+
+		const finishPress = (event: PointerEvent): void => {
+			if (!surfacePress || event.pointerId !== surfacePress.pointerId) {
+				return;
+			}
+			surfacePress = null;
+		};
+
+		window.addEventListener('pointermove', handlePointerMove);
+		window.addEventListener('pointerup', finishPress);
+		window.addEventListener('pointercancel', finishPress);
+
+		return () => {
+			window.removeEventListener('pointermove', handlePointerMove);
+			window.removeEventListener('pointerup', finishPress);
+			window.removeEventListener('pointercancel', finishPress);
+		};
+	});
 
 	$effect(() => {
 		if (!freeLayoutInteraction) {
@@ -1781,15 +2558,29 @@
 				? parentSnapGrid.step * freeLayoutInteraction.rootRemPx
 				: 0;
 			if (freeLayoutInteraction.mode === 'move') {
-				freeLayoutPreview = buildFreeLayoutMovePreview(
+				const nextPreview = buildFreeLayoutMovePreview(
 					freeLayoutInteraction,
 					deltaXPx,
 					deltaYPx,
 					snapPx
 				);
-				scheduleFreeLayoutCommit(freeLayoutPreview);
+				freeLayoutPreview = nextPreview;
+				const nextDropTarget = resolveFreeLayoutDropTargetAtPoint(
+					event.clientX,
+					event.clientY,
+					nextPreview
+				);
+				freeLayoutDropTarget = nextDropTarget;
+				setFreeLayoutHoverSurface(nextDropTarget?.element ?? null);
+				if (nextDropTarget) {
+					cancelScheduledFreeLayoutCommit();
+					return;
+				}
+				scheduleFreeLayoutCommit(nextPreview);
 				return;
 			}
+			setFreeLayoutHoverSurface(null);
+			freeLayoutDropTarget = null;
 			const nextPreview = buildFreeLayoutResizePreview(
 				freeLayoutInteraction,
 				deltaXPx,
@@ -1808,9 +2599,10 @@
 				return;
 			}
 			const preview = freeLayoutPreview;
+			const mode = freeLayoutInteraction.mode;
 			freeLayoutInteraction = null;
 			freeLayoutPreview = null;
-			void finalizeFreeLayoutInteraction(preview);
+			void finalizeFreeLayoutInteraction(preview, mode);
 		};
 
 		window.addEventListener('pointermove', handlePointerMove);
@@ -1900,8 +2692,27 @@
 		if (typeof window !== 'undefined' && pageViewportResizeFrame !== null) {
 			window.cancelAnimationFrame(pageViewportResizeFrame);
 		}
+		clearFreeLayoutInteractionChrome();
 		cancelPageViewAnimation();
 		void finishFreeLayoutEditSession();
+	});
+
+	$effect(() => {
+		if (typeof window === 'undefined') {
+			return;
+		}
+
+		const resetSurfacePreview = (): void => {
+			clearSurfaceDropState();
+		};
+
+		window.addEventListener('dragend', resetSurfacePreview, true);
+		window.addEventListener('drop', resetSurfacePreview, true);
+
+		return () => {
+			window.removeEventListener('dragend', resetSurfacePreview, true);
+			window.removeEventListener('drop', resetSurfacePreview, true);
+		};
 	});
 
 	$effect(() => {
@@ -2021,10 +2832,7 @@
 			);
 			maxExtent = Math.max(
 				maxExtent,
-				childRect.top +
-					childRect.height +
-					cssValueToPx(gap.y, 'y', createCssUnitContext(surfaceContext, 'y')) +
-					2 * rootRemPx
+				childRect.top + childRect.height + 2 * rootRemPx
 			);
 		}
 		return maxExtent;
@@ -2035,14 +2843,40 @@
 			return;
 		}
 		const knownChildIds = new Set(pendingSurfaceDrop.knownChildIds);
-		if (childWidgets.some((child) => !knownChildIds.has(child.node_id))) {
+		const knownDirectChildIds = new Set(pendingSurfaceDrop.knownDirectChildIds);
+		if (
+			liveNode.children.length !== pendingSurfaceDrop.knownDirectChildIds.length ||
+			childWidgets.length !== pendingSurfaceDrop.knownChildIds.length ||
+			liveNode.children.some((childId) => !knownDirectChildIds.has(childId)) ||
+			childWidgets.some((child) => !knownChildIds.has(child.node_id))
+		) {
 			pendingSurfaceDrop = null;
 		}
 	});
 
+	$effect(() => {
+		if (!pendingSurfaceDrop || typeof window === 'undefined') {
+			return;
+		}
+		const timeout = window.setTimeout(() => {
+			pendingSurfaceDrop = null;
+		}, 2000);
+		return () => {
+			window.clearTimeout(timeout);
+		};
+	});
+
 	const surfaceStyle = $derived.by((): string => {
 		const snapStepPx = surfaceSnapGrid.enabled ? surfaceSnapGrid.step * getRootRemPixels() : 0;
-		const gapStyle = `--dashboard-gap-x: ${formatCssValue(gap.x)}; --dashboard-gap-y: ${formatCssValue(gap.y)}; --dashboard-snap-grid-step: ${snapStepPx}px;`;
+		const gapX =
+			layoutKind === 'horizontal' || layoutKind === 'grid'
+				? gap.x
+				: { value: 0, unit: 'rem' as const };
+		const gapY =
+			layoutKind === 'vertical' || layoutKind === 'grid'
+				? gap.y
+				: { value: 0, unit: 'rem' as const };
+		const gapStyle = `--dashboard-gap-x: ${formatCssValue(gapX)}; --dashboard-gap-y: ${formatCssValue(gapY)}; --dashboard-snap-grid-step: ${snapStepPx}px;`;
 		if (layoutKind === 'free') {
 			if (isPage) {
 				return `${gapStyle} inline-size: 100%; block-size: 100%; min-block-size: 0;`;
@@ -2050,7 +2884,7 @@
 			return `${gapStyle} min-block-size: ${freeSurfaceHeightPx}px;`;
 		}
 		if (layoutKind === 'grid') {
-			return `${gapStyle} --dashboard-grid-columns: ${gridColumns};`;
+			return `${gapStyle} --dashboard-grid-flow: ${resolvedGridDimensions.direction}; --dashboard-grid-columns: ${resolvedGridDimensions.columns}; --dashboard-grid-rows: ${resolvedGridDimensions.rows};`;
 		}
 		return gapStyle;
 	});
@@ -2089,9 +2923,104 @@
 		return `inline-size: ${pageLogicalWidthPx}px; block-size: ${pageLogicalHeightPx}px; transform: translate(${pageView.panX}px, ${pageView.panY}px) scale(${pageEffectiveScale}); z-index: 0;`;
 	});
 
+	const sumCssLengthExpressions = (expressions: string[]): string => {
+		if (expressions.length === 0) {
+			return '0px';
+		}
+		if (expressions.length === 1) {
+			return expressions[0];
+		}
+		return expressions.map((expression) => `(${expression})`).join(' + ');
+	};
+
+	const placementHasExplicitSize = (
+		axis: 'horizontal' | 'vertical',
+		placementLike: DashboardPlacement | DashboardWidgetCreationPlacement
+	): boolean => {
+		if (!('sizeEnabled' in placementLike) || placementLike.sizeEnabled === undefined) {
+			return false;
+		}
+		return axis === 'horizontal'
+			? placementLike.sizeEnabled.width
+			: placementLike.sizeEnabled.height;
+	};
+
+	const stackAutoBasisExpression = (
+		axis: 'horizontal' | 'vertical',
+		placements: Array<DashboardPlacement | DashboardWidgetCreationPlacement>
+	): string => {
+		const sizeSelector =
+			axis === 'horizontal'
+				? (placementLike: DashboardPlacement | DashboardWidgetCreationPlacement) =>
+						formatCssValue(placementLike.size.width)
+				: (placementLike: DashboardPlacement | DashboardWidgetCreationPlacement) =>
+						formatCssValue(placementLike.size.height);
+		const hardSizeExpressions = placements
+			.filter((placementLike) => placementHasExplicitSize(axis, placementLike))
+			.map(sizeSelector);
+		const autoCount = Math.max(
+			1,
+			placements.filter((placementLike) => !placementHasExplicitSize(axis, placementLike)).length
+		);
+		const gapExpression =
+			axis === 'horizontal' ? formatCssValue(gap.x) : formatCssValue(gap.y);
+		const totalGapExpression =
+			placements.length > 1 ? `(${gapExpression} * ${placements.length - 1})` : '0px';
+		return `max(calc((100% - ${totalGapExpression} - (${sumCssLengthExpressions(hardSizeExpressions)})) / ${autoCount}), 0px)`;
+	};
+
+	const childPlacements = $derived.by(() =>
+		childWidgets.map((child) => getDashboardPlacement(graph, child))
+	);
+	const stackPlacements = $derived.by(() => {
+		const placements: Array<DashboardPlacement | DashboardWidgetCreationPlacement> = [...childPlacements];
+		if (
+			displayedSurfaceDropPreview &&
+			(layoutKind === 'horizontal' || layoutKind === 'vertical')
+		) {
+			placements.push(displayedSurfaceDropPreview.placement);
+		}
+		return placements;
+	});
+	const stackAutoBasis = $derived.by(() => {
+		if (layoutKind === 'horizontal') {
+			return stackAutoBasisExpression('horizontal', stackPlacements);
+		}
+		if (layoutKind === 'vertical') {
+			return stackAutoBasisExpression('vertical', stackPlacements);
+		}
+		return null;
+	});
+	const resolvedGridDimensions = $derived.by(() => {
+		if (layoutKind !== 'grid') {
+			return { direction: 'row' as DashboardGridDirection, columns: 1, rows: 1 };
+		}
+		const lineCount = Math.max(1, gridSettings.lineCount);
+		const itemCount = Math.max(
+			childWidgets.length + (displayedSurfaceDropPreview ? 1 : 0),
+			1
+		);
+		if (gridSettings.direction === 'column') {
+			return {
+				direction: gridSettings.direction,
+				columns: Math.max(1, Math.ceil(itemCount / lineCount)),
+				rows: lineCount
+			};
+		}
+		return {
+			direction: gridSettings.direction,
+			columns: lineCount,
+			rows: Math.max(1, Math.ceil(itemCount / lineCount))
+		};
+	});
+
 	const placementStyle = (
 		childPlacement: DashboardPlacement | DashboardWidgetCreationPlacement
 	): string => {
+		const hasExplicitWidth =
+			layoutKind === 'free' ? true : placementHasExplicitSize('horizontal', childPlacement);
+		const hasExplicitHeight =
+			layoutKind === 'free' ? true : placementHasExplicitSize('vertical', childPlacement);
 		if (layoutKind === 'free') {
 			const width = `max(${formatCssValue(childPlacement.size.width)}, ${minFreeWidgetWidthRem}rem)`;
 			const height = `max(${formatCssValue(childPlacement.size.height)}, ${minFreeWidgetHeightRem}rem)`;
@@ -2112,14 +3041,18 @@
 			return `left: ${left}; top: ${top}; inline-size: ${width}; block-size: ${height};`;
 		}
 		if (layoutKind === 'grid') {
-			return `grid-column: span ${childPlacement.columnSpan}; grid-row: span ${childPlacement.rowSpan}; min-block-size: max(${formatCssValue(childPlacement.size.height)}, 3.25rem);`;
+			return 'inline-size: 100%; block-size: 100%; min-inline-size: 0; min-block-size: 0;';
 		}
-		const basis =
-			layoutKind === 'horizontal' ? childPlacement.size.width : childPlacement.size.height;
 		if (layoutKind === 'horizontal') {
-			return `flex: 0 0 max(${formatCssValue(basis)}, 6.5rem); inline-size: max(${formatCssValue(childPlacement.size.width)}, 6.5rem); block-size: 100%; min-inline-size: 0; min-block-size: 0;`;
+			const widthExpression = hasExplicitWidth
+				? formatCssValue(childPlacement.size.width)
+				: (stackAutoBasis ?? '0px');
+			return `flex: 0 0 ${widthExpression}; inline-size: ${widthExpression}; block-size: 100%; min-inline-size: 0; min-block-size: 0;`;
 		}
-		return `flex: 0 0 max(${formatCssValue(basis)}, 2.8rem); inline-size: 100%; block-size: max(${formatCssValue(childPlacement.size.height)}, 2.8rem); min-inline-size: 0; min-block-size: 0;`;
+		const heightExpression = hasExplicitHeight
+			? formatCssValue(childPlacement.size.height)
+			: (stackAutoBasis ?? '0px');
+		return `flex: 0 0 ${heightExpression}; inline-size: 100%; block-size: ${heightExpression}; min-inline-size: 0; min-block-size: 0;`;
 	};
 
 	const displayedWidgetPlacement = $derived.by(() => ({
@@ -2569,6 +3502,191 @@
 	});
 </script>
 
+<ContextMenu
+	open={dashboardContextMenu.open}
+	items={dashboardContextMenuItems}
+	anchor={dashboardContextMenuAnchor}
+	minWidthRem={12}
+	menuClassName="gc-dashboard-context-menu"
+	onOpenChange={(nextOpen) => {
+		if (!nextOpen) {
+			closeDashboardContextMenu();
+		}
+	}} />
+
+{#snippet dashboardSurfaceDropPreviewContent(preview: SurfaceDropPreview)}
+	<div class="dashboard-drop-preview-meta">
+		<span class="dashboard-drop-preview-kind">{surfaceDropKindLabel(preview)}</span>
+		<strong>{preview.label}</strong>
+	</div>
+	<div class="dashboard-drop-preview-shell">
+		{#if preview.targetKind === 'node'}
+			<div class="dashboard-drop-preview-node-toolbar">
+				<span></span>
+				<span></span>
+				<span></span>
+			</div>
+			<div class="dashboard-drop-preview-node-lines">
+				<span class="wide"></span>
+				<span></span>
+				<span class="short"></span>
+			</div>
+		{:else if preview.genericWidgetKind === 'button'}
+			<div class="dashboard-drop-preview-button">{preview.previewText ?? preview.label}</div>
+		{:else if preview.genericWidgetKind === 'slider'}
+			<div class="dashboard-drop-preview-slider">
+				<span class="dashboard-drop-preview-slider-label">{preview.label}</span>
+				<span class="dashboard-drop-preview-slider-track"><span></span></span>
+			</div>
+		{:else if preview.genericWidgetKind === 'checkbox'}
+			<div class="dashboard-drop-preview-checkbox">
+				<span class="dashboard-drop-preview-checkbox-box"></span>
+				<span>{preview.previewText ?? preview.label}</span>
+			</div>
+		{:else if preview.genericWidgetKind === 'textInput'}
+			<div class="dashboard-drop-preview-input" class:multiline={preview.multiline}>
+				<span>{preview.previewPlaceholder ?? preview.label}</span>
+			</div>
+		{:else}
+			<div class="dashboard-drop-preview-text">{preview.previewText ?? preview.label}</div>
+		{/if}
+	</div>
+{/snippet}
+
+{#snippet dashboardSurfaceDropPreviewSlot(style: string = '', additionalClass: string = '')}
+	{#if displayedSurfaceDropPreview}
+		<div
+			class={`dashboard-slot dashboard-drop-preview ${additionalClass}`.trim()}
+			class:is-committing={pendingSurfaceDrop !== null && surfaceDropPreview === null}
+			style={style}
+			aria-hidden="true">
+			<div class="dashboard-slot-fill">
+				<div class="dashboard-drop-preview-fill">
+					{@render dashboardSurfaceDropPreviewContent(displayedSurfaceDropPreview)}
+				</div>
+			</div>
+		</div>
+	{/if}
+{/snippet}
+
+{#snippet dashboardSurfaceContent(
+	compact: boolean = false,
+	dropIndicatorLabel: string = 'Drop to add a child widget',
+	renderMarqueeInSurface: boolean = false
+)}
+	{#if layoutKind === 'tabs'}
+		<div class="dashboard-tab-strip" class:compact={compact}>
+			{#each childWidgets as child}
+				<button
+					type="button"
+					class:selected={!displayedSurfaceDropPreview && activeTabNodeId === child.node_id}
+					onpointerdown={withStoppedPropagation}
+					onclick={() => {
+						activeTabNodeId = child.node_id;
+					}}>{child.meta.label}</button>
+			{/each}
+			{#if displayedSurfaceDropPreview}
+				<button
+					type="button"
+					class="selected dashboard-drop-preview-tab"
+					tabindex="-1"
+					aria-hidden="true">
+					{displayedSurfaceDropPreview.label}
+				</button>
+			{/if}
+		</div>
+		<div class="dashboard-tab-body" class:compact={compact}>
+			{#if displayedSurfaceDropPreview}
+				{@render dashboardSurfaceDropPreviewSlot('', 'dashboard-drop-preview-panel')}
+			{:else if activeTabNodeId !== null}
+				{@const activeChild =
+					childWidgets.find((candidate) => candidate.node_id === activeTabNodeId) ?? null}
+				{#if activeChild}
+					<div class="dashboard-slot">
+						<div class="dashboard-slot-fill">
+							<DashboardCanvasSelf node={activeChild} {editMode} />
+						</div>
+					</div>
+				{/if}
+			{/if}
+		</div>
+	{:else if layoutKind === 'accordion'}
+		<div class="dashboard-accordion" class:compact={compact}>
+			{#each childWidgets as child}
+				<section class="dashboard-accordion-item">
+					<button
+						type="button"
+						class:selected={openAccordionNodeIds.includes(child.node_id)}
+						onpointerdown={withStoppedPropagation}
+						onclick={() => {
+							toggleAccordionNode(child.node_id);
+						}}>{child.meta.label}</button>
+					{#if openAccordionNodeIds.includes(child.node_id)}
+						<div class="dashboard-slot accordion-slot">
+							<div class="dashboard-slot-fill">
+								<DashboardCanvasSelf node={child} {editMode} />
+							</div>
+						</div>
+					{/if}
+				</section>
+			{/each}
+			{#if displayedSurfaceDropPreview}
+				<section class="dashboard-accordion-item dashboard-drop-preview-accordion">
+					<button
+						type="button"
+						class="selected dashboard-drop-preview-tab"
+						tabindex="-1"
+						aria-hidden="true">
+						{displayedSurfaceDropPreview.label}
+					</button>
+					{@render dashboardSurfaceDropPreviewSlot('', 'dashboard-drop-preview-panel')}
+				</section>
+			{/if}
+		</div>
+	{:else}
+		<div class="dashboard-layout">
+			{#each childWidgets as child}
+				<div class="dashboard-slot" style={slotStyle(child)}>
+					<div class="dashboard-slot-fill">
+						<DashboardCanvasSelf node={child} {editMode} />
+					</div>
+				</div>
+			{/each}
+			{#if displayedSurfaceDropPreview}
+				{@render dashboardSurfaceDropPreviewSlot(
+					placementStyle(displayedSurfaceDropPreview.placement),
+					layoutKind === 'free' ? '' : 'dashboard-drop-preview-flow'
+				)}
+			{/if}
+		</div>
+	{/if}
+
+	{#if childWidgets.length === 0 && !displayedSurfaceDropPreview}
+		<div class="dashboard-empty-inline dashboard-surface-empty">
+			Drop widgets here or use the add menu.
+		</div>
+	{/if}
+
+	{#if surfaceDragDepth > 0 && !displayedSurfaceDropPreview}
+		<div class="dashboard-drop-indicator">{dropIndicatorLabel}</div>
+	{/if}
+
+	{#if renderMarqueeInSurface && marqueeSelection}
+		<div class="dashboard-marquee-selection" style={marqueeStyle} aria-hidden="true"></div>
+	{/if}
+{/snippet}
+
+{#snippet dashboardSurfaceHitZones()}
+	{#if editMode && layoutKind !== 'free'}
+		<div class="dashboard-surface-hit-zones" aria-hidden="true">
+			<div class="dashboard-surface-hit-zone top"></div>
+			<div class="dashboard-surface-hit-zone right"></div>
+			<div class="dashboard-surface-hit-zone bottom"></div>
+			<div class="dashboard-surface-hit-zone left"></div>
+		</div>
+	{/if}
+{/snippet}
+
 {#if isPage}
 	<div
 		class="dashboard-page-viewport"
@@ -2601,9 +3719,13 @@
 					class:surface-target-active={surfaceDragDepth > 0}
 					class:edit-bleed-visible={editMode}
 					class:snap-grid-visible={snapGridVisible}
+					data-local-context-menu
+					data-dashboard-drop-message="Drop inside page"
+					data-dashboard-surface-node-id={String(liveNode.node_id)}
 					role="region"
 					aria-label="Dashboard page surface"
 					style={surfaceStyle}
+					oncontextmenu={handleSurfaceContextMenu}
 					onpointerdown={handleSurfacePointerDown}
 					ondragenter={handleSurfaceDragEnter}
 					ondragover={handleSurfaceDragOver}
@@ -2611,140 +3733,8 @@
 					ondrop={(event) => {
 						void handleSurfaceDrop(event);
 					}}>
-					{#if layoutKind === 'tabs'}
-						<div class="dashboard-tab-strip">
-							{#each childWidgets as child}
-								<button
-									type="button"
-									class:selected={activeTabNodeId === child.node_id}
-									onpointerdown={withStoppedPropagation}
-									onclick={() => {
-										activeTabNodeId = child.node_id;
-									}}>{child.meta.label}</button>
-							{/each}
-						</div>
-						<div class="dashboard-tab-body">
-							{#if activeTabNodeId !== null}
-								{@const activeChild =
-									childWidgets.find((candidate) => candidate.node_id === activeTabNodeId) ?? null}
-								{#if activeChild}
-									<div class="dashboard-slot">
-										<div class="dashboard-slot-fill">
-											<DashboardCanvasSelf node={activeChild} {editMode} />
-										</div>
-									</div>
-								{/if}
-							{/if}
-						</div>
-					{:else if layoutKind === 'accordion'}
-						<div class="dashboard-accordion">
-							{#each childWidgets as child}
-								<section class="dashboard-accordion-item">
-									<button
-										type="button"
-										class:selected={openAccordionNodeIds.includes(child.node_id)}
-										onpointerdown={withStoppedPropagation}
-										onclick={() => {
-											toggleAccordionNode(child.node_id);
-										}}>{child.meta.label}</button>
-									{#if openAccordionNodeIds.includes(child.node_id)}
-										<div class="dashboard-slot accordion-slot">
-											<div class="dashboard-slot-fill">
-												<DashboardCanvasSelf node={child} {editMode} />
-											</div>
-										</div>
-									{/if}
-								</section>
-							{/each}
-						</div>
-					{:else}
-						<div class="dashboard-layout">
-							{#each childWidgets as child}
-								<div class="dashboard-slot" style={slotStyle(child)}>
-									<div class="dashboard-slot-fill">
-										<DashboardCanvasSelf node={child} {editMode} />
-									</div>
-								</div>
-							{/each}
-							{#if displayedSurfaceDropPreview && layoutKind === 'free'}
-								<div
-									class="dashboard-slot dashboard-drop-preview"
-									class:is-committing={pendingSurfaceDrop !== null && surfaceDropPreview === null}
-									style={placementStyle(displayedSurfaceDropPreview.placement)}
-									aria-hidden="true">
-									<div class="dashboard-slot-fill">
-										<div class="dashboard-drop-preview-fill">
-											<div class="dashboard-drop-preview-meta">
-												<span class="dashboard-drop-preview-kind"
-													>{surfaceDropKindLabel(displayedSurfaceDropPreview)}</span>
-												<strong>{displayedSurfaceDropPreview.label}</strong>
-											</div>
-											<div class="dashboard-drop-preview-shell">
-												{#if displayedSurfaceDropPreview.targetKind === 'node'}
-													<div class="dashboard-drop-preview-node-toolbar">
-														<span></span>
-														<span></span>
-														<span></span>
-													</div>
-													<div class="dashboard-drop-preview-node-lines">
-														<span class="wide"></span>
-														<span></span>
-														<span class="short"></span>
-													</div>
-												{:else if displayedSurfaceDropPreview.genericWidgetKind === 'button'}
-													<div class="dashboard-drop-preview-button">
-														{displayedSurfaceDropPreview.previewText ??
-															displayedSurfaceDropPreview.label}
-													</div>
-												{:else if displayedSurfaceDropPreview.genericWidgetKind === 'slider'}
-													<div class="dashboard-drop-preview-slider">
-														<span class="dashboard-drop-preview-slider-label"
-															>{displayedSurfaceDropPreview.label}</span>
-														<span class="dashboard-drop-preview-slider-track"><span></span></span>
-													</div>
-												{:else if displayedSurfaceDropPreview.genericWidgetKind === 'checkbox'}
-													<div class="dashboard-drop-preview-checkbox">
-														<span class="dashboard-drop-preview-checkbox-box"></span>
-														<span
-															>{displayedSurfaceDropPreview.previewText ??
-																displayedSurfaceDropPreview.label}</span>
-													</div>
-												{:else if displayedSurfaceDropPreview.genericWidgetKind === 'textInput'}
-													<div
-														class="dashboard-drop-preview-input"
-														class:multiline={displayedSurfaceDropPreview.multiline}>
-														<span
-															>{displayedSurfaceDropPreview.previewPlaceholder ??
-																displayedSurfaceDropPreview.label}</span>
-													</div>
-												{:else}
-													<div class="dashboard-drop-preview-text">
-														{displayedSurfaceDropPreview.previewText ??
-															displayedSurfaceDropPreview.label}
-													</div>
-												{/if}
-											</div>
-										</div>
-									</div>
-								</div>
-							{/if}
-						</div>
-					{/if}
-
-					{#if childWidgets.length === 0 && !displayedSurfaceDropPreview}
-						<div class="dashboard-empty-state">
-							<span class="eyebrow">Dashboard Page</span>
-							<h3>Drop a node or parameter here</h3>
-							<p>
-								Outliner drags create node widgets. Inspector parameter-label drags create generic
-								widgets.
-							</p>
-						</div>
-					{/if}
-
-					{#if surfaceDragDepth > 0 && (!displayedSurfaceDropPreview || layoutKind !== 'free')}
-						<div class="dashboard-drop-indicator">Drop to create a widget</div>
-					{/if}
+					{@render dashboardSurfaceHitZones()}
+					{@render dashboardSurfaceContent(false, 'Drop to create a widget')}
 				</div>
 			</div>
 			{#if editMode && pageSize.enabled}
@@ -2766,12 +3756,14 @@
 		class:free-layout-active={freeLayoutInteraction !== null}
 		class:editable-free={supportsFreePlacement}
 		class:run-mode={!editMode}
+		data-local-context-menu
 		data-node-id={liveNode.node_id}
 		data-dashboard-surface-id={String(parentNode?.node_id ?? '')}
 		bind:this={widgetShellElement}
 		style={widgetShellStyle}
 		role="button"
 		tabindex={editMode ? 0 : -1}
+		oncontextmenu={handleWidgetContextMenu}
 		onpointerdown={handleWidgetPointerDown}
 		onkeydown={selectWidgetNodeFromKeyboard}>
 		{#if editMode && supportsFreePlacement}
@@ -2805,9 +3797,14 @@
 					class="dashboard-surface dashboard-container-surface {layoutKind}"
 					class:surface-target-active={surfaceDragDepth > 0}
 					class:snap-grid-visible={snapGridVisible}
+					class:with-inline-label={hasInsideWidgetLabel}
+					data-local-context-menu
+					data-dashboard-drop-message="Drop inside container"
+					data-dashboard-surface-node-id={String(liveNode.node_id)}
 					role="group"
 					aria-label="Dashboard container surface"
 					style={surfaceStyle}
+					oncontextmenu={handleSurfaceContextMenu}
 					onpointerdown={handleSurfacePointerDown}
 					ondragenter={handleSurfaceDragEnter}
 					ondragover={handleSurfaceDragOver}
@@ -2815,137 +3812,11 @@
 					ondrop={(event) => {
 						void handleSurfaceDrop(event);
 					}}>
-					{#if layoutKind === 'tabs'}
-						<div class="dashboard-tab-strip compact">
-							{#each childWidgets as child}
-								<button
-									type="button"
-									class:selected={activeTabNodeId === child.node_id}
-									onpointerdown={withStoppedPropagation}
-									onclick={() => {
-										activeTabNodeId = child.node_id;
-									}}>{child.meta.label}</button>
-							{/each}
-						</div>
-						<div class="dashboard-tab-body compact">
-							{#if activeTabNodeId !== null}
-								{@const activeChild =
-									childWidgets.find((candidate) => candidate.node_id === activeTabNodeId) ?? null}
-								{#if activeChild}
-									<div class="dashboard-slot">
-										<div class="dashboard-slot-fill">
-											<DashboardCanvasSelf node={activeChild} {editMode} />
-										</div>
-									</div>
-								{/if}
-							{/if}
-						</div>
-					{:else if layoutKind === 'accordion'}
-						<div class="dashboard-accordion compact">
-							{#each childWidgets as child}
-								<section class="dashboard-accordion-item">
-									<button
-										type="button"
-										class:selected={openAccordionNodeIds.includes(child.node_id)}
-										onpointerdown={withStoppedPropagation}
-										onclick={() => {
-											toggleAccordionNode(child.node_id);
-										}}>{child.meta.label}</button>
-									{#if openAccordionNodeIds.includes(child.node_id)}
-										<div class="dashboard-slot accordion-slot">
-											<div class="dashboard-slot-fill">
-												<DashboardCanvasSelf node={child} {editMode} />
-											</div>
-										</div>
-									{/if}
-								</section>
-							{/each}
-						</div>
-					{:else}
-						<div class="dashboard-layout">
-							{#each childWidgets as child}
-								<div class="dashboard-slot" style={slotStyle(child)}>
-									<div class="dashboard-slot-fill">
-										<DashboardCanvasSelf node={child} {editMode} />
-									</div>
-								</div>
-							{/each}
-							{#if displayedSurfaceDropPreview && layoutKind === 'free'}
-								<div
-									class="dashboard-slot dashboard-drop-preview"
-									class:is-committing={pendingSurfaceDrop !== null && surfaceDropPreview === null}
-									style={placementStyle(displayedSurfaceDropPreview.placement)}
-									aria-hidden="true">
-									<div class="dashboard-slot-fill">
-										<div class="dashboard-drop-preview-fill">
-											<div class="dashboard-drop-preview-meta">
-												<span class="dashboard-drop-preview-kind"
-													>{surfaceDropKindLabel(displayedSurfaceDropPreview)}</span>
-												<strong>{displayedSurfaceDropPreview.label}</strong>
-											</div>
-											<div class="dashboard-drop-preview-shell">
-												{#if displayedSurfaceDropPreview.targetKind === 'node'}
-													<div class="dashboard-drop-preview-node-toolbar">
-														<span></span>
-														<span></span>
-														<span></span>
-													</div>
-													<div class="dashboard-drop-preview-node-lines">
-														<span class="wide"></span>
-														<span></span>
-														<span class="short"></span>
-													</div>
-												{:else if displayedSurfaceDropPreview.genericWidgetKind === 'button'}
-													<div class="dashboard-drop-preview-button">
-														{displayedSurfaceDropPreview.previewText ??
-															displayedSurfaceDropPreview.label}
-													</div>
-												{:else if displayedSurfaceDropPreview.genericWidgetKind === 'slider'}
-													<div class="dashboard-drop-preview-slider">
-														<span class="dashboard-drop-preview-slider-label"
-															>{displayedSurfaceDropPreview.label}</span>
-														<span class="dashboard-drop-preview-slider-track"><span></span></span>
-													</div>
-												{:else if displayedSurfaceDropPreview.genericWidgetKind === 'checkbox'}
-													<div class="dashboard-drop-preview-checkbox">
-														<span class="dashboard-drop-preview-checkbox-box"></span>
-														<span
-															>{displayedSurfaceDropPreview.previewText ??
-																displayedSurfaceDropPreview.label}</span>
-													</div>
-												{:else if displayedSurfaceDropPreview.genericWidgetKind === 'textInput'}
-													<div
-														class="dashboard-drop-preview-input"
-														class:multiline={displayedSurfaceDropPreview.multiline}>
-														<span
-															>{displayedSurfaceDropPreview.previewPlaceholder ??
-																displayedSurfaceDropPreview.label}</span>
-													</div>
-												{:else}
-													<div class="dashboard-drop-preview-text">
-														{displayedSurfaceDropPreview.previewText ??
-															displayedSurfaceDropPreview.label}
-													</div>
-												{/if}
-											</div>
-										</div>
-									</div>
-								</div>
-							{/if}
-						</div>
+					{#if hasInsideWidgetLabel}
+						<span class="dashboard-container-inline-label">{widgetLabelText}</span>
 					{/if}
-
-					{#if childWidgets.length === 0 && !displayedSurfaceDropPreview}
-						<div class="dashboard-empty-inline">Drop widgets here or use the add menu.</div>
-					{/if}
-
-					{#if surfaceDragDepth > 0 && (!displayedSurfaceDropPreview || layoutKind !== 'free')}
-						<div class="dashboard-drop-indicator">Drop to add a child widget</div>
-					{/if}
-
-					{#if marqueeSelection}
-						<div class="dashboard-marquee-selection" style={marqueeStyle} aria-hidden="true"></div>
-					{/if}
+					{@render dashboardSurfaceHitZones()}
+					{@render dashboardSurfaceContent(true, 'Drop to add a child widget', true)}
 				</div>
 			</div>
 		</div>
@@ -2958,12 +3829,14 @@
 		class:free-layout-active={freeLayoutInteraction !== null}
 		class:editable-free={supportsFreePlacement}
 		class:run-mode={!editMode}
+		data-local-context-menu
 		data-node-id={liveNode.node_id}
 		data-dashboard-surface-id={String(parentNode?.node_id ?? '')}
 		bind:this={widgetShellElement}
 		style={widgetShellStyle}
 		role="button"
 		tabindex={editMode ? 0 : -1}
+		oncontextmenu={handleWidgetContextMenu}
 		ondragenter={(event) => {
 			handleBindingDragEnter(event, canBindNodeWidget);
 		}}
@@ -3033,12 +3906,14 @@
 		class:free-layout-active={freeLayoutInteraction !== null}
 		class:editable-free={supportsFreePlacement}
 		class:run-mode={!editMode}
+		data-local-context-menu
 		data-node-id={liveNode.node_id}
 		data-dashboard-surface-id={String(parentNode?.node_id ?? '')}
 		bind:this={widgetShellElement}
 		style={widgetShellStyle}
 		role="button"
 		tabindex={editMode ? 0 : -1}
+		oncontextmenu={handleWidgetContextMenu}
 		ondragenter={(event) => {
 			handleBindingDragEnter(event, canBindGenericWidget);
 		}}
@@ -3209,6 +4084,14 @@
 {/if}
 
 <style>
+	:global(.gc-dashboard-context-menu) {
+		min-inline-size: 12rem;
+	}
+
+	:global(.gc-dashboard-context-menu .gc-context-item) {
+		font-size: 0.78rem;
+	}
+
 	.dashboard-surface {
 		position: relative;
 		inline-size: 100%;
@@ -3300,7 +4183,7 @@
 	}
 
 	.dashboard-page.edit-bleed-visible,
-	.dashboard-page.edit-bleed-visible .dashboard-layout {
+	.dashboard-page.edit-bleed-visible > .dashboard-layout {
 		overflow: visible;
 	}
 
@@ -3317,12 +4200,31 @@
 	}
 
 	.dashboard-page.surface-target-active,
-	.dashboard-container-surface.surface-target-active {
+	.dashboard-container-surface.surface-target-active,
+	.dashboard-surface.dashboard-reparent-target {
 		border-color: rgb(from var(--gc-color-focus) r g b / 0.86);
 		box-shadow: 0 0 0 0.08rem rgb(from var(--gc-color-focus) r g b / 0.28);
 	}
 
-	.dashboard-surface.free .dashboard-layout {
+	.dashboard-surface.surface-target-active::after,
+	.dashboard-surface.dashboard-reparent-target::after {
+		content: attr(data-dashboard-drop-message);
+		position: absolute;
+		inset-block-start: 0.55rem;
+		inset-inline-end: 0.55rem;
+		z-index: 4;
+		padding: 0.18rem 0.5rem;
+		border-radius: 999rem;
+		background: rgb(from var(--gc-color-focus) r g b / 0.86);
+		color: white;
+		font-size: 0.6rem;
+		font-weight: 700;
+		letter-spacing: 0.05em;
+		text-transform: uppercase;
+		pointer-events: none;
+	}
+
+	.dashboard-surface.free > .dashboard-layout {
 		position: relative;
 		inline-size: 100%;
 		block-size: 100%;
@@ -3330,21 +4232,26 @@
 		z-index: 1;
 	}
 
-	.dashboard-surface.free .dashboard-slot {
+	.dashboard-surface.free > .dashboard-layout > .dashboard-slot {
 		position: absolute;
 		min-inline-size: 0;
 		min-block-size: 0;
 	}
 
-	.dashboard-surface.grid .dashboard-layout {
+	.dashboard-surface.grid > .dashboard-layout {
 		display: grid;
+		grid-auto-flow: var(--dashboard-grid-flow);
 		grid-template-columns: repeat(var(--dashboard-grid-columns), minmax(0, 1fr));
-		grid-auto-rows: minmax(5rem, auto);
+		grid-template-rows: repeat(var(--dashboard-grid-rows), minmax(0, 1fr));
 		gap: var(--dashboard-gap-y) var(--dashboard-gap-x);
+		inline-size: 100%;
+		block-size: 100%;
+		min-inline-size: 0;
+		min-block-size: 100%;
 	}
 
-	.dashboard-surface.horizontal .dashboard-layout,
-	.dashboard-surface.vertical .dashboard-layout {
+	.dashboard-surface.horizontal > .dashboard-layout,
+	.dashboard-surface.vertical > .dashboard-layout {
 		display: flex;
 		flex: 1 1 auto;
 		gap: var(--dashboard-gap-y) var(--dashboard-gap-x);
@@ -3364,14 +4271,14 @@
 		overflow-y: auto;
 	}
 
-	.dashboard-surface.horizontal .dashboard-layout {
+	.dashboard-surface.horizontal > .dashboard-layout {
 		flex-direction: row;
 		flex-wrap: nowrap;
 		align-items: stretch;
 		align-content: flex-start;
 	}
 
-	.dashboard-surface.vertical .dashboard-layout {
+	.dashboard-surface.vertical > .dashboard-layout {
 		flex-direction: column;
 		align-items: stretch;
 		justify-content: flex-start;
@@ -3445,25 +4352,70 @@
 		padding-inline-start: 0.1rem;
 	}
 
-	.dashboard-surface.horizontal .dashboard-slot,
+	.dashboard-surface-hit-zones {
+		position: absolute;
+		inset: 0;
+		z-index: 2;
+		pointer-events: none;
+	}
+
+	.dashboard-surface-hit-zone {
+		position: absolute;
+		pointer-events: auto;
+		background: transparent;
+	}
+
+	.dashboard-surface-hit-zone.top,
+	.dashboard-surface-hit-zone.bottom {
+		inset-inline: 0;
+		block-size: 0.75rem;
+	}
+
+	.dashboard-surface-hit-zone.top {
+		inset-block-start: 0;
+	}
+
+	.dashboard-surface-hit-zone.bottom {
+		inset-block-end: 0;
+	}
+
+	.dashboard-surface-hit-zone.left,
+	.dashboard-surface-hit-zone.right {
+		inset-block: 0.75rem;
+		inline-size: 0.75rem;
+	}
+
+	.dashboard-surface-hit-zone.left {
+		inset-inline-start: 0;
+	}
+
+	.dashboard-surface-hit-zone.right {
+		inset-inline-end: 0;
+	}
+
+	.dashboard-surface.horizontal > .dashboard-layout > .dashboard-slot,
 	.dashboard-tab-body .dashboard-slot,
 	.dashboard-tab-body.compact .dashboard-slot {
 		block-size: 100%;
 	}
 
-	.dashboard-surface.horizontal .dashboard-slot {
+	.dashboard-surface.horizontal > .dashboard-layout > .dashboard-slot {
 		flex: 0 0 auto;
 		align-self: stretch;
 		block-size: 100%;
 	}
 
-	.dashboard-surface.vertical .dashboard-slot,
-	.dashboard-surface.grid .dashboard-slot,
+	.dashboard-surface.vertical > .dashboard-layout > .dashboard-slot,
+	.dashboard-surface.grid > .dashboard-layout > .dashboard-slot,
 	.dashboard-accordion .dashboard-slot {
 		inline-size: 100%;
 	}
 
-	.dashboard-surface.vertical .dashboard-slot {
+	.dashboard-surface.grid > .dashboard-layout > .dashboard-slot {
+		block-size: 100%;
+	}
+
+	.dashboard-surface.vertical > .dashboard-layout > .dashboard-slot {
 		flex: 0 0 auto;
 		inline-size: 100%;
 	}
@@ -3513,6 +4465,10 @@
 	}
 
 	.dashboard-widget-shell.selected.editable-free {
+		overflow: visible;
+	}
+
+	.dashboard-widget-shell.dashboard-descendant-free-layout-active {
 		overflow: visible;
 	}
 
@@ -3569,6 +4525,8 @@
 	}
 
 	.dashboard-widget-label {
+		position: relative;
+		z-index: 1;
 		display: flex;
 		flex: 0 0 auto;
 		align-items: center;
@@ -3597,13 +4555,20 @@
 
 	.dashboard-widget-frame.label-left > .dashboard-widget-label,
 	.dashboard-widget-frame.label-right > .dashboard-widget-label {
-		inline-size: min(7rem, 36%);
+		inline-size: auto;
+		block-size: 100%;
+		min-inline-size: 2rem;
+		padding: 0.65rem 0.45rem;
 		justify-content: center;
 		text-align: center;
+		writing-mode: vertical-rl;
+		text-orientation: mixed;
+		white-space: normal;
 	}
 
 	.dashboard-widget-frame.label-left > .dashboard-widget-label {
 		border-inline-end: solid 0.06rem rgb(from var(--gc-color-panel-outline) r g b / 0.24);
+		transform: rotate(180deg);
 	}
 
 	.dashboard-widget-frame.label-right > .dashboard-widget-label {
@@ -3681,8 +4646,7 @@
 	}
 
 	.dashboard-drop-indicator,
-	.dashboard-drop-preview-kind,
-	.dashboard-empty-state .eyebrow {
+	.dashboard-drop-preview-kind {
 		text-transform: uppercase;
 		letter-spacing: 0.08em;
 		font-size: 0.62rem;
@@ -3754,6 +4718,29 @@
 		min-block-size: 4rem;
 	}
 
+	.dashboard-container-surface.with-inline-label {
+		padding-block-start: 2rem;
+	}
+
+	.dashboard-container-inline-label {
+		position: absolute;
+		inset-inline-start: 0.6rem;
+		inset-block-start: 0.55rem;
+		z-index: 4;
+		max-inline-size: calc(100% - 1.2rem);
+		padding: 0.26rem 0.5rem;
+		border-radius: 999rem;
+		background: rgb(from var(--gc-color-background) r g b / 0.82);
+		box-shadow: 0 0.2rem 0.6rem rgb(from var(--gc-color-background) r g b / 0.16);
+		font-size: 0.66rem;
+		font-weight: 600;
+		line-height: 1.1;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+		pointer-events: none;
+	}
+
 	.dashboard-anchor-guides {
 		position: absolute;
 		inset: 0;
@@ -3820,7 +4807,6 @@
 		border-radius: 0.2rem;
 	}
 
-	.dashboard-empty-state,
 	.dashboard-empty-inline,
 	.dashboard-drop-indicator {
 		display: flex;
@@ -3830,23 +4816,6 @@
 		color: var(--gc-color-text);
 	}
 
-	.dashboard-empty-state {
-		position: absolute;
-		inset: 0.8rem;
-		border-radius: 0.8rem;
-		flex-direction: column;
-		gap: 0.4rem;
-		border: dashed 0.08rem rgb(from var(--gc-color-panel-outline) r g b / 0.6);
-		background: rgb(from var(--gc-color-background) r g b / 0.16);
-	}
-
-	.dashboard-empty-state h3 {
-		margin: 0;
-		font-size: 1.05rem;
-		color: #eef4ff;
-	}
-
-	.dashboard-empty-state p,
 	.dashboard-empty-inline {
 		margin: 0;
 		font-size: 0.76rem;
@@ -3862,6 +4831,17 @@
 		padding: 0.55rem;
 	}
 
+	.dashboard-surface-empty {
+		position: absolute;
+		inset: 0;
+		inline-size: 100%;
+		block-size: 100%;
+		min-block-size: 0;
+		box-sizing: border-box;
+		pointer-events: none;
+		z-index: 1;
+	}
+
 	.dashboard-drop-indicator {
 		position: absolute;
 		inset: 0.7rem;
@@ -3875,6 +4855,26 @@
 	.dashboard-drop-preview {
 		pointer-events: none;
 		z-index: 2;
+	}
+
+	.dashboard-drop-preview-flow,
+	.dashboard-drop-preview-panel {
+		min-inline-size: 0;
+		min-block-size: 4.75rem;
+	}
+
+	.dashboard-drop-preview-flow {
+		align-self: stretch;
+	}
+
+	.dashboard-drop-preview-panel {
+		flex: 1 1 auto;
+		inline-size: 100%;
+	}
+
+	.dashboard-drop-preview-tab {
+		pointer-events: none;
+		border-style: dashed;
 	}
 
 	.dashboard-drop-preview.is-committing {

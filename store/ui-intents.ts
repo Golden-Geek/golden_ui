@@ -144,6 +144,21 @@ export const sendMoveNodeIntent = async (
 	});
 };
 
+export const sendDuplicateNodeIntent = async (
+	source: NodeId,
+	new_parent: NodeId,
+	new_prev_sibling?: NodeId,
+	label?: string
+): Promise<boolean> => {
+	return sendUiIntent({
+		kind: 'duplicateNode',
+		source,
+		new_parent,
+		new_prev_sibling,
+		label
+	});
+};
+
 export const sendCreateUserItemIntent = async (
 	parent: NodeId,
 	item: UiCreatableUserItem
