@@ -90,6 +90,10 @@
 		knownChildIds: NodeId[];
 		knownDirectChildIds: NodeId[];
 	};
+	type WidgetMovePreviewEventDetail = {
+		surfaceNodeId: NodeId | null;
+		preview: SurfaceDropPreview | null;
+	};
 	type DashboardContextMenuScope = 'surface' | 'widget';
 	type DashboardContextMenuState = {
 		open: boolean;
@@ -198,6 +202,7 @@
 	let pageViewportSize = $state({ width: 0, height: 0 });
 	let pageViewportResizeFrame = $state<number | null>(null);
 	let surfaceDropPreview = $state<SurfaceDropPreview | null>(null);
+	let widgetMoveSurfacePreview = $state<SurfaceDropPreview | null>(null);
 	let pendingSurfaceDrop = $state<PendingSurfaceDrop | null>(null);
 	let dashboardContextMenu = $state<DashboardContextMenuState>({
 		open: false,
@@ -207,13 +212,10 @@
 		surfacePlacement: null
 	});
 	let displayedSurfaceDropPreview = $derived(
-		surfaceDropPreview ?? pendingSurfaceDrop?.preview ?? null
+		surfaceDropPreview ?? widgetMoveSurfacePreview ?? pendingSurfaceDrop?.preview ?? null
 	);
 	let rendersInlineSurfaceDropPreview = $derived.by(() => {
-		if (!displayedSurfaceDropPreview) {
-			return false;
-		}
-		return layoutKind === 'free' || layoutKind === 'tabs' || layoutKind === 'accordion';
+		return displayedSurfaceDropPreview !== null;
 	});
 	let pendingPersistedPageView = $state<DashboardPersistedPageView | null>(null);
 	let appliedPersistedPageView = $state<DashboardPersistedPageView | null>(null);
@@ -1061,9 +1063,46 @@
 		}
 	};
 
+	const widgetMovePreviewEventName = 'gc-dashboard-widget-move-preview';
+
+	const buildCurrentWidgetMovePreview = (
+		dropTarget: Pick<WidgetMoveDropTarget, 'placement' | 'targetIndex'>
+	): SurfaceDropPreview => {
+		const genericWidgetKind = isGenericWidget ? (widgetKind as DashboardGenericWidgetKind) : null;
+		return {
+			label: widgetLabelText.length > 0 ? widgetLabelText : liveNode.meta.label,
+			targetKind: isNodeWidget || isContainerWidget ? 'node' : 'parameter',
+			placement: dropTarget.placement,
+			targetIndex: dropTarget.targetIndex,
+			genericWidgetKind,
+			previewText: isGenericWidget ? genericDisplayValue || textConfig || widgetLabelText || null : null,
+			previewPlaceholder: isGenericWidget ? placeholderConfig || widgetLabelText || null : null,
+			multiline: isGenericWidget ? multiline : false
+		};
+	};
+
+	const publishWidgetMoveSurfacePreview = (
+		dropTarget: Pick<WidgetMoveDropTarget, 'surfaceNodeId' | 'placement' | 'targetIndex'> | null
+	): void => {
+		if (typeof window === 'undefined') {
+			return;
+		}
+		const detail: WidgetMovePreviewEventDetail = dropTarget
+			? {
+					surfaceNodeId: dropTarget.surfaceNodeId,
+					preview: buildCurrentWidgetMovePreview(dropTarget)
+				}
+			: {
+					surfaceNodeId: null,
+					preview: null
+				};
+		window.dispatchEvent(new CustomEvent<WidgetMovePreviewEventDetail>(widgetMovePreviewEventName, { detail }));
+	};
+
 	const clearFreeLayoutInteractionChrome = (): void => {
 		setFreeLayoutHoverSurface(null);
 		clearSurfaceInsertionIndicator();
+		publishWidgetMoveSurfacePreview(null);
 		setFreeLayoutAncestorShells(null);
 		freeLayoutDropTarget = null;
 		widgetMoveDropTarget = null;
@@ -3194,6 +3233,7 @@
 				freeLayoutDropTarget = nextDropTarget;
 				setFreeLayoutHoverSurface(nextDropTarget?.element ?? null);
 				setSurfaceInsertionIndicator(nextDropTarget?.element ?? null, nextDropTarget?.indicator ?? null);
+				publishWidgetMoveSurfacePreview(nextDropTarget);
 				if (nextDropTarget) {
 					cancelScheduledFreeLayoutCommit();
 					return;
@@ -3279,6 +3319,7 @@
 			widgetMoveDropTarget = nextDropTarget;
 			setFreeLayoutHoverSurface(nextDropTarget?.element ?? null);
 			setSurfaceInsertionIndicator(nextDropTarget?.element ?? null, nextDropTarget?.indicator ?? null);
+			publishWidgetMoveSurfacePreview(nextDropTarget);
 		};
 
 		const finishInteraction = (event: PointerEvent): void => {
@@ -3474,6 +3515,27 @@
 		return () => {
 			window.removeEventListener('dragend', resetSurfacePreview, true);
 			window.removeEventListener('drop', resetSurfacePreview, true);
+		};
+	});
+
+	$effect(() => {
+		if (typeof window === 'undefined' || !isLayoutSurface) {
+			widgetMoveSurfacePreview = null;
+			return;
+		}
+
+		const handleWidgetMovePreview = (event: Event): void => {
+			const detail = (event as CustomEvent<WidgetMovePreviewEventDetail>).detail;
+			if (!detail || detail.surfaceNodeId !== liveNode.node_id) {
+				widgetMoveSurfacePreview = null;
+				return;
+			}
+			widgetMoveSurfacePreview = detail.preview;
+		};
+
+		window.addEventListener(widgetMovePreviewEventName, handleWidgetMovePreview);
+		return () => {
+			window.removeEventListener(widgetMovePreviewEventName, handleWidgetMovePreview);
 		};
 	});
 
@@ -3913,6 +3975,28 @@
 
 	const slotStyle = (child: UiNodeDto): string =>
 		placementStyle(getDashboardPlacement(graph, child));
+	const inlineSurfaceDropPreviewStyle = (): string =>
+		displayedSurfaceDropPreview ? placementStyle(displayedSurfaceDropPreview.placement) : '';
+
+	const shouldRenderSurfaceDropPreviewBeforeIndex = (index: number): boolean => {
+		if (!rendersInlineSurfaceDropPreview || !displayedSurfaceDropPreview) {
+			return false;
+		}
+		if (displayedSurfaceDropPreview.targetIndex === null) {
+			return false;
+		}
+		return displayedSurfaceDropPreview.targetIndex === index;
+	};
+
+	const shouldRenderSurfaceDropPreviewAtEnd = (): boolean => {
+		if (!rendersInlineSurfaceDropPreview || !displayedSurfaceDropPreview) {
+			return false;
+		}
+		return (
+			displayedSurfaceDropPreview.targetIndex === null ||
+			displayedSurfaceDropPreview.targetIndex >= childWidgets.length
+		);
+	};
 
 	const widgetKind = $derived.by(() => {
 		const widgetKindParam = getDirectParam(graph, liveNode, 'widget_kind');
@@ -4365,7 +4449,16 @@
 )}
 	{#if layoutKind === 'tabs'}
 		<div class="dashboard-tab-strip" class:compact={compact}>
-			{#each childWidgets as child}
+			{#each childWidgets as child, index}
+				{#if shouldRenderSurfaceDropPreviewBeforeIndex(index)}
+					<button
+						type="button"
+						class="selected dashboard-drop-preview-tab"
+						tabindex="-1"
+						aria-hidden="true">
+						{displayedSurfaceDropPreview?.label}
+					</button>
+				{/if}
 				<button
 					type="button"
 					class:selected={!displayedSurfaceDropPreview && activeTabNodeId === child.node_id}
@@ -4374,13 +4467,13 @@
 						activeTabNodeId = child.node_id;
 					}}>{child.meta.label}</button>
 			{/each}
-			{#if displayedSurfaceDropPreview}
+			{#if shouldRenderSurfaceDropPreviewAtEnd()}
 				<button
 					type="button"
 					class="selected dashboard-drop-preview-tab"
 					tabindex="-1"
 					aria-hidden="true">
-					{displayedSurfaceDropPreview.label}
+					{displayedSurfaceDropPreview?.label}
 				</button>
 			{/if}
 		</div>
@@ -4401,7 +4494,19 @@
 		</div>
 	{:else if layoutKind === 'accordion'}
 		<div class="dashboard-accordion" class:compact={compact}>
-			{#each childWidgets as child}
+			{#each childWidgets as child, index}
+				{#if shouldRenderSurfaceDropPreviewBeforeIndex(index)}
+					<section class="dashboard-accordion-item dashboard-drop-preview-accordion">
+						<button
+							type="button"
+							class="selected dashboard-drop-preview-tab"
+							tabindex="-1"
+							aria-hidden="true">
+							{displayedSurfaceDropPreview?.label}
+						</button>
+						{@render dashboardSurfaceDropPreviewSlot('', 'dashboard-drop-preview-panel')}
+					</section>
+				{/if}
 				<section class="dashboard-accordion-item">
 					<button
 						type="button"
@@ -4419,14 +4524,14 @@
 					{/if}
 				</section>
 			{/each}
-			{#if displayedSurfaceDropPreview}
+			{#if shouldRenderSurfaceDropPreviewAtEnd()}
 				<section class="dashboard-accordion-item dashboard-drop-preview-accordion">
 					<button
 						type="button"
 						class="selected dashboard-drop-preview-tab"
 						tabindex="-1"
 						aria-hidden="true">
-						{displayedSurfaceDropPreview.label}
+						{displayedSurfaceDropPreview?.label}
 					</button>
 					{@render dashboardSurfaceDropPreviewSlot('', 'dashboard-drop-preview-panel')}
 				</section>
@@ -4434,16 +4539,22 @@
 		</div>
 	{:else}
 		<div class="dashboard-layout">
-			{#each childWidgets as child}
+			{#each childWidgets as child, index}
+				{#if shouldRenderSurfaceDropPreviewBeforeIndex(index)}
+					{@render dashboardSurfaceDropPreviewSlot(
+						inlineSurfaceDropPreviewStyle(),
+						layoutKind === 'free' ? '' : 'dashboard-drop-preview-flow'
+					)}
+				{/if}
 				<div class="dashboard-slot" style={slotStyle(child)}>
 					<div class="dashboard-slot-fill">
 						<DashboardCanvasSelf node={child} {editMode} />
 					</div>
 				</div>
 			{/each}
-			{#if rendersInlineSurfaceDropPreview && displayedSurfaceDropPreview}
+			{#if shouldRenderSurfaceDropPreviewAtEnd()}
 				{@render dashboardSurfaceDropPreviewSlot(
-					placementStyle(displayedSurfaceDropPreview.placement),
+					inlineSurfaceDropPreviewStyle(),
 					layoutKind === 'free' ? '' : 'dashboard-drop-preview-flow'
 				)}
 			{/if}
