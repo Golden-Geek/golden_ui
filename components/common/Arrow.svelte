@@ -4,7 +4,6 @@
 		color = 'rgba(255, 255, 255, 0.5)'
 	}: { direction: 'left' | 'right' | 'up' | 'down'; color?: string } = $props();
 
-	$inspect({ direction, color });
 </script>
 
 <svg class="arrow {direction}" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
