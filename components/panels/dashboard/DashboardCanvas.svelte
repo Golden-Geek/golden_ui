@@ -4,6 +4,7 @@
 	import { appState, type SelectionMode } from '../../../store/workbench.svelte';
 	import {
 		createUiEditSession,
+		sendPatchMetaIntent,
 		sendRemoveNodeIntent,
 		sendSetParamIntent
 	} from '../../../store/ui-intents';
@@ -78,6 +79,7 @@
 		label: string;
 		targetKind: DashboardDragPayload['kind'];
 		placement: DashboardWidgetCreationPlacement;
+		targetIndex: number | null;
 		genericWidgetKind: DashboardGenericWidgetKind | null;
 		previewText: string | null;
 		previewPlaceholder: string | null;
@@ -207,6 +209,12 @@
 	let displayedSurfaceDropPreview = $derived(
 		surfaceDropPreview ?? pendingSurfaceDrop?.preview ?? null
 	);
+	let rendersInlineSurfaceDropPreview = $derived.by(() => {
+		if (!displayedSurfaceDropPreview) {
+			return false;
+		}
+		return layoutKind === 'free' || layoutKind === 'tabs' || layoutKind === 'accordion';
+	});
 	let pendingPersistedPageView = $state<DashboardPersistedPageView | null>(null);
 	let appliedPersistedPageView = $state<DashboardPersistedPageView | null>(null);
 	type ObservedAnchorPlacement = {
@@ -258,6 +266,8 @@
 		surfaceNodeId: NodeId;
 		element: HTMLElement;
 		placement: DashboardWidgetCreationPlacement;
+		targetIndex: number | null;
+		indicator: SurfaceInsertionIndicator | null;
 	};
 	type FreeLayoutInteraction = {
 		pointerId: number;
@@ -275,6 +285,47 @@
 		surfaceScaleY: number;
 		viewportWidthPx: number;
 		viewportHeightPx: number;
+	};
+	type SurfaceInsertionIndicator = {
+		left: number;
+		top: number;
+		width: number;
+		height: number;
+	};
+	type SurfaceInsertionTarget = {
+		targetIndex: number;
+		indicator: SurfaceInsertionIndicator | null;
+	};
+	type WidgetMoveDropTarget = {
+		surfaceNodeId: NodeId;
+		element: HTMLElement;
+		layoutKind: DashboardLayoutKind;
+		targetIndex: number | null;
+		placement: DashboardWidgetCreationPlacement;
+		indicator: SurfaceInsertionIndicator | null;
+	};
+	type WidgetMoveInteraction = {
+		pointerId: number;
+		sourceSurfaceNodeId: NodeId;
+		startClient: [number, number];
+	};
+	type ConstrainedResizeInteraction = {
+		pointerId: number;
+		axis: 'x' | 'y';
+		sign: -1 | 1;
+		startClient: [number, number];
+		paramNodeId: NodeId;
+		paramBehaviour: ParamEventBehaviour;
+		startSize: CssValueData;
+		startSizePx: number;
+		rootRemPx: number;
+		surfaceWidthPx: number;
+		surfaceHeightPx: number;
+		surfaceScaleX: number;
+		surfaceScaleY: number;
+		viewportWidthPx: number;
+		viewportHeightPx: number;
+		lastSent: CssValueData | null;
 	};
 	type SurfaceMetrics = {
 		width: number;
@@ -320,6 +371,9 @@
 	let freeLayoutInteraction = $state<FreeLayoutInteraction | null>(null);
 	let freeLayoutPreview = $state<FreeLayoutPreviewSet | null>(null);
 	let freeLayoutDropTarget = $state<FreeLayoutDropTarget | null>(null);
+	let widgetMoveInteraction = $state<WidgetMoveInteraction | null>(null);
+	let widgetMoveDropTarget = $state<WidgetMoveDropTarget | null>(null);
+	let constrainedResizeInteraction = $state<ConstrainedResizeInteraction | null>(null);
 	let marqueeSelection = $state<MarqueeSelectionState | null>(null);
 	let surfacePress = $state<SurfacePressState | null>(null);
 	let pageView = $state<DashboardPageViewState>({
@@ -330,6 +384,7 @@
 		zoom: 1
 	});
 	let freeLayoutHoverSurfaceElement: HTMLElement | null = null;
+	let surfaceInsertionIndicatorElement: HTMLElement | null = null;
 	let freeLayoutAncestorShells: HTMLElement[] = [];
 
 	const minFreeWidgetWidthRem = 0.5;
@@ -455,9 +510,41 @@
 		}
 	};
 
+	const clearSurfaceInsertionIndicator = (): void => {
+		if (!surfaceInsertionIndicatorElement) {
+			return;
+		}
+		surfaceInsertionIndicatorElement.classList.remove('dashboard-flow-drop-target');
+		surfaceInsertionIndicatorElement.style.removeProperty('--dashboard-flow-drop-indicator-left');
+		surfaceInsertionIndicatorElement.style.removeProperty('--dashboard-flow-drop-indicator-top');
+		surfaceInsertionIndicatorElement.style.removeProperty('--dashboard-flow-drop-indicator-width');
+		surfaceInsertionIndicatorElement.style.removeProperty('--dashboard-flow-drop-indicator-height');
+		surfaceInsertionIndicatorElement = null;
+	};
+
+	const setSurfaceInsertionIndicator = (
+		surfaceElement: HTMLElement | null,
+		indicator: SurfaceInsertionIndicator | null
+	): void => {
+		if (surfaceInsertionIndicatorElement && surfaceInsertionIndicatorElement !== surfaceElement) {
+			clearSurfaceInsertionIndicator();
+		}
+		if (!surfaceElement || !indicator) {
+			clearSurfaceInsertionIndicator();
+			return;
+		}
+		surfaceInsertionIndicatorElement = surfaceElement;
+		surfaceElement.classList.add('dashboard-flow-drop-target');
+		surfaceElement.style.setProperty('--dashboard-flow-drop-indicator-left', `${indicator.left}px`);
+		surfaceElement.style.setProperty('--dashboard-flow-drop-indicator-top', `${indicator.top}px`);
+		surfaceElement.style.setProperty('--dashboard-flow-drop-indicator-width', `${indicator.width}px`);
+		surfaceElement.style.setProperty('--dashboard-flow-drop-indicator-height', `${indicator.height}px`);
+	};
+
 	const clearSurfaceDropState = (): void => {
 		surfaceDragDepth = 0;
 		surfaceDropPreview = null;
+		clearSurfaceInsertionIndicator();
 	};
 
 	const pointFallsWithinElement = (
@@ -609,6 +696,345 @@
 		);
 	};
 
+	type SurfaceOrderAnchor = {
+		nodeId: NodeId;
+		rect: DOMRect;
+	};
+
+	const resolveSurfaceContentElement = (
+		surfaceElement: HTMLElement,
+		targetLayoutKind: DashboardLayoutKind
+	): HTMLElement => {
+		if (targetLayoutKind === 'tabs') {
+			return (
+				surfaceElement.querySelector<HTMLElement>('.dashboard-tab-strip') ?? surfaceElement
+			);
+		}
+		if (targetLayoutKind === 'accordion') {
+			return (
+				surfaceElement.querySelector<HTMLElement>('.dashboard-accordion') ?? surfaceElement
+			);
+		}
+		return getDirectDashboardLayoutElement(surfaceElement) ?? surfaceElement;
+	};
+
+	const resolveSurfaceOrderAnchors = (
+		surfaceNode: UiNodeDto,
+		surfaceElement: HTMLElement,
+		targetLayoutKind: DashboardLayoutKind,
+		ignoredNodeIds: ReadonlySet<NodeId>
+	): SurfaceOrderAnchor[] => {
+		if (!graph) {
+			return [];
+		}
+		const orderedChildren = getDirectItemChildren(graph, surfaceNode).filter(
+			(child) => !ignoredNodeIds.has(child.node_id)
+		);
+		if (orderedChildren.length === 0) {
+			return [];
+		}
+
+		if (targetLayoutKind === 'tabs') {
+			const buttons = Array.from(
+				surfaceElement.querySelectorAll<HTMLElement>(
+					'.dashboard-tab-strip > button:not(.dashboard-drop-preview-tab)'
+				)
+			);
+			return orderedChildren
+				.map((child, index) => {
+					const button = buttons[index];
+					return button
+						? {
+								nodeId: child.node_id,
+								rect: button.getBoundingClientRect()
+							}
+						: null;
+				})
+				.filter((anchor): anchor is SurfaceOrderAnchor => anchor !== null);
+		}
+
+		if (targetLayoutKind === 'accordion') {
+			const sections = Array.from(
+				surfaceElement.querySelectorAll<HTMLElement>('.dashboard-accordion > .dashboard-accordion-item')
+			);
+			return orderedChildren
+				.map((child, index) => {
+					const section = sections[index];
+					if (!section) {
+						return null;
+					}
+					const button = section.querySelector<HTMLElement>('button');
+					const anchorElement = button ?? section;
+					return {
+						nodeId: child.node_id,
+						rect: anchorElement.getBoundingClientRect()
+					};
+				})
+				.filter((anchor): anchor is SurfaceOrderAnchor => anchor !== null);
+		}
+
+		return orderedChildren
+			.map((child) => {
+				const shell = surfaceElement.querySelector<HTMLElement>(
+					`.dashboard-widget-shell[data-node-id="${String(child.node_id)}"][data-dashboard-surface-id="${String(surfaceNode.node_id)}"]`
+				);
+				return shell
+					? {
+							nodeId: child.node_id,
+							rect: shell.getBoundingClientRect()
+						}
+					: null;
+			})
+			.filter((anchor): anchor is SurfaceOrderAnchor => anchor !== null);
+	};
+
+	const buildVerticalInsertionIndicator = (
+		surfaceRect: DOMRect,
+		trackRect: DOMRect,
+		surfaceMetrics: SurfaceMetrics,
+		xPx: number,
+		targetRect?: DOMRect
+	): SurfaceInsertionIndicator => {
+		const rootRemPx = getRootRemPixels();
+		const scaleX = Math.max(surfaceMetrics.scaleX, 1e-6);
+		const scaleY = Math.max(surfaceMetrics.scaleY, 1e-6);
+		const trackTop = (trackRect.top - surfaceRect.top) / scaleY;
+		const trackBottom = (trackRect.bottom - surfaceRect.top) / scaleY;
+		const targetTop = targetRect ? (targetRect.top - surfaceRect.top) / scaleY : null;
+		const targetBottom = targetRect ? (targetRect.bottom - surfaceRect.top) / scaleY : null;
+		const top = Math.max(
+			trackTop + 0.3 * rootRemPx,
+			0
+		);
+		const indicatorTop = targetTop !== null
+			? Math.max(targetTop + 0.3 * rootRemPx, top)
+			: top;
+		const bottom = targetBottom !== null
+			? Math.min(
+					targetBottom - 0.3 * rootRemPx,
+					trackBottom - 0.3 * rootRemPx
+				)
+			: trackBottom - 0.3 * rootRemPx;
+		const height = Math.max(bottom - indicatorTop, 1.5 * rootRemPx);
+		return {
+			left: Math.max(0, xPx / scaleX - 0.1 * rootRemPx),
+			top: indicatorTop,
+			width: 0.2 * rootRemPx,
+			height
+		};
+	};
+
+	const buildHorizontalInsertionIndicator = (
+		surfaceRect: DOMRect,
+		trackRect: DOMRect,
+		surfaceMetrics: SurfaceMetrics,
+		yPx: number,
+		targetRect?: DOMRect
+	): SurfaceInsertionIndicator => {
+		const rootRemPx = getRootRemPixels();
+		const scaleX = Math.max(surfaceMetrics.scaleX, 1e-6);
+		const scaleY = Math.max(surfaceMetrics.scaleY, 1e-6);
+		const trackLeft = (trackRect.left - surfaceRect.left) / scaleX;
+		const trackRight = (trackRect.right - surfaceRect.left) / scaleX;
+		const targetLeft = targetRect ? (targetRect.left - surfaceRect.left) / scaleX : null;
+		const targetRight = targetRect ? (targetRect.right - surfaceRect.left) / scaleX : null;
+		const left = Math.max(
+			trackLeft + 0.3 * rootRemPx,
+			0
+		);
+		const indicatorLeft = targetLeft !== null
+			? Math.max(targetLeft + 0.3 * rootRemPx, left)
+			: left;
+		const right = targetRight !== null
+			? Math.min(
+					targetRight - 0.3 * rootRemPx,
+					trackRight - 0.3 * rootRemPx
+				)
+			: trackRight - 0.3 * rootRemPx;
+		const width = Math.max(right - indicatorLeft, 1.5 * rootRemPx);
+		return {
+			left: indicatorLeft,
+			top: Math.max(0, yPx / scaleY - 0.1 * rootRemPx),
+			width,
+			height: 0.2 * rootRemPx
+		};
+	};
+
+	const resolveSurfaceInsertionTarget = (
+		surfaceNode: UiNodeDto,
+		surfaceElement: HTMLElement,
+		targetLayoutKind: DashboardLayoutKind,
+		clientX: number,
+		clientY: number,
+		ignoredNodeIds: ReadonlySet<NodeId>
+	): SurfaceInsertionTarget | null => {
+		if (!graph) {
+			return null;
+		}
+		if (targetLayoutKind === 'free') {
+			return {
+				targetIndex: getDirectItemChildren(graph, surfaceNode).length,
+				indicator: null
+			};
+		}
+
+		const rootRemPx = getRootRemPixels();
+		const surfaceRect = surfaceElement.getBoundingClientRect();
+		const surfaceMetrics = getElementSurfaceMetrics(surfaceElement, rootRemPx);
+		const trackElement = resolveSurfaceContentElement(surfaceElement, targetLayoutKind);
+		const trackRect = trackElement.getBoundingClientRect();
+		const anchors = resolveSurfaceOrderAnchors(
+			surfaceNode,
+			surfaceElement,
+			targetLayoutKind,
+			ignoredNodeIds
+		);
+
+		if (anchors.length === 0) {
+			if (targetLayoutKind === 'horizontal' || targetLayoutKind === 'tabs') {
+				return {
+					targetIndex: 0,
+					indicator: buildVerticalInsertionIndicator(
+						surfaceRect,
+						trackRect,
+						surfaceMetrics,
+						trackRect.left - surfaceRect.left + 0.5 * rootRemPx
+					)
+				};
+			}
+			return {
+				targetIndex: 0,
+				indicator: buildHorizontalInsertionIndicator(
+					surfaceRect,
+					trackRect,
+					surfaceMetrics,
+					trackRect.top - surfaceRect.top + 0.5 * rootRemPx
+				)
+			};
+		}
+
+		if (targetLayoutKind === 'horizontal' || targetLayoutKind === 'tabs') {
+			for (let index = 0; index < anchors.length; index += 1) {
+				const anchor = anchors[index];
+				if (clientX < anchor.rect.left + anchor.rect.width * 0.5) {
+					return {
+						targetIndex: index,
+						indicator: buildVerticalInsertionIndicator(
+							surfaceRect,
+							trackRect,
+							surfaceMetrics,
+							anchor.rect.left - surfaceRect.left,
+							anchor.rect
+						)
+					};
+				}
+			}
+			const last = anchors[anchors.length - 1];
+			return {
+				targetIndex: anchors.length,
+				indicator: buildVerticalInsertionIndicator(
+					surfaceRect,
+					trackRect,
+					surfaceMetrics,
+					last.rect.right - surfaceRect.left,
+					last.rect
+				)
+			};
+		}
+
+		if (targetLayoutKind === 'vertical' || targetLayoutKind === 'accordion') {
+			for (let index = 0; index < anchors.length; index += 1) {
+				const anchor = anchors[index];
+				if (clientY < anchor.rect.top + anchor.rect.height * 0.5) {
+					return {
+						targetIndex: index,
+						indicator: buildHorizontalInsertionIndicator(
+							surfaceRect,
+							trackRect,
+							surfaceMetrics,
+							anchor.rect.top - surfaceRect.top,
+							anchor.rect
+						)
+					};
+				}
+			}
+			const last = anchors[anchors.length - 1];
+			return {
+				targetIndex: anchors.length,
+				indicator: buildHorizontalInsertionIndicator(
+					surfaceRect,
+					trackRect,
+					surfaceMetrics,
+					last.rect.bottom - surfaceRect.top,
+					last.rect
+				)
+			};
+		}
+
+		const gridDirection = getDashboardGridSettings(graph, surfaceNode).direction;
+		if (gridDirection === 'column') {
+			for (let index = 0; index < anchors.length; index += 1) {
+				const anchor = anchors[index];
+				if (
+					clientX < anchor.rect.left ||
+					(clientX <= anchor.rect.right && clientY < anchor.rect.top + anchor.rect.height * 0.5)
+				) {
+					return {
+						targetIndex: index,
+						indicator: buildHorizontalInsertionIndicator(
+							surfaceRect,
+							trackRect,
+							surfaceMetrics,
+							anchor.rect.top - surfaceRect.top,
+							anchor.rect
+						)
+					};
+				}
+			}
+			const last = anchors[anchors.length - 1];
+			return {
+				targetIndex: anchors.length,
+				indicator: buildHorizontalInsertionIndicator(
+					surfaceRect,
+					trackRect,
+					surfaceMetrics,
+					last.rect.bottom - surfaceRect.top,
+					last.rect
+				)
+			};
+		}
+
+		for (let index = 0; index < anchors.length; index += 1) {
+			const anchor = anchors[index];
+			if (
+				clientY < anchor.rect.top ||
+				(clientY <= anchor.rect.bottom && clientX < anchor.rect.left + anchor.rect.width * 0.5)
+			) {
+				return {
+					targetIndex: index,
+					indicator: buildVerticalInsertionIndicator(
+						surfaceRect,
+						trackRect,
+						surfaceMetrics,
+						anchor.rect.left - surfaceRect.left,
+						anchor.rect
+					)
+				};
+			}
+		}
+		const last = anchors[anchors.length - 1];
+		return {
+			targetIndex: anchors.length,
+			indicator: buildVerticalInsertionIndicator(
+				surfaceRect,
+				trackRect,
+				surfaceMetrics,
+				last.rect.right - surfaceRect.left,
+				last.rect
+			)
+		};
+	};
+
 	const setFreeLayoutHoverSurface = (nextSurface: HTMLElement | null): void => {
 		if (freeLayoutHoverSurfaceElement === nextSurface) {
 			return;
@@ -637,8 +1063,10 @@
 
 	const clearFreeLayoutInteractionChrome = (): void => {
 		setFreeLayoutHoverSurface(null);
+		clearSurfaceInsertionIndicator();
 		setFreeLayoutAncestorShells(null);
 		freeLayoutDropTarget = null;
+		widgetMoveDropTarget = null;
 	};
 
 	const normalizeClientRect = (
@@ -1090,6 +1518,19 @@
 			return null;
 		}
 
+		const targetLayoutKind = getDashboardLayoutKind(graph, targetSurfaceNode, 'free');
+		const insertionTarget =
+			targetLayoutKind === 'free'
+				? null
+				: resolveSurfaceInsertionTarget(
+						targetSurfaceNode,
+						resolvedSurface.element,
+						targetLayoutKind,
+						clientX,
+						clientY,
+						new Set<NodeId>([liveNode.node_id])
+					);
+
 		return {
 			surfaceNodeId: resolvedSurface.surfaceNodeId,
 			element: resolvedSurface.element,
@@ -1099,7 +1540,65 @@
 				currentDraggedPlacement(previewSet),
 				clientX,
 				clientY
+			),
+			targetIndex: insertionTarget?.targetIndex ?? null,
+			indicator: insertionTarget?.indicator ?? null
+		};
+	};
+
+	const resolveWidgetMoveDropTargetAtPoint = (
+		clientX: number,
+		clientY: number
+	): WidgetMoveDropTarget | null => {
+		if (!graph || !editMode || !isWidget || !widgetMoveInteraction) {
+			return null;
+		}
+
+		const resolvedSurface = resolveDashboardSurfaceAtPoint(
+			clientX,
+			clientY,
+			new Set<NodeId>([liveNode.node_id])
+		);
+		if (!resolvedSurface) {
+			return null;
+		}
+
+		const targetSurfaceNode = graph.nodesById.get(resolvedSurface.surfaceNodeId);
+		if (!targetSurfaceNode) {
+			return null;
+		}
+		if (
+			!targetSurfaceNode.creatable_user_items.some(
+				(candidate) => candidate.node_type === liveNode.node_type
 			)
+		) {
+			return null;
+		}
+
+		const targetLayoutKind = getDashboardLayoutKind(graph, targetSurfaceNode, 'free');
+		const insertionTarget = resolveSurfaceInsertionTarget(
+			targetSurfaceNode,
+			resolvedSurface.element,
+			targetLayoutKind,
+			clientX,
+			clientY,
+			new Set<NodeId>([liveNode.node_id])
+		);
+
+		return {
+			surfaceNodeId: resolvedSurface.surfaceNodeId,
+			element: resolvedSurface.element,
+			layoutKind: targetLayoutKind,
+			targetIndex:
+				targetLayoutKind === 'free' ? null : (insertionTarget?.targetIndex ?? 0),
+			placement: buildFreeLayoutDropPlacement(
+				targetSurfaceNode,
+				resolvedSurface.element,
+				currentDraggedPlacement(null),
+				clientX,
+				clientY
+			),
+			indicator: targetLayoutKind === 'free' ? null : (insertionTarget?.indicator ?? null)
 		};
 	};
 
@@ -1758,6 +2257,17 @@
 			viewportWidthPx: getViewportWidthPx(),
 			viewportHeightPx: getViewportHeightPx()
 		};
+		const insertionTarget =
+			layoutKind === 'free' || !surfaceElement
+				? null
+				: resolveSurfaceInsertionTarget(
+						liveNode,
+						surfaceElement,
+						layoutKind,
+						event.clientX,
+						event.clientY,
+						new Set<NodeId>()
+					);
 		const placementOptions =
 			layoutKind === 'free'
 				? {
@@ -1781,6 +2291,7 @@
 				label: targetNode.meta.label,
 				targetKind: payload.kind,
 				placement: defaults.placement,
+				targetIndex: insertionTarget?.targetIndex ?? null,
 				genericWidgetKind: defaults.widgetKind,
 				previewText: defaults.text ?? null,
 				previewPlaceholder: defaults.placeholder ?? null,
@@ -1791,6 +2302,7 @@
 			label: targetNode.meta.label,
 			targetKind: payload.kind,
 			placement: getDashboardNodeWidgetCreationDefaults(targetNode, context, placementOptions),
+			targetIndex: insertionTarget?.targetIndex ?? null,
 			genericWidgetKind: null,
 			previewText: null,
 			previewPlaceholder: null,
@@ -1810,7 +2322,19 @@
 		}
 		event.preventDefault();
 		surfaceDragDepth += 1;
-		surfaceDropPreview = buildSurfaceDropPreview(event, payload);
+		const preview = buildSurfaceDropPreview(event, payload);
+		surfaceDropPreview = preview;
+		if (event.currentTarget instanceof HTMLElement && layoutKind !== 'free') {
+			const insertionTarget = resolveSurfaceInsertionTarget(
+				liveNode,
+				event.currentTarget,
+				layoutKind,
+				event.clientX,
+				event.clientY,
+				new Set<NodeId>()
+			);
+			setSurfaceInsertionIndicator(event.currentTarget, insertionTarget?.indicator ?? null);
+		}
 	};
 
 	const handleSurfaceDragOver = (event: DragEvent): void => {
@@ -1827,7 +2351,19 @@
 		if (event.dataTransfer) {
 			event.dataTransfer.dropEffect = 'copy';
 		}
-		surfaceDropPreview = buildSurfaceDropPreview(event, payload);
+		const preview = buildSurfaceDropPreview(event, payload);
+		surfaceDropPreview = preview;
+		if (event.currentTarget instanceof HTMLElement && layoutKind !== 'free') {
+			const insertionTarget = resolveSurfaceInsertionTarget(
+				liveNode,
+				event.currentTarget,
+				layoutKind,
+				event.clientX,
+				event.clientY,
+				new Set<NodeId>()
+			);
+			setSurfaceInsertionIndicator(event.currentTarget, insertionTarget?.indicator ?? null);
+		}
 	};
 
 	const handleSurfaceDragLeave = (event: DragEvent): void => {
@@ -1839,6 +2375,7 @@
 		surfaceDragDepth = nextDepth;
 		if (nextDepth === 0) {
 			surfaceDropPreview = null;
+			clearSurfaceInsertionIndicator();
 		}
 	};
 
@@ -1868,7 +2405,8 @@
 			: null;
 		if (payload?.kind === 'parameter') {
 			const created = await createDashboardGenericWidget(getGraph, liveNode.node_id, targetNode, {
-				placement: dropPreview?.placement
+				placement: dropPreview?.placement,
+				targetIndex: dropPreview?.targetIndex ?? undefined
 			});
 			if (!created) {
 				pendingSurfaceDrop = null;
@@ -1876,7 +2414,8 @@
 			return;
 		}
 		const created = await createDashboardNodeWidget(getGraph, liveNode.node_id, targetNode, {
-			placement: dropPreview?.placement
+			placement: dropPreview?.placement,
+			targetIndex: dropPreview?.targetIndex ?? undefined
 		});
 		if (!created) {
 			pendingSurfaceDrop = null;
@@ -2307,7 +2846,8 @@
 				getGraph,
 				liveNode.node_id,
 				dropTarget.surfaceNodeId,
-				dropTarget.placement
+				dropTarget.placement,
+				dropTarget.targetIndex ?? undefined
 			);
 			await finishFreeLayoutEditSession();
 			return;
@@ -2421,6 +2961,75 @@
 		freeLayoutPreview = buildPreviewSetFromTargets(liveNode.node_id, targets);
 	};
 
+	const beginWidgetMoveInteraction = (event: PointerEvent): void => {
+		if (!editMode || !supportsOrdering) {
+			return;
+		}
+		event.preventDefault();
+		event.stopPropagation();
+		clearFreeLayoutInteractionChrome();
+		setFreeLayoutAncestorShells(event.currentTarget);
+		widgetMoveInteraction = {
+			pointerId: event.pointerId,
+			sourceSurfaceNodeId: parentNode?.node_id ?? liveNode.node_id,
+			startClient: [event.clientX, event.clientY]
+		};
+	};
+
+	const beginConstrainedResize = (
+		event: PointerEvent,
+		resizeEdges: FreeLayoutResizeEdges
+	): void => {
+		if (!editMode || !supportsStackSizing) {
+			return;
+		}
+		const axis = parentLayoutKind === 'horizontal' ? 'x' : 'y';
+		const isLeadingEdge = axis === 'x' ? resizeEdges.left : resizeEdges.top;
+		const declId = axis === 'x' ? 'width' : 'height';
+		const paramNode = getDirectParamNode(graph, liveNode, declId);
+		if (paramNode?.data.kind !== 'parameter') {
+			return;
+		}
+
+		event.preventDefault();
+		event.stopPropagation();
+		void sendPatchMetaIntent(paramNode.node_id, { enabled: true });
+
+		const rootRemPx = getRootRemPixels();
+		const surfaceMetrics = getClosestSurfaceMetrics(event.currentTarget, rootRemPx);
+		const sizeContext = {
+			rootRemPx,
+			surfaceWidthPx: surfaceMetrics.width,
+			surfaceHeightPx: surfaceMetrics.height,
+			viewportWidthPx: getViewportWidthPx(),
+			viewportHeightPx: getViewportHeightPx()
+		};
+		const startSize = axis === 'x' ? placement.size.width : placement.size.height;
+		const startSizePx = Math.max(
+			(axis === 'x' ? minFreeWidgetWidthRem : minFreeWidgetHeightRem) * rootRemPx,
+			cssValueToPx(startSize, axis, createCssUnitContext(sizeContext, axis))
+		);
+
+		constrainedResizeInteraction = {
+			pointerId: event.pointerId,
+			axis,
+			sign: isLeadingEdge ? -1 : 1,
+			startClient: [event.clientX, event.clientY],
+			paramNodeId: paramNode.node_id,
+			paramBehaviour: paramNode.data.param.event_behaviour,
+			startSize,
+			startSizePx,
+			rootRemPx,
+			surfaceWidthPx: surfaceMetrics.width,
+			surfaceHeightPx: surfaceMetrics.height,
+			surfaceScaleX: surfaceMetrics.scaleX,
+			surfaceScaleY: surfaceMetrics.scaleY,
+			viewportWidthPx: getViewportWidthPx(),
+			viewportHeightPx: getViewportHeightPx(),
+			lastSent: null
+		};
+	};
+
 	const handleWidgetPointerDown = (event: PointerEvent): void => {
 		focusClosestPageViewport(event.currentTarget);
 		if (!editMode || event.button !== 0) {
@@ -2439,8 +3048,20 @@
 			beginFreeLayoutMove(event, resolveTransformNodes());
 			return;
 		}
+		if (selectionMode !== 'REPLACE') {
+			event.stopPropagation();
+			selectWidgetNode(selectionMode);
+			return;
+		}
+		if (!isSelected) {
+			selectWidgetNode('REPLACE');
+		}
+		if (supportsOrdering) {
+			beginWidgetMoveInteraction(event);
+			return;
+		}
 		event.stopPropagation();
-		selectWidgetNode(selectionMode);
+		selectWidgetNode('REPLACE');
 	};
 
 	const handleSurfacePointerDown = (event: PointerEvent): void => {
@@ -2572,6 +3193,7 @@
 				);
 				freeLayoutDropTarget = nextDropTarget;
 				setFreeLayoutHoverSurface(nextDropTarget?.element ?? null);
+				setSurfaceInsertionIndicator(nextDropTarget?.element ?? null, nextDropTarget?.indicator ?? null);
 				if (nextDropTarget) {
 					cancelScheduledFreeLayoutCommit();
 					return;
@@ -2581,6 +3203,7 @@
 			}
 			setFreeLayoutHoverSurface(null);
 			freeLayoutDropTarget = null;
+			clearSurfaceInsertionIndicator();
 			const nextPreview = buildFreeLayoutResizePreview(
 				freeLayoutInteraction,
 				deltaXPx,
@@ -2632,6 +3255,143 @@
 			window.removeEventListener('pointermove', handlePointerMove);
 			window.removeEventListener('pointerup', finishInteraction);
 			window.removeEventListener('pointercancel', finishInteraction);
+			document.body.style.cursor = previousCursor;
+			document.body.style.userSelect = previousUserSelect;
+		};
+	});
+
+	$effect(() => {
+		if (!widgetMoveInteraction) {
+			return;
+		}
+
+		const handlePointerMove = (event: PointerEvent): void => {
+			if (!widgetMoveInteraction || event.pointerId !== widgetMoveInteraction.pointerId) {
+				return;
+			}
+			const deltaX = event.clientX - widgetMoveInteraction.startClient[0];
+			const deltaY = event.clientY - widgetMoveInteraction.startClient[1];
+			if (Math.hypot(deltaX, deltaY) < marqueeDragThresholdPx) {
+				return;
+			}
+			event.preventDefault();
+			const nextDropTarget = resolveWidgetMoveDropTargetAtPoint(event.clientX, event.clientY);
+			widgetMoveDropTarget = nextDropTarget;
+			setFreeLayoutHoverSurface(nextDropTarget?.element ?? null);
+			setSurfaceInsertionIndicator(nextDropTarget?.element ?? null, nextDropTarget?.indicator ?? null);
+		};
+
+		const finishInteraction = (event: PointerEvent): void => {
+			if (!widgetMoveInteraction || event.pointerId !== widgetMoveInteraction.pointerId) {
+				return;
+			}
+			const dropTarget = widgetMoveDropTarget;
+			widgetMoveInteraction = null;
+			clearFreeLayoutInteractionChrome();
+			if (!dropTarget) {
+				return;
+			}
+			void moveDashboardWidgetToSurface(
+				getGraph,
+				liveNode.node_id,
+				dropTarget.surfaceNodeId,
+				dropTarget.placement,
+				dropTarget.targetIndex ?? undefined
+			);
+		};
+
+		window.addEventListener('pointermove', handlePointerMove);
+		window.addEventListener('pointerup', finishInteraction);
+		window.addEventListener('pointercancel', finishInteraction);
+
+		const previousCursor = document.body.style.cursor;
+		const previousUserSelect = document.body.style.userSelect;
+		document.body.style.cursor = 'grabbing';
+		document.body.style.userSelect = 'none';
+
+		return () => {
+			window.removeEventListener('pointermove', handlePointerMove);
+			window.removeEventListener('pointerup', finishInteraction);
+			window.removeEventListener('pointercancel', finishInteraction);
+			document.body.style.cursor = previousCursor;
+			document.body.style.userSelect = previousUserSelect;
+		};
+	});
+
+	$effect(() => {
+		if (!constrainedResizeInteraction) {
+			return;
+		}
+
+		const handlePointerMove = (event: PointerEvent): void => {
+			if (
+				!constrainedResizeInteraction ||
+				event.pointerId !== constrainedResizeInteraction.pointerId
+			) {
+				return;
+			}
+			event.preventDefault();
+			const axis = constrainedResizeInteraction.axis;
+			const scale =
+				axis === 'x'
+					? Math.max(constrainedResizeInteraction.surfaceScaleX, 1e-6)
+					: Math.max(constrainedResizeInteraction.surfaceScaleY, 1e-6);
+			const deltaPx =
+				(axis === 'x'
+					? event.clientX - constrainedResizeInteraction.startClient[0]
+					: event.clientY - constrainedResizeInteraction.startClient[1]) / scale;
+			const nextSizePx = Math.max(
+				(axis === 'x' ? minFreeWidgetWidthRem : minFreeWidgetHeightRem) *
+					constrainedResizeInteraction.rootRemPx,
+				constrainedResizeInteraction.startSizePx +
+					constrainedResizeInteraction.sign * deltaPx
+			);
+			const nextSize = pxToCssValue(
+				nextSizePx,
+				constrainedResizeInteraction.startSize,
+				axis,
+				createCssUnitContext(constrainedResizeInteraction, axis)
+			);
+			if (
+				constrainedResizeInteraction.lastSent &&
+				sameCssValue(constrainedResizeInteraction.lastSent, nextSize)
+			) {
+				return;
+			}
+			constrainedResizeInteraction = {
+				...constrainedResizeInteraction,
+				lastSent: nextSize
+			};
+			void sendSetParamIntent(
+				constrainedResizeInteraction.paramNodeId,
+				{ kind: 'css_value', value: nextSize.value, unit: nextSize.unit },
+				constrainedResizeInteraction.paramBehaviour
+			);
+		};
+
+		const finishResize = (event: PointerEvent): void => {
+			if (
+				!constrainedResizeInteraction ||
+				event.pointerId !== constrainedResizeInteraction.pointerId
+			) {
+				return;
+			}
+			constrainedResizeInteraction = null;
+		};
+
+		window.addEventListener('pointermove', handlePointerMove);
+		window.addEventListener('pointerup', finishResize);
+		window.addEventListener('pointercancel', finishResize);
+
+		const previousCursor = document.body.style.cursor;
+		const previousUserSelect = document.body.style.userSelect;
+		document.body.style.cursor = constrainedResizeInteraction.axis === 'x' ? 'ew-resize' : 'ns-resize';
+		document.body.style.userSelect = 'none';
+
+		return () => {
+			window.removeEventListener('pointermove', handlePointerMove);
+			window.removeEventListener('pointerup', finishResize);
+			window.removeEventListener('pointercancel', finishResize);
 			document.body.style.cursor = previousCursor;
 			document.body.style.userSelect = previousUserSelect;
 		};
@@ -2692,6 +3452,8 @@
 		if (typeof window !== 'undefined' && pageViewportResizeFrame !== null) {
 			window.cancelAnimationFrame(pageViewportResizeFrame);
 		}
+		widgetMoveInteraction = null;
+		constrainedResizeInteraction = null;
 		clearFreeLayoutInteractionChrome();
 		cancelPageViewAnimation();
 		void finishFreeLayoutEditSession();
@@ -2760,12 +3522,38 @@
 	let supportsStackSizing = $derived(
 		editMode && (parentLayoutKind === 'horizontal' || parentLayoutKind === 'vertical')
 	);
-	let supportsOrdering = $derived(
-		editMode &&
-			(parentLayoutKind === 'grid' ||
-				parentLayoutKind === 'horizontal' ||
-				parentLayoutKind === 'vertical')
+	let supportsOrdering = $derived(editMode && parentLayoutKind !== 'free');
+	let supportsWidgetDrag = $derived(editMode && (supportsFreePlacement || supportsOrdering));
+	let widgetInteractionActive = $derived(
+		freeLayoutInteraction !== null ||
+			widgetMoveInteraction !== null ||
+			constrainedResizeInteraction !== null
 	);
+	let visibleResizeZones = $derived.by(() => {
+		if (!editMode) {
+			return [] as FreeLayoutResizeZone[];
+		}
+		if (supportsFreePlacement) {
+			return freeLayoutResizeZones;
+		}
+		if (parentLayoutKind === 'horizontal') {
+			return freeLayoutResizeZones.filter(
+				(zone) =>
+					(zone.edges.left || zone.edges.right) &&
+					!zone.edges.top &&
+					!zone.edges.bottom
+			);
+		}
+		if (parentLayoutKind === 'vertical') {
+			return freeLayoutResizeZones.filter(
+				(zone) =>
+					(zone.edges.top || zone.edges.bottom) &&
+					!zone.edges.left &&
+					!zone.edges.right
+			);
+		}
+		return [] as FreeLayoutResizeZone[];
+	});
 	let pageSize = $derived(getDashboardPageSize(graph, liveNode));
 	let parentSnapGrid = $derived(getDashboardSnapGrid(graph, parentNode));
 	let surfaceSnapGrid = $derived(getDashboardSnapGrid(graph, liveNode));
@@ -2975,6 +3763,7 @@
 	const stackPlacements = $derived.by(() => {
 		const placements: Array<DashboardPlacement | DashboardWidgetCreationPlacement> = [...childPlacements];
 		if (
+			rendersInlineSurfaceDropPreview &&
 			displayedSurfaceDropPreview &&
 			(layoutKind === 'horizontal' || layoutKind === 'vertical')
 		) {
@@ -2997,7 +3786,7 @@
 		}
 		const lineCount = Math.max(1, gridSettings.lineCount);
 		const itemCount = Math.max(
-			childWidgets.length + (displayedSurfaceDropPreview ? 1 : 0),
+			childWidgets.length + (rendersInlineSurfaceDropPreview && displayedSurfaceDropPreview ? 1 : 0),
 			1
 		);
 		if (gridSettings.direction === 'column') {
@@ -3652,7 +4441,7 @@
 					</div>
 				</div>
 			{/each}
-			{#if displayedSurfaceDropPreview}
+			{#if rendersInlineSurfaceDropPreview && displayedSurfaceDropPreview}
 				{@render dashboardSurfaceDropPreviewSlot(
 					placementStyle(displayedSurfaceDropPreview.placement),
 					layoutKind === 'free' ? '' : 'dashboard-drop-preview-flow'
@@ -3753,8 +4542,8 @@
 	<section
 		class="dashboard-widget-shell dashboard-container"
 		class:selected={isSelected}
-		class:free-layout-active={freeLayoutInteraction !== null}
-		class:editable-free={supportsFreePlacement}
+		class:free-layout-active={widgetInteractionActive}
+		class:editable-free={supportsWidgetDrag}
 		class:run-mode={!editMode}
 		data-local-context-menu
 		data-node-id={liveNode.node_id}
@@ -3766,8 +4555,8 @@
 		oncontextmenu={handleWidgetContextMenu}
 		onpointerdown={handleWidgetPointerDown}
 		onkeydown={selectWidgetNodeFromKeyboard}>
-		{#if editMode && supportsFreePlacement}
-			{#each freeLayoutResizeZones as resizeZone}
+		{#if editMode && visibleResizeZones.length > 0}
+			{#each visibleResizeZones as resizeZone}
 				<div
 					class="dashboard-resize-zone {resizeZone.name}"
 					aria-hidden="true"
@@ -3775,7 +4564,11 @@
 						if (!isSelected) {
 							selectWidgetNode('REPLACE');
 						}
-						beginFreeLayoutResize(event, resizeZone.edges, resolveTransformNodes());
+						if (supportsFreePlacement) {
+							beginFreeLayoutResize(event, resizeZone.edges, resolveTransformNodes());
+							return;
+						}
+						beginConstrainedResize(event, resizeZone.edges);
 					}}>
 				</div>
 			{/each}
@@ -3826,8 +4619,8 @@
 		class="dashboard-widget-shell dashboard-node-widget"
 		class:selected={isSelected}
 		class:binding-active={bindingDragDepth > 0}
-		class:free-layout-active={freeLayoutInteraction !== null}
-		class:editable-free={supportsFreePlacement}
+		class:free-layout-active={widgetInteractionActive}
+		class:editable-free={supportsWidgetDrag}
 		class:run-mode={!editMode}
 		data-local-context-menu
 		data-node-id={liveNode.node_id}
@@ -3849,8 +4642,8 @@
 		}}
 		onpointerdown={handleWidgetPointerDown}
 		onkeydown={selectWidgetNodeFromKeyboard}>
-		{#if editMode && supportsFreePlacement}
-			{#each freeLayoutResizeZones as resizeZone}
+		{#if editMode && visibleResizeZones.length > 0}
+			{#each visibleResizeZones as resizeZone}
 				<div
 					class="dashboard-resize-zone {resizeZone.name}"
 					aria-hidden="true"
@@ -3858,7 +4651,11 @@
 						if (!isSelected) {
 							selectWidgetNode('REPLACE');
 						}
-						beginFreeLayoutResize(event, resizeZone.edges, resolveTransformNodes());
+						if (supportsFreePlacement) {
+							beginFreeLayoutResize(event, resizeZone.edges, resolveTransformNodes());
+							return;
+						}
+						beginConstrainedResize(event, resizeZone.edges);
 					}}>
 				</div>
 			{/each}
@@ -3903,8 +4700,8 @@
 		class="dashboard-widget-shell dashboard-generic-widget"
 		class:selected={isSelected}
 		class:binding-active={bindingDragDepth > 0}
-		class:free-layout-active={freeLayoutInteraction !== null}
-		class:editable-free={supportsFreePlacement}
+		class:free-layout-active={widgetInteractionActive}
+		class:editable-free={supportsWidgetDrag}
 		class:run-mode={!editMode}
 		data-local-context-menu
 		data-node-id={liveNode.node_id}
@@ -3926,8 +4723,8 @@
 		}}
 		onpointerdown={handleWidgetPointerDown}
 		onkeydown={selectWidgetNodeFromKeyboard}>
-		{#if editMode && supportsFreePlacement}
-			{#each freeLayoutResizeZones as resizeZone}
+		{#if editMode && visibleResizeZones.length > 0}
+			{#each visibleResizeZones as resizeZone}
 				<div
 					class="dashboard-resize-zone {resizeZone.name}"
 					aria-hidden="true"
@@ -3935,7 +4732,11 @@
 						if (!isSelected) {
 							selectWidgetNode('REPLACE');
 						}
-						beginFreeLayoutResize(event, resizeZone.edges, resolveTransformNodes());
+						if (supportsFreePlacement) {
+							beginFreeLayoutResize(event, resizeZone.edges, resolveTransformNodes());
+							return;
+						}
+						beginConstrainedResize(event, resizeZone.edges);
 					}}>
 				</div>
 			{/each}
@@ -4201,9 +5002,24 @@
 
 	.dashboard-page.surface-target-active,
 	.dashboard-container-surface.surface-target-active,
+	.dashboard-surface.dashboard-flow-drop-target,
 	.dashboard-surface.dashboard-reparent-target {
 		border-color: rgb(from var(--gc-color-focus) r g b / 0.86);
 		box-shadow: 0 0 0 0.08rem rgb(from var(--gc-color-focus) r g b / 0.28);
+	}
+
+	.dashboard-surface.dashboard-flow-drop-target::before {
+		content: '';
+		position: absolute;
+		inset-inline-start: var(--dashboard-flow-drop-indicator-left);
+		inset-block-start: var(--dashboard-flow-drop-indicator-top);
+		inline-size: var(--dashboard-flow-drop-indicator-width);
+		block-size: var(--dashboard-flow-drop-indicator-height);
+		border-radius: 999rem;
+		background: rgb(from var(--gc-color-focus) r g b / 0.92);
+		box-shadow: 0 0 0.55rem rgb(from var(--gc-color-focus) r g b / 0.28);
+		pointer-events: none;
+		z-index: 4;
 	}
 
 	.dashboard-surface.surface-target-active::after,

@@ -52,12 +52,14 @@ interface DashboardWidgetPlacementOptions {
 
 interface DashboardWidgetCreationOptions {
 	placement?: DashboardWidgetCreationPlacement;
+	targetIndex?: number;
 }
 
 export interface DashboardContainerWidgetCreationOptions {
 	label?: string;
 	placement?: DashboardWidgetCreationPlacement;
 	layoutKind?: DashboardLayoutKind;
+	targetIndex?: number;
 }
 
 interface DashboardGenericWidgetCreationDefaults {
@@ -758,6 +760,18 @@ export const createDashboardNodeWidget = async (
 			(child) => child.node_type === 'dashboard_node_widget'
 		);
 		if (createdWidget) {
+			if (typeof options?.targetIndex === 'number') {
+				await sendMoveNodeIntent(
+					createdWidget.node_id,
+					parentId,
+					resolvePrevSiblingForParentItemIndex(
+						getGraph(),
+						parentId,
+						options.targetIndex,
+						createdWidget.node_id
+					)
+				);
+			}
 			await applyDashboardWidgetSizingMode(getGraph, createdWidget.node_id, parentId);
 		}
 		return true;
@@ -810,6 +824,18 @@ export const createDashboardGenericWidget = async (
 			(child) => child.node_type === 'dashboard_generic_widget'
 		);
 		if (createdWidget) {
+			if (typeof options?.targetIndex === 'number') {
+				await sendMoveNodeIntent(
+					createdWidget.node_id,
+					parentId,
+					resolvePrevSiblingForParentItemIndex(
+						getGraph(),
+						parentId,
+						options.targetIndex,
+						createdWidget.node_id
+					)
+				);
+			}
 			await applyDashboardWidgetSizingMode(getGraph, createdWidget.node_id, parentId);
 		}
 		return true;
@@ -893,6 +919,18 @@ export const createDashboardContainerWidget = async (
 			(child) => child.node_type === 'dashboard_widget_container'
 		);
 		if (container) {
+			if (typeof options?.targetIndex === 'number') {
+				await sendMoveNodeIntent(
+					container.node_id,
+					parentId,
+					resolvePrevSiblingForParentItemIndex(
+						getGraph(),
+						parentId,
+						options.targetIndex,
+						container.node_id
+					)
+				);
+			}
 			await applyDashboardWidgetSizingMode(getGraph, container.node_id, parentId);
 		}
 		return container?.node_id ?? null;
@@ -914,6 +952,55 @@ const resolveLastDashboardItemChildId = (
 		}
 	}
 	return undefined;
+};
+
+const getParentOrderingLists = (
+	graph: GraphState | null,
+	parentId: NodeId,
+	excludedNodeId?: NodeId
+): { orderedSiblings: UiNodeDto[]; itemSiblings: UiNodeDto[] } | null => {
+	if (!graph) {
+		return null;
+	}
+
+	const parent = graph.nodesById.get(parentId);
+	if (!parent) {
+		return null;
+	}
+
+	const orderedSiblings = parent.children
+		.map((childId) => graph.nodesById.get(childId))
+		.filter((child): child is UiNodeDto => child !== undefined && child.node_id !== excludedNodeId);
+	return {
+		orderedSiblings,
+		itemSiblings: orderedSiblings.filter((child) => child.user_role === 'itemRoot')
+	};
+};
+
+const resolvePrevSiblingForParentItemIndex = (
+	graph: GraphState | null,
+	parentId: NodeId,
+	targetIndex: number,
+	excludedNodeId?: NodeId
+): NodeId | undefined => {
+	const ordering = getParentOrderingLists(graph, parentId, excludedNodeId);
+	if (!ordering) {
+		return undefined;
+	}
+
+	const nextIndex = Math.max(0, Math.min(ordering.itemSiblings.length, targetIndex));
+	if (nextIndex === 0) {
+		const firstItemId = ordering.itemSiblings[0]?.node_id;
+		if (firstItemId !== undefined) {
+			const firstItemIndex = ordering.orderedSiblings.findIndex(
+				(child) => child.node_id === firstItemId
+			);
+			return firstItemIndex > 0 ? ordering.orderedSiblings[firstItemIndex - 1]?.node_id : undefined;
+		}
+		return ordering.orderedSiblings.at(-1)?.node_id;
+	}
+
+	return ordering.itemSiblings[nextIndex - 1]?.node_id;
 };
 
 const applyDashboardWidgetPlacement = async (
@@ -971,7 +1058,8 @@ export const moveDashboardWidgetToSurface = async (
 	getGraph: GraphGetter,
 	widgetNodeId: NodeId,
 	newParentId: NodeId,
-	placement?: DashboardWidgetCreationPlacement
+	placement?: DashboardWidgetCreationPlacement,
+	targetIndex?: number
 ): Promise<boolean> => {
 	const graph = getGraph();
 	const widget = graph?.nodesById.get(widgetNodeId);
@@ -983,13 +1071,36 @@ export const moveDashboardWidgetToSurface = async (
 	const editSession = createUiEditSession('Move dashboard widget', 'dashboard-move');
 	await editSession.begin();
 	try {
-		const moved = await sendMoveNodeIntent(
-			widgetNodeId,
-			newParentId,
-			resolveLastDashboardItemChildId(getGraph(), newParentId, widgetNodeId)
-		);
-		if (!moved || !placement) {
-			return moved;
+		const sourceParentId = graph?.parentById.get(widgetNodeId);
+		const currentOrderingState = getDashboardWidgetOrderingState(graph, widgetNodeId);
+		const normalizedTargetIndex =
+			typeof targetIndex === 'number'
+				? Math.max(0, Math.round(targetIndex))
+				: undefined;
+		const needsMove =
+			sourceParentId !== newParentId ||
+			(normalizedTargetIndex !== undefined &&
+				normalizedTargetIndex !== currentOrderingState?.currentIndex);
+
+		if (needsMove) {
+			const moved = await sendMoveNodeIntent(
+				widgetNodeId,
+				newParentId,
+				normalizedTargetIndex === undefined
+					? resolveLastDashboardItemChildId(getGraph(), newParentId, widgetNodeId)
+					: resolvePrevSiblingForParentItemIndex(
+							getGraph(),
+							newParentId,
+							normalizedTargetIndex,
+							widgetNodeId
+						)
+			);
+			if (!moved) {
+				return false;
+			}
+		}
+		if (!placement) {
+			return needsMove;
 		}
 		return applyDashboardWidgetPlacement(getGraph, widgetNodeId, newParentId, placement);
 	} finally {
