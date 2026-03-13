@@ -90,6 +90,11 @@
 		knownChildIds: NodeId[];
 		knownDirectChildIds: NodeId[];
 	};
+	type PendingWidgetMoveCommit = {
+		preview: SurfaceDropPreview | null;
+		hiddenChildNodeId: NodeId | null;
+		expectedChildIds: NodeId[];
+	};
 	type NonFreeSurfaceFlowRenderItem =
 		| {
 				key: string;
@@ -107,6 +112,12 @@
 		sourceSurfaceNodeId: NodeId | null;
 		sourceWidgetNodeId: NodeId | null;
 	};
+	type WidgetMoveCommitEventDetail = {
+		targetSurfaceNodeId: NodeId | null;
+		preview: SurfaceDropPreview | null;
+		sourceSurfaceNodeId: NodeId | null;
+		sourceWidgetNodeId: NodeId | null;
+	};
 	type DashboardContextMenuScope = 'surface' | 'widget';
 	type DashboardContextMenuState = {
 		open: boolean;
@@ -119,11 +130,13 @@
 	let {
 		node,
 		editMode = false,
+		pageNavigationEnabled = true,
 		persistedPageView = null,
 		onPersistedPageViewChange = null
 	} = $props<{
 		node: UiNodeDto;
 		editMode?: boolean;
+		pageNavigationEnabled?: boolean;
 		persistedPageView?: DashboardPersistedPageView | null;
 		onPersistedPageViewChange?: DashboardPersistedPageViewChangeHandler | null;
 	}>();
@@ -155,9 +168,9 @@
 	let gridSettings = $derived(getDashboardGridSettings(graph, liveNode));
 	let childWidgets = $derived(getDirectItemChildren(graph, liveNode));
 	let renderedChildWidgets = $derived.by(() =>
-		widgetMoveHiddenChildNodeId === null || layoutKind === 'free'
+		effectiveHiddenChildNodeId === null || layoutKind === 'free'
 			? childWidgets
-			: childWidgets.filter((child) => child.node_id !== widgetMoveHiddenChildNodeId)
+			: childWidgets.filter((child) => child.node_id !== effectiveHiddenChildNodeId)
 	);
 	let widgetOrderingState = $derived(getDashboardWidgetOrderingState(graph, liveNode.node_id));
 	let canInsertContainer = $derived.by(() => {
@@ -223,6 +236,7 @@
 	let widgetMoveSurfacePreview = $state<SurfaceDropPreview | null>(null);
 	let widgetMoveHiddenChildNodeId = $state<NodeId | null>(null);
 	let pendingSurfaceDrop = $state<PendingSurfaceDrop | null>(null);
+	let pendingWidgetMoveCommit = $state<PendingWidgetMoveCommit | null>(null);
 	let dashboardContextMenu = $state<DashboardContextMenuState>({
 		open: false,
 		scope: 'surface',
@@ -230,8 +244,15 @@
 		y: 0,
 		surfacePlacement: null
 	});
+	let effectiveHiddenChildNodeId = $derived(
+		widgetMoveHiddenChildNodeId ?? pendingWidgetMoveCommit?.hiddenChildNodeId ?? null
+	);
 	let displayedSurfaceDropPreview = $derived(
-		surfaceDropPreview ?? widgetMoveSurfacePreview ?? pendingSurfaceDrop?.preview ?? null
+		surfaceDropPreview ??
+			widgetMoveSurfacePreview ??
+			pendingSurfaceDrop?.preview ??
+			pendingWidgetMoveCommit?.preview ??
+			null
 	);
 	let rendersInlineSurfaceDropPreview = $derived.by(() => {
 		return displayedSurfaceDropPreview !== null;
@@ -558,8 +579,14 @@
 		surfaceElement.classList.add('dashboard-flow-drop-target');
 		surfaceElement.style.setProperty('--dashboard-flow-drop-indicator-left', `${indicator.left}px`);
 		surfaceElement.style.setProperty('--dashboard-flow-drop-indicator-top', `${indicator.top}px`);
-		surfaceElement.style.setProperty('--dashboard-flow-drop-indicator-width', `${indicator.width}px`);
-		surfaceElement.style.setProperty('--dashboard-flow-drop-indicator-height', `${indicator.height}px`);
+		surfaceElement.style.setProperty(
+			'--dashboard-flow-drop-indicator-width',
+			`${indicator.width}px`
+		);
+		surfaceElement.style.setProperty(
+			'--dashboard-flow-drop-indicator-height',
+			`${indicator.height}px`
+		);
 	};
 
 	const clearSurfaceDropState = (): void => {
@@ -575,10 +602,7 @@
 	): boolean => {
 		const rect = element.getBoundingClientRect();
 		return (
-			clientX >= rect.left &&
-			clientX <= rect.right &&
-			clientY >= rect.top &&
-			clientY <= rect.bottom
+			clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom
 		);
 	};
 
@@ -727,14 +751,10 @@
 		targetLayoutKind: DashboardLayoutKind
 	): HTMLElement => {
 		if (targetLayoutKind === 'tabs') {
-			return (
-				surfaceElement.querySelector<HTMLElement>('.dashboard-tab-strip') ?? surfaceElement
-			);
+			return surfaceElement.querySelector<HTMLElement>('.dashboard-tab-strip') ?? surfaceElement;
 		}
 		if (targetLayoutKind === 'accordion') {
-			return (
-				surfaceElement.querySelector<HTMLElement>('.dashboard-accordion') ?? surfaceElement
-			);
+			return surfaceElement.querySelector<HTMLElement>('.dashboard-accordion') ?? surfaceElement;
 		}
 		return getDirectDashboardLayoutElement(surfaceElement) ?? surfaceElement;
 	};
@@ -776,7 +796,9 @@
 
 		if (targetLayoutKind === 'accordion') {
 			const sections = Array.from(
-				surfaceElement.querySelectorAll<HTMLElement>('.dashboard-accordion > .dashboard-accordion-item')
+				surfaceElement.querySelectorAll<HTMLElement>(
+					'.dashboard-accordion > .dashboard-accordion-item'
+				)
 			);
 			return orderedChildren
 				.map((child, index) => {
@@ -823,19 +845,12 @@
 		const trackBottom = (trackRect.bottom - surfaceRect.top) / scaleY;
 		const targetTop = targetRect ? (targetRect.top - surfaceRect.top) / scaleY : null;
 		const targetBottom = targetRect ? (targetRect.bottom - surfaceRect.top) / scaleY : null;
-		const top = Math.max(
-			trackTop + 0.3 * rootRemPx,
-			0
-		);
-		const indicatorTop = targetTop !== null
-			? Math.max(targetTop + 0.3 * rootRemPx, top)
-			: top;
-		const bottom = targetBottom !== null
-			? Math.min(
-					targetBottom - 0.3 * rootRemPx,
-					trackBottom - 0.3 * rootRemPx
-				)
-			: trackBottom - 0.3 * rootRemPx;
+		const top = Math.max(trackTop + 0.3 * rootRemPx, 0);
+		const indicatorTop = targetTop !== null ? Math.max(targetTop + 0.3 * rootRemPx, top) : top;
+		const bottom =
+			targetBottom !== null
+				? Math.min(targetBottom - 0.3 * rootRemPx, trackBottom - 0.3 * rootRemPx)
+				: trackBottom - 0.3 * rootRemPx;
 		const height = Math.max(bottom - indicatorTop, 1.5 * rootRemPx);
 		return {
 			left: Math.max(0, xPx / scaleX - 0.1 * rootRemPx),
@@ -859,19 +874,12 @@
 		const trackRight = (trackRect.right - surfaceRect.left) / scaleX;
 		const targetLeft = targetRect ? (targetRect.left - surfaceRect.left) / scaleX : null;
 		const targetRight = targetRect ? (targetRect.right - surfaceRect.left) / scaleX : null;
-		const left = Math.max(
-			trackLeft + 0.3 * rootRemPx,
-			0
-		);
-		const indicatorLeft = targetLeft !== null
-			? Math.max(targetLeft + 0.3 * rootRemPx, left)
-			: left;
-		const right = targetRight !== null
-			? Math.min(
-					targetRight - 0.3 * rootRemPx,
-					trackRight - 0.3 * rootRemPx
-				)
-			: trackRight - 0.3 * rootRemPx;
+		const left = Math.max(trackLeft + 0.3 * rootRemPx, 0);
+		const indicatorLeft = targetLeft !== null ? Math.max(targetLeft + 0.3 * rootRemPx, left) : left;
+		const right =
+			targetRight !== null
+				? Math.min(targetRight - 0.3 * rootRemPx, trackRight - 0.3 * rootRemPx)
+				: trackRight - 0.3 * rootRemPx;
 		const width = Math.max(right - indicatorLeft, 1.5 * rootRemPx);
 		return {
 			left: indicatorLeft,
@@ -1083,6 +1091,7 @@
 	};
 
 	const widgetMovePreviewEventName = 'gc-dashboard-widget-move-preview';
+	const widgetMoveCommitEventName = 'gc-dashboard-widget-move-commit';
 
 	const buildCurrentWidgetMovePreview = (
 		dropTarget: Pick<WidgetMoveDropTarget, 'placement' | 'targetIndex'>
@@ -1094,7 +1103,9 @@
 			placement: dropTarget.placement,
 			targetIndex: dropTarget.targetIndex,
 			genericWidgetKind,
-			previewText: isGenericWidget ? genericDisplayValue || textConfig || widgetLabelText || null : null,
+			previewText: isGenericWidget
+				? genericDisplayValue || textConfig || widgetLabelText || null
+				: null,
 			previewPlaceholder: isGenericWidget ? placeholderConfig || widgetLabelText || null : null,
 			multiline: isGenericWidget ? multiline : false
 		};
@@ -1119,7 +1130,34 @@
 					sourceSurfaceNodeId: null,
 					sourceWidgetNodeId: null
 				};
-		window.dispatchEvent(new CustomEvent<WidgetMovePreviewEventDetail>(widgetMovePreviewEventName, { detail }));
+		window.dispatchEvent(
+			new CustomEvent<WidgetMovePreviewEventDetail>(widgetMovePreviewEventName, { detail })
+		);
+	};
+
+	const publishWidgetMoveCommit = (
+		dropTarget: Pick<WidgetMoveDropTarget, 'surfaceNodeId' | 'placement' | 'targetIndex'> | null,
+		sourceSurfaceNodeId: NodeId | null = null
+	): void => {
+		if (typeof window === 'undefined') {
+			return;
+		}
+		const detail: WidgetMoveCommitEventDetail = dropTarget
+			? {
+					targetSurfaceNodeId: dropTarget.surfaceNodeId,
+					preview: buildCurrentWidgetMovePreview(dropTarget),
+					sourceSurfaceNodeId,
+					sourceWidgetNodeId: liveNode.node_id
+				}
+			: {
+					targetSurfaceNodeId: null,
+					preview: null,
+					sourceSurfaceNodeId: null,
+					sourceWidgetNodeId: null
+				};
+		window.dispatchEvent(
+			new CustomEvent<WidgetMoveCommitEventDetail>(widgetMoveCommitEventName, { detail })
+		);
 	};
 
 	const clearFreeLayoutInteractionChrome = (): void => {
@@ -1275,6 +1313,20 @@
 			}
 		}
 		return true;
+	};
+
+	const moveNodeIdInList = (
+		nodeIds: NodeId[],
+		nodeId: NodeId,
+		targetIndex: number | null
+	): NodeId[] => {
+		const nextNodeIds = nodeIds.filter((candidate) => candidate !== nodeId);
+		const nextIndex =
+			targetIndex === null
+				? nextNodeIds.length
+				: Math.max(0, Math.min(nextNodeIds.length, Math.round(targetIndex)));
+		nextNodeIds.splice(nextIndex, 0, nodeId);
+		return nextNodeIds;
 	};
 
 	const isFreeLayoutTransformableWidget = (candidate: UiNodeDto): boolean => {
@@ -1494,7 +1546,8 @@
 			};
 		}
 
-		const layoutElement = getDirectDashboardLayoutElement(targetSurfaceElement) ?? targetSurfaceElement;
+		const layoutElement =
+			getDirectDashboardLayoutElement(targetSurfaceElement) ?? targetSurfaceElement;
 		const rootRemPx = getRootRemPixels();
 		const metrics = getElementSurfaceMetrics(layoutElement, rootRemPx);
 		const rect = layoutElement.getBoundingClientRect();
@@ -1525,10 +1578,8 @@
 		return {
 			anchor: basePlacement.anchor,
 			position: {
-				x:
-					snappedLeft + anchorOffsetPx(anchorX, widthPx) - anchorBasePx(anchorX, metrics.width),
-				y:
-					snappedTop + anchorOffsetPx(anchorY, heightPx) - anchorBasePx(anchorY, metrics.height)
+				x: snappedLeft + anchorOffsetPx(anchorX, widthPx) - anchorBasePx(anchorX, metrics.width),
+				y: snappedTop + anchorOffsetPx(anchorY, heightPx) - anchorBasePx(anchorY, metrics.height)
 			},
 			size: {
 				width: { ...basePlacement.size.width },
@@ -1564,7 +1615,10 @@
 			clientY,
 			new Set(freeLayoutInteraction.targets.map((target) => target.nodeId))
 		);
-		if (!resolvedSurface || resolvedSurface.surfaceNodeId === freeLayoutInteraction.sourceSurfaceNodeId) {
+		if (
+			!resolvedSurface ||
+			resolvedSurface.surfaceNodeId === freeLayoutInteraction.sourceSurfaceNodeId
+		) {
 			return null;
 		}
 
@@ -1651,8 +1705,7 @@
 			surfaceNodeId: resolvedSurface.surfaceNodeId,
 			element: resolvedSurface.element,
 			layoutKind: targetLayoutKind,
-			targetIndex:
-				targetLayoutKind === 'free' ? null : (insertionTarget?.targetIndex ?? 0),
+			targetIndex: targetLayoutKind === 'free' ? null : (insertionTarget?.targetIndex ?? 0),
 			placement: buildFreeLayoutDropPlacement(
 				targetSurfaceNode,
 				resolvedSurface.element,
@@ -1990,21 +2043,88 @@
 		pageViewAnimationFrame = window.requestAnimationFrame(step);
 	};
 
-	const homePageView = (): void => {
-		const geometry = getPageFrameGeometry();
-		if (!geometry) {
-			animatePageViewTo({
-				panX: 0,
-				panY: 0,
-				zoom: 1
-			});
+	const applyPageView = (
+		candidate: DashboardPersistedPageView,
+		options: { animate?: boolean } = {}
+	): void => {
+		if (options.animate === false) {
+			cancelPageViewAnimation();
+			setPageViewInstantly(candidate);
 			return;
 		}
-		animatePageViewTo({
-			panX: geometry.viewportCenterX - geometry.baseCenterX,
-			panY: geometry.viewportCenterY - geometry.baseCenterY,
-			zoom: 1
-		});
+		animatePageViewTo(candidate);
+	};
+
+	const homePageView = (options: { animate?: boolean } = {}): void => {
+		const geometry = getPageFrameGeometry();
+		if (!geometry) {
+			applyPageView(
+				{
+					panX: 0,
+					panY: 0,
+					zoom: 1
+				},
+				options
+			);
+			return;
+		}
+		applyPageView(
+			{
+				panX: geometry.viewportCenterX - geometry.baseCenterX,
+				panY: geometry.viewportCenterY - geometry.baseCenterY,
+				zoom: 1
+			},
+			options
+		);
+	};
+
+	const frameWidgetElements = (
+		widgetElements: HTMLElement[],
+		options: { animate?: boolean; fillRatio?: number } = {}
+	): boolean => {
+		const geometry = getPageFrameGeometry();
+		if (!geometry) {
+			return false;
+		}
+		if (widgetElements.length === 0) {
+			homePageView(options);
+			return true;
+		}
+		const fillRatio = Math.min(Math.max(options.fillRatio ?? 0.84, 0.1), 0.98);
+		const { viewportRect, frameCenterX, frameCenterY, baseCenterX, baseCenterY, currentScale } =
+			geometry;
+		const availableWidth = Math.max(1, viewportRect.width - 2 * pageEditBleedPx);
+		const availableHeight = Math.max(1, viewportRect.height - 2 * pageEditBleedPx);
+		let localLeft = Number.POSITIVE_INFINITY;
+		let localRight = Number.NEGATIVE_INFINITY;
+		let localTop = Number.POSITIVE_INFINITY;
+		let localBottom = Number.NEGATIVE_INFINITY;
+		for (const widgetElement of widgetElements) {
+			const widgetRect = widgetElement.getBoundingClientRect();
+			localLeft = Math.min(localLeft, (widgetRect.left - frameCenterX) / currentScale);
+			localRight = Math.max(localRight, (widgetRect.right - frameCenterX) / currentScale);
+			localTop = Math.min(localTop, (widgetRect.top - frameCenterY) / currentScale);
+			localBottom = Math.max(localBottom, (widgetRect.bottom - frameCenterY) / currentScale);
+		}
+		const localWidth = Math.max(1, localRight - localLeft);
+		const localHeight = Math.max(1, localBottom - localTop);
+		const targetScale = Math.min(
+			(availableWidth * fillRatio) / localWidth,
+			(availableHeight * fillRatio) / localHeight
+		);
+		const nextZoom = clampPageZoom(targetScale / Math.max(pageFitScale, 1e-6));
+		const nextScale = Math.max(pageFitScale * nextZoom, 1e-6);
+		const localCenterX = (localLeft + localRight) * 0.5;
+		const localCenterY = (localTop + localBottom) * 0.5;
+		applyPageView(
+			{
+				zoom: nextZoom,
+				panX: geometry.viewportCenterX - baseCenterX - localCenterX * nextScale,
+				panY: geometry.viewportCenterY - baseCenterY - localCenterY * nextScale
+			},
+			options
+		);
+		return true;
 	};
 
 	const getPageFrameGeometry = (): {
@@ -2187,6 +2307,33 @@
 		previousPageFitScaleEditMode = editMode;
 	});
 
+	$effect(() => {
+		if (!isPage) {
+			return;
+		}
+		if (pageViewportWidthPx <= 1 || pageViewportHeightPx <= 1) {
+			return;
+		}
+		const hasPersistedPageView = persistedPageView !== null && persistedPageView !== undefined;
+		if (pageNavigationEnabled && hasPersistedPageView) {
+			return;
+		}
+		void liveNode.node_id;
+		void pageFitScale;
+		void pageLogicalWidthPx;
+		void pageLogicalHeightPx;
+		if (typeof window === 'undefined') {
+			homePageView({ animate: false });
+			return;
+		}
+		const frameRequest = window.requestAnimationFrame(() => {
+			homePageView({ animate: false });
+		});
+		return () => {
+			window.cancelAnimationFrame(frameRequest);
+		};
+	});
+
 	const selectWidgetNode = (selectionMode: SelectionMode = 'REPLACE'): void => {
 		if (!editMode) {
 			return;
@@ -2303,10 +2450,10 @@
 		if (!targetNode) {
 			return null;
 		}
-		const surfaceElement =
-			event.currentTarget instanceof HTMLElement ? event.currentTarget : null;
+		const surfaceElement = event.currentTarget instanceof HTMLElement ? event.currentTarget : null;
 		const layoutElement = getDirectDashboardLayoutElement(surfaceElement);
-		const metricsElement = layoutKind === 'free' ? layoutElement : (layoutElement ?? surfaceElement);
+		const metricsElement =
+			layoutKind === 'free' ? layoutElement : (layoutElement ?? surfaceElement);
 		if (!metricsElement) {
 			return null;
 		}
@@ -2447,7 +2594,7 @@
 			clearSurfaceDropState();
 			return;
 		}
-		const dropPreview = buildSurfaceDropPreview(event, payload);
+		const dropPreview = surfaceDropPreview ?? buildSurfaceDropPreview(event, payload);
 		clearSurfaceDropState();
 		if (!canCreateFromDrop(payload)) {
 			return;
@@ -3255,7 +3402,10 @@
 				);
 				freeLayoutDropTarget = nextDropTarget;
 				setFreeLayoutHoverSurface(nextDropTarget?.element ?? null);
-				setSurfaceInsertionIndicator(nextDropTarget?.element ?? null, nextDropTarget?.indicator ?? null);
+				setSurfaceInsertionIndicator(
+					nextDropTarget?.element ?? null,
+					nextDropTarget?.indicator ?? null
+				);
 				publishWidgetMoveSurfacePreview(nextDropTarget);
 				if (nextDropTarget) {
 					cancelScheduledFreeLayoutCommit();
@@ -3341,7 +3491,10 @@
 			const nextDropTarget = resolveWidgetMoveDropTargetAtPoint(event.clientX, event.clientY);
 			widgetMoveDropTarget = nextDropTarget;
 			setFreeLayoutHoverSurface(nextDropTarget?.element ?? null);
-			setSurfaceInsertionIndicator(nextDropTarget?.element ?? null, nextDropTarget?.indicator ?? null);
+			setSurfaceInsertionIndicator(
+				nextDropTarget?.element ?? null,
+				nextDropTarget?.indicator ?? null
+			);
 			publishWidgetMoveSurfacePreview(nextDropTarget);
 		};
 
@@ -3350,18 +3503,34 @@
 				return;
 			}
 			const dropTarget = widgetMoveDropTarget;
+			const sourceSurfaceNodeId = widgetMoveInteraction.sourceSurfaceNodeId;
+			const isNoOpMove =
+				dropTarget !== null &&
+				dropTarget.surfaceNodeId === sourceSurfaceNodeId &&
+				dropTarget.targetIndex === (widgetOrderingState?.currentIndex ?? null);
+			if (dropTarget && !isNoOpMove) {
+				publishWidgetMoveCommit(dropTarget, sourceSurfaceNodeId);
+			}
 			widgetMoveInteraction = null;
 			clearFreeLayoutInteractionChrome();
-			if (!dropTarget) {
+			if (!dropTarget || isNoOpMove) {
+				if (isNoOpMove) {
+					publishWidgetMoveCommit(null);
+				}
 				return;
 			}
-			void moveDashboardWidgetToSurface(
-				getGraph,
-				liveNode.node_id,
-				dropTarget.surfaceNodeId,
-				dropTarget.placement,
-				dropTarget.targetIndex ?? undefined
-			);
+			void (async () => {
+				const moved = await moveDashboardWidgetToSurface(
+					getGraph,
+					liveNode.node_id,
+					dropTarget.surfaceNodeId,
+					dropTarget.placement,
+					dropTarget.targetIndex ?? undefined
+				);
+				if (!moved) {
+					publishWidgetMoveCommit(null);
+				}
+			})();
 		};
 
 		window.addEventListener('pointermove', handlePointerMove);
@@ -3407,8 +3576,7 @@
 			const nextSizePx = Math.max(
 				(axis === 'x' ? minFreeWidgetWidthRem : minFreeWidgetHeightRem) *
 					constrainedResizeInteraction.rootRemPx,
-				constrainedResizeInteraction.startSizePx +
-					constrainedResizeInteraction.sign * deltaPx
+				constrainedResizeInteraction.startSizePx + constrainedResizeInteraction.sign * deltaPx
 			);
 			const nextSize = pxToCssValue(
 				nextSizePx,
@@ -3449,7 +3617,8 @@
 
 		const previousCursor = document.body.style.cursor;
 		const previousUserSelect = document.body.style.userSelect;
-		document.body.style.cursor = constrainedResizeInteraction.axis === 'x' ? 'ew-resize' : 'ns-resize';
+		document.body.style.cursor =
+			constrainedResizeInteraction.axis === 'x' ? 'ew-resize' : 'ns-resize';
 		document.body.style.userSelect = 'none';
 
 		return () => {
@@ -3545,6 +3714,7 @@
 		if (typeof window === 'undefined' || !isLayoutSurface) {
 			widgetMoveSurfacePreview = null;
 			widgetMoveHiddenChildNodeId = null;
+			pendingWidgetMoveCommit = null;
 			return;
 		}
 		const currentLayoutKind = layoutKind;
@@ -3556,8 +3726,7 @@
 				widgetMoveHiddenChildNodeId = null;
 				return;
 			}
-			widgetMoveSurfacePreview =
-				detail.surfaceNodeId === liveNode.node_id ? detail.preview : null;
+			widgetMoveSurfacePreview = detail.surfaceNodeId === liveNode.node_id ? detail.preview : null;
 			widgetMoveHiddenChildNodeId =
 				currentLayoutKind !== 'free' && detail.sourceSurfaceNodeId === liveNode.node_id
 					? detail.sourceWidgetNodeId
@@ -3567,6 +3736,60 @@
 		window.addEventListener(widgetMovePreviewEventName, handleWidgetMovePreview);
 		return () => {
 			window.removeEventListener(widgetMovePreviewEventName, handleWidgetMovePreview);
+		};
+	});
+
+	$effect(() => {
+		if (typeof window === 'undefined' || !isLayoutSurface) {
+			pendingWidgetMoveCommit = null;
+			return;
+		}
+		const currentLayoutKind = layoutKind;
+
+		const handleWidgetMoveCommit = (event: Event): void => {
+			const detail = (event as CustomEvent<WidgetMoveCommitEventDetail>).detail;
+			if (!detail) {
+				pendingWidgetMoveCommit = null;
+				return;
+			}
+			const preview = detail.targetSurfaceNodeId === liveNode.node_id ? detail.preview : null;
+			const hiddenChildNodeId =
+				currentLayoutKind !== 'free' && detail.sourceSurfaceNodeId === liveNode.node_id
+					? detail.sourceWidgetNodeId
+					: null;
+			if (!preview && hiddenChildNodeId === null) {
+				pendingWidgetMoveCommit = null;
+				return;
+			}
+			if (detail.sourceWidgetNodeId === null) {
+				pendingWidgetMoveCommit = null;
+				return;
+			}
+			const currentChildIds = childWidgets.map((child) => child.node_id);
+			const expectedChildIds =
+				detail.targetSurfaceNodeId === liveNode.node_id
+					? moveNodeIdInList(
+							currentChildIds,
+							detail.sourceWidgetNodeId,
+							detail.preview?.targetIndex ?? null
+						)
+					: detail.sourceSurfaceNodeId === liveNode.node_id
+						? currentChildIds.filter((childNodeId) => childNodeId !== detail.sourceWidgetNodeId)
+						: null;
+			if (expectedChildIds === null) {
+				pendingWidgetMoveCommit = null;
+				return;
+			}
+			pendingWidgetMoveCommit = {
+				preview,
+				hiddenChildNodeId,
+				expectedChildIds
+			};
+		};
+
+		window.addEventListener(widgetMoveCommitEventName, handleWidgetMoveCommit);
+		return () => {
+			window.removeEventListener(widgetMoveCommitEventName, handleWidgetMoveCommit);
 		};
 	});
 
@@ -3631,18 +3854,12 @@
 		}
 		if (parentLayoutKind === 'horizontal') {
 			return freeLayoutResizeZones.filter(
-				(zone) =>
-					(zone.edges.left || zone.edges.right) &&
-					!zone.edges.top &&
-					!zone.edges.bottom
+				(zone) => (zone.edges.left || zone.edges.right) && !zone.edges.top && !zone.edges.bottom
 			);
 		}
 		if (parentLayoutKind === 'vertical') {
 			return freeLayoutResizeZones.filter(
-				(zone) =>
-					(zone.edges.top || zone.edges.bottom) &&
-					!zone.edges.left &&
-					!zone.edges.right
+				(zone) => (zone.edges.top || zone.edges.bottom) && !zone.edges.left && !zone.edges.right
 			);
 		}
 		return [] as FreeLayoutResizeZone[];
@@ -3711,10 +3928,7 @@
 				childPlacement,
 				surfaceContext as FreeLayoutInteraction
 			);
-			maxExtent = Math.max(
-				maxExtent,
-				childRect.top + childRect.height + 2 * rootRemPx
-			);
+			maxExtent = Math.max(maxExtent, childRect.top + childRect.height + 2 * rootRemPx);
 		}
 		return maxExtent;
 	});
@@ -3736,11 +3950,33 @@
 	});
 
 	$effect(() => {
+		if (!pendingWidgetMoveCommit) {
+			return;
+		}
+		const currentChildIds = childWidgets.map((child) => child.node_id);
+		if (sameNodeIdList(currentChildIds, pendingWidgetMoveCommit.expectedChildIds)) {
+			pendingWidgetMoveCommit = null;
+		}
+	});
+
+	$effect(() => {
 		if (!pendingSurfaceDrop || typeof window === 'undefined') {
 			return;
 		}
 		const timeout = window.setTimeout(() => {
 			pendingSurfaceDrop = null;
+		}, 2000);
+		return () => {
+			window.clearTimeout(timeout);
+		};
+	});
+
+	$effect(() => {
+		if (!pendingWidgetMoveCommit || typeof window === 'undefined') {
+			return;
+		}
+		const timeout = window.setTimeout(() => {
+			pendingWidgetMoveCommit = null;
 		}, 2000);
 		return () => {
 			window.clearTimeout(timeout);
@@ -3843,8 +4079,7 @@
 			1,
 			placements.filter((placementLike) => !placementHasExplicitSize(axis, placementLike)).length
 		);
-		const gapExpression =
-			axis === 'horizontal' ? formatCssValue(gap.x) : formatCssValue(gap.y);
+		const gapExpression = axis === 'horizontal' ? formatCssValue(gap.x) : formatCssValue(gap.y);
 		const totalGapExpression =
 			placements.length > 1 ? `(${gapExpression} * ${placements.length - 1})` : '0px';
 		return `max(calc((100% - ${totalGapExpression} - (${sumCssLengthExpressions(hardSizeExpressions)})) / ${autoCount}), 0px)`;
@@ -3854,7 +4089,9 @@
 		renderedChildWidgets.map((child) => getDashboardPlacement(graph, child))
 	);
 	const stackPlacements = $derived.by(() => {
-		const placements: Array<DashboardPlacement | DashboardWidgetCreationPlacement> = [...childPlacements];
+		const placements: Array<DashboardPlacement | DashboardWidgetCreationPlacement> = [
+			...childPlacements
+		];
 		if (
 			rendersInlineSurfaceDropPreview &&
 			displayedSurfaceDropPreview &&
@@ -4011,9 +4248,9 @@
 		displayedSurfaceDropPreview ? placementStyle(displayedSurfaceDropPreview.placement) : '';
 
 	const isHiddenSourceSurfaceChild = (child: UiNodeDto): boolean =>
-		widgetMoveHiddenChildNodeId !== null &&
+		effectiveHiddenChildNodeId !== null &&
 		layoutKind !== 'free' &&
-		child.node_id === widgetMoveHiddenChildNodeId;
+		child.node_id === effectiveHiddenChildNodeId;
 
 	const childPreviewInsertionIndexByNodeId = $derived.by(() => {
 		const indices = new Map<NodeId, number>();
@@ -4354,10 +4591,6 @@
 	};
 
 	const frameSelectedWidgets = (): boolean => {
-		const geometry = getPageFrameGeometry();
-		if (!geometry) {
-			return false;
-		}
 		const viewportElement = pageViewportElement;
 		if (!viewportElement) {
 			return false;
@@ -4367,44 +4600,16 @@
 				viewportElement.querySelector<HTMLElement>(`[data-node-id="${String(nodeId)}"]`)
 			)
 			.filter((element): element is HTMLElement => element !== null);
-		if (selectedWidgetElements.length === 0) {
-			homePageView();
-			return true;
-		}
-		const { viewportRect, frameCenterX, frameCenterY, baseCenterX, baseCenterY, currentScale } =
-			geometry;
-		const availableWidth = Math.max(1, viewportRect.width - 2 * pageEditBleedPx);
-		const availableHeight = Math.max(1, viewportRect.height - 2 * pageEditBleedPx);
-		let localLeft = Number.POSITIVE_INFINITY;
-		let localRight = Number.NEGATIVE_INFINITY;
-		let localTop = Number.POSITIVE_INFINITY;
-		let localBottom = Number.NEGATIVE_INFINITY;
-		for (const widgetElement of selectedWidgetElements) {
-			const widgetRect = widgetElement.getBoundingClientRect();
-			localLeft = Math.min(localLeft, (widgetRect.left - frameCenterX) / currentScale);
-			localRight = Math.max(localRight, (widgetRect.right - frameCenterX) / currentScale);
-			localTop = Math.min(localTop, (widgetRect.top - frameCenterY) / currentScale);
-			localBottom = Math.max(localBottom, (widgetRect.bottom - frameCenterY) / currentScale);
-		}
-		const localWidth = Math.max(1, localRight - localLeft);
-		const localHeight = Math.max(1, localBottom - localTop);
-		const targetScale = Math.min(
-			(availableWidth * 0.78) / localWidth,
-			(availableHeight * 0.78) / localHeight
-		);
-		const nextZoom = clampPageZoom(targetScale / Math.max(pageFitScale, 1e-6));
-		const nextScale = Math.max(pageFitScale * nextZoom, 1e-6);
-		const localCenterX = (localLeft + localRight) * 0.5;
-		const localCenterY = (localTop + localBottom) * 0.5;
-		animatePageViewTo({
-			zoom: nextZoom,
-			panX: geometry.viewportCenterX - baseCenterX - localCenterX * nextScale,
-			panY: geometry.viewportCenterY - baseCenterY - localCenterY * nextScale
+		return frameWidgetElements(selectedWidgetElements, {
+			animate: true,
+			fillRatio: 0.78
 		});
-		return true;
 	};
 
 	const handlePageViewportPointerDown = (event: PointerEvent): void => {
+		if (!pageNavigationEnabled) {
+			return;
+		}
 		pageViewportElement?.focus();
 		if (event.button !== 1) {
 			return;
@@ -4420,6 +4625,9 @@
 	};
 
 	const handlePageViewportWheel = (event: WheelEvent): void => {
+		if (!pageNavigationEnabled) {
+			return;
+		}
 		if (event.defaultPrevented) {
 			return;
 		}
@@ -4433,7 +4641,7 @@
 	};
 
 	$effect(() => {
-		if (!isPage) {
+		if (!isPage || !pageNavigationEnabled) {
 			return;
 		}
 		const unregisterHandlers = [
@@ -4524,7 +4732,7 @@
 		<div
 			class={`dashboard-slot dashboard-drop-preview ${additionalClass}`.trim()}
 			class:is-committing={pendingSurfaceDrop !== null && surfaceDropPreview === null}
-			style={style}
+			{style}
 			aria-hidden="true">
 			<div class="dashboard-slot-fill">
 				<div class="dashboard-drop-preview-fill">
@@ -4541,7 +4749,7 @@
 	renderMarqueeInSurface: boolean = false
 )}
 	{#if layoutKind === 'tabs'}
-		<div class="dashboard-tab-strip" class:compact={compact}>
+		<div class="dashboard-tab-strip" class:compact>
 			{#each childWidgets as child (child.node_id)}
 				{#if shouldRenderSurfaceDropPreviewBeforeChild(child)}
 					<button
@@ -4571,7 +4779,7 @@
 				</button>
 			{/if}
 		</div>
-		<div class="dashboard-tab-body" class:compact={compact}>
+		<div class="dashboard-tab-body" class:compact>
 			{#if displayedSurfaceDropPreview}
 				{@render dashboardSurfaceDropPreviewSlot('', 'dashboard-drop-preview-panel')}
 			{:else if activeTabNodeId !== null}
@@ -4587,7 +4795,7 @@
 			{/if}
 		</div>
 	{:else if layoutKind === 'accordion'}
-		<div class="dashboard-accordion" class:compact={compact}>
+		<div class="dashboard-accordion" class:compact>
 			{#each childWidgets as child (child.node_id)}
 				{#if shouldRenderSurfaceDropPreviewBeforeChild(child)}
 					<section class="dashboard-accordion-item dashboard-drop-preview-accordion">
@@ -4665,12 +4873,11 @@
 					class="dashboard-slot"
 					class:dashboard-drop-preview={item.kind === 'preview'}
 					class:dashboard-drop-preview-flow={item.kind === 'preview'}
-					class:is-committing={
-						item.kind === 'preview' && pendingSurfaceDrop !== null && surfaceDropPreview === null
-					}
-					class:dashboard-hidden-drag-source={
-						item.kind === 'child' && isHiddenSourceSurfaceChild(item.child)
-					}
+					class:is-committing={item.kind === 'preview' &&
+						pendingSurfaceDrop !== null &&
+						surfaceDropPreview === null}
+					class:dashboard-hidden-drag-source={item.kind === 'child' &&
+						isHiddenSourceSurfaceChild(item.child)}
 					style={item.kind === 'preview' ? inlineSurfaceDropPreviewStyle() : slotStyle(item.child)}
 					aria-hidden={item.kind === 'preview'}>
 					<div class="dashboard-slot-fill">

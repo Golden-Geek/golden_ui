@@ -1,12 +1,21 @@
 <script lang="ts">
 	let {
 		direction = 'right',
-		color = 'rgba(255, 255, 255, 0.5)'
-	}: { direction: 'left' | 'right' | 'up' | 'down'; color?: string } = $props();
-
+		color = 'rgba(255, 255, 255, 0.5)',
+		size = '1rem'
+	}: {
+		direction: 'left' | 'right' | 'up' | 'down';
+		color?: string;
+		size?: string;
+	} = $props();
 </script>
 
-<svg class="arrow {direction}" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+<svg
+	class="arrow {direction}"
+	viewBox="0 0 24 24"
+	fill="none"
+	xmlns="http://www.w3.org/2000/svg"
+	style="--arrow-size: {size}">
 	<path
 		d="M 8 0 M 15 12 L 9 17 M 15 12 L 9 7"
 		stroke={color}
@@ -18,8 +27,8 @@
 <style>
 	.arrow {
 		vertical-align: middle;
-		width: 1rem;
-		height: 1rem;
+		width: var(--arrow-size);
+		height: var(--arrow-size);
 		background-size: contain;
 		transition:
 			opacity 0.2s ease,

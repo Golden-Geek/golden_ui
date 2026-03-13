@@ -20,7 +20,11 @@ export { createWebSocketUiClient } from './transport/ws';
 export { default as MainWindow } from './components/app/MainWindow.svelte';
 export { default as MainComponent } from './components/app/MainComponent.svelte';
 export { default as AppHeader } from './components/app/AppHeader.svelte';
+export { default as WorkbenchSessionRoot } from './components/app/WorkbenchSessionRoot.svelte';
 export { default as WorkbenchOverlayHost } from './components/app/WorkbenchOverlayHost.svelte';
+export { default as DashboardRouteLayout } from './components/routes/DashboardRouteLayout.svelte';
+export { default as DashboardRoute } from './components/routes/DashboardRoute.svelte';
+export { default as DashboardPageRoute } from './components/routes/DashboardPageRoute.svelte';
 export { default as Watcher } from './components/common/Watcher.svelte';
 
 export { default as UnknownPanel } from './components/panels/UnknownPanel.svelte';
@@ -29,6 +33,7 @@ export { default as Inspector } from './components/panels/inspector/InspectorPan
 export { default as LoggerPanel } from './components/panels/logger/LoggerPanel.svelte';
 export { default as WarningsPanel } from './components/panels/warnings/WarningsPanel.svelte';
 export { default as DashboardPanel } from './components/panels/dashboard/DashboardPanel.svelte';
+export { default as DashboardViewer } from './components/panels/dashboard/DashboardViewer.svelte';
 export {
 	registerNodeInspector,
 	registerNodeInspectors,

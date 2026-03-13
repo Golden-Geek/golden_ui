@@ -1,18 +1,96 @@
 <script lang="ts">
+	import {
+		readPanelPersistedState,
+		writePanelPersistedState
+	} from '../../../dockview/panel-persistence';
 	import type { PanelProps, PanelState } from '../../../dockview/panel-types';
-	import type { UiNodeDto } from '../../../types';
+	import type { NodeId, UiNodeDto } from '../../../types';
 	import { appState } from '../../../store/workbench.svelte';
-	import { tick } from 'svelte';
+	import { tick, untrack } from 'svelte';
 	import OutlinerItem from './OutlinerItem.svelte';
 	import { collectOutlinerAncestorNodeIds, scrollOutlinerNodeIntoView } from './navigation';
 
-	let { panelId, panelType, title, params }: PanelProps = $props();
+	let { panelApi, panelId, panelType, title, params }: PanelProps = $props();
 	let panel = $state<PanelState>({
 		panelId: '',
 		panelType: '',
 		title: '',
 		params: {}
 	});
+
+	interface OutlinerPersistedState {
+		opennessByNodeId?: Record<string, boolean>;
+	}
+
+	const isRecord = (value: unknown): value is Record<string, unknown> =>
+		typeof value === 'object' && value !== null && !Array.isArray(value);
+
+	const sanitizeOpennessByNodeId = (value: unknown): Record<string, boolean> => {
+		if (!isRecord(value)) {
+			return {};
+		}
+
+		const nextEntries: Array<[string, boolean]> = [];
+		for (const [rawNodeId, rawExpanded] of Object.entries(value)) {
+			const nodeId = Number(rawNodeId);
+			if (!Number.isInteger(nodeId) || nodeId < 0 || typeof rawExpanded !== 'boolean') {
+				continue;
+			}
+			nextEntries.push([String(nodeId), rawExpanded]);
+		}
+		return Object.fromEntries(nextEntries);
+	};
+
+	const sameOpennessByNodeId = (
+		left: Record<string, boolean>,
+		right: Record<string, boolean>
+	): boolean => {
+		const leftEntries = Object.entries(left);
+		const rightEntries = Object.entries(right);
+		if (leftEntries.length !== rightEntries.length) {
+			return false;
+		}
+		for (const [nodeId, expanded] of leftEntries) {
+			if (right[nodeId] !== expanded) {
+				return false;
+			}
+		}
+		return true;
+	};
+
+	let opennessByNodeId = $state<Record<string, boolean>>({});
+
+	const applyPersistedState = (nextParams: PanelState['params']): void => {
+		const persistedState = readPanelPersistedState<OutlinerPersistedState>(nextParams);
+		const nextOpennessByNodeId = sanitizeOpennessByNodeId(persistedState.opennessByNodeId);
+		const currentOpennessByNodeId = untrack(() => opennessByNodeId);
+		if (sameOpennessByNodeId(currentOpennessByNodeId, nextOpennessByNodeId)) {
+			return;
+		}
+		opennessByNodeId = nextOpennessByNodeId;
+	};
+
+	const persistOpennessByNodeId = (nextOpennessByNodeId: Record<string, boolean>): void => {
+		const currentOpennessByNodeId = untrack(() => opennessByNodeId);
+		if (sameOpennessByNodeId(currentOpennessByNodeId, nextOpennessByNodeId)) {
+			return;
+		}
+		opennessByNodeId = nextOpennessByNodeId;
+		writePanelPersistedState(panelApi, {
+			opennessByNodeId: nextOpennessByNodeId
+		});
+	};
+
+	const setNodeExpanded = (nodeId: NodeId, expanded: boolean): void => {
+		const nodeKey = String(nodeId);
+		if (opennessByNodeId[nodeKey] === expanded) {
+			return;
+		}
+		persistOpennessByNodeId({
+			...opennessByNodeId,
+			[nodeKey]: expanded
+		});
+	};
 
 	$effect(() => {
 		panel = {
@@ -21,10 +99,12 @@
 			title,
 			params
 		};
+		applyPersistedState(params);
 	});
 
 	export const setPanelState = (next: PanelState): void => {
 		panel = next;
+		applyPersistedState(next.params);
 	};
 
 	let mainGraphState = $derived(appState.session?.graph.state);
@@ -36,6 +116,29 @@
 	let treeElement = $state<HTMLDivElement | null>(null);
 
 	let rootNode = $derived(mainGraphState?.nodesById.get(mainGraphState?.rootId ?? 0) ?? null);
+
+	$effect(() => {
+		if (!mainGraphState || mainGraphState.rootId === null) {
+			return;
+		}
+
+		let didPrune = false;
+		const nextEntries: Array<[string, boolean]> = [];
+		for (const [nodeIdKey, expanded] of Object.entries(opennessByNodeId)) {
+			const nodeId = Number(nodeIdKey) as NodeId;
+			if (!mainGraphState.nodesById.has(nodeId)) {
+				didPrune = true;
+				continue;
+			}
+			nextEntries.push([nodeIdKey, expanded]);
+		}
+
+		if (!didPrune) {
+			return;
+		}
+
+		persistOpennessByNodeId(Object.fromEntries(nextEntries));
+	});
 
 	const nodeFilter = (candidate: UiNodeDto): boolean => {
 		const normalizedQuery = query.trim().toLowerCase();
@@ -96,6 +199,8 @@
 					node={rootNode}
 					initiallyExpandedDepth={3}
 					{autoExpandAncestorNodeIds}
+					{opennessByNodeId}
+					onNodeOpennessChange={setNodeExpanded}
 					{nodeFilter} />
 			</div>
 		</div>

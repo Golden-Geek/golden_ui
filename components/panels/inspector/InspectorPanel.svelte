@@ -17,6 +17,7 @@
 	import Watcher from '../../common/Watcher.svelte';
 	import type { WatcherUiSettings } from '../../common/watcher/watcher-utils';
 	import NodeAddButton from '../../common/NodeAddButton.svelte';
+	import Arrow from '../../common/Arrow.svelte';
 
 	let { panelApi, panelId, panelType, title, params }: PanelProps = $props();
 
@@ -494,24 +495,27 @@
 		<div class="inspector-nav-tools">
 			<button
 				type="button"
-				class="inspector-nav-button arrow up"
+				class="inspector-nav-button"
 				title="Inspect parent node"
 				disabled={!canInspectParent}
 				onclick={inspectParentNode}>
+				<Arrow direction="up" />
 			</button>
 			<button
 				type="button"
-				class="inspector-nav-button arrow left"
+				class="inspector-nav-button"
 				title="Inspect previous node"
 				disabled={!canGoHistoryBackward}
 				onclick={inspectPreviousNode}>
+				<Arrow direction="left" />
 			</button>
 			<button
 				type="button"
-				class="inspector-nav-button arrow right"
+				class="inspector-nav-button"
 				title="Inspect next node"
 				disabled={!canGoHistoryForward}
 				onclick={inspectNextNode}>
+				<Arrow direction="right" />
 			</button>
 
 			<button
@@ -637,6 +641,8 @@
 		opacity: 0.6;
 		height: 1rem;
 		width: 1rem;
+		padding: 0;
+		margin: 0 0.2rem;
 	}
 
 	.inspector-nav-button:hover:not(:disabled) {
@@ -646,10 +652,6 @@
 	.inspector-nav-button:disabled {
 		opacity: 0.2;
 		cursor: default;
-	}
-
-	.inspector-nav-button.arrow {
-		margin: 0;
 	}
 
 	.lock-toggle {

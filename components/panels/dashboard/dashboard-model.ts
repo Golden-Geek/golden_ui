@@ -228,15 +228,18 @@ export const getDashboardPlacement = (
 		},
 		anchor,
 		size: {
-			width: cssValueFromParamValue(widthNode?.data.kind === 'parameter' ? widthNode.data.param.value : undefined, {
-				value: 12,
-				unit: 'rem'
-			}),
+			width: cssValueFromParamValue(
+				widthNode?.data.kind === 'parameter' ? widthNode.data.param.value : undefined,
+				{
+					value: 12,
+					unit: 'rem'
+				}
+			),
 			height: cssValueFromParamValue(
 				heightNode?.data.kind === 'parameter' ? heightNode.data.param.value : undefined,
 				{
-				value: 4,
-				unit: 'rem'
+					value: 4,
+					unit: 'rem'
 				}
 			)
 		},
@@ -266,7 +269,7 @@ export const getDashboardPageSize = (
 	node: UiNodeDto | null,
 	fallback: [number, number] = [1920, 1080]
 ): DashboardPageSize => {
-	const pageSizeNode = getDirectParamNode(graph, node, 'page_size');
+	const pageSizeNode = getDirectParamNode(graph, node, 'layout/page_size');
 	const pageSizeParam = pageSizeNode?.data.kind === 'parameter' ? pageSizeNode.data.param : null;
 	const pageSizeValue = pageSizeParam?.value.kind === 'vec2' ? pageSizeParam.value.value : fallback;
 	return {

@@ -17,4 +17,11 @@ warnings?: Array<NodeWarning>,
 /**
  * If greater than zero, this node surfaces descendant warnings up to this depth.
  */
-show_child_warnings_max_depth?: number, };
+show_child_warnings_max_depth?: number, 
+/**
+ * Whether this node stays visible when rendered as a nested inspector child.
+ *
+ * Managed items default to hidden in nested inspectors unless directly selected
+ * or rendered as the inspector root.
+ */
+show_in_nested_inspector?: boolean, };

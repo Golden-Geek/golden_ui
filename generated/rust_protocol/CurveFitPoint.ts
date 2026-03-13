@@ -3,7 +3,7 @@
 /**
  * One recorded sample used when fitting a curve to bezier keys.
  */
-export type AnimationCurveFitPoint = { 
+export type CurveFitPoint = { 
 /**
  * Sample position on the curve domain axis.
  */

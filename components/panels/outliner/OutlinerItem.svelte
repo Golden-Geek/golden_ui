@@ -21,8 +21,10 @@
 		transitionDurationMs = 150,
 		focusedNodeId = null,
 		autoExpandAncestorNodeIds = EMPTY_AUTO_EXPAND_ANCESTORS,
+		opennessByNodeId = null,
 		nodeFilter = (_candidate: UiNodeDto) => true,
 		nodeSelectable = (_candidate: UiNodeDto) => true,
+		onNodeOpennessChange = null,
 		onSelectNode = null
 	} = $props<{
 		node: UiNodeDto | null;
@@ -33,8 +35,10 @@
 		transitionDurationMs?: number;
 		focusedNodeId?: number | null;
 		autoExpandAncestorNodeIds?: ReadonlySet<NodeId>;
+		opennessByNodeId?: Readonly<Record<string, boolean>> | null;
 		nodeFilter?: (candidate: UiNodeDto) => boolean;
 		nodeSelectable?: (candidate: UiNodeDto) => boolean;
+		onNodeOpennessChange?: ((nodeId: NodeId, expanded: boolean) => void) | null;
 		onSelectNode?: ((next: UiNodeDto, event: MouseEvent) => void) | null;
 	}>();
 
@@ -65,23 +69,81 @@
 		);
 	};
 
-	let isExpanded = $state(false);
-	let didInitExpanded = $state(false);
+	const defaultExpandedForNode = (candidate: UiNodeDto | null): boolean => {
+		if (candidate === null) {
+			return false;
+		}
+		return level < initiallyExpandedDepth || autoExpandAncestorNodeIds.has(candidate.node_id);
+	};
+
+	const explicitExpandedForNode = (candidate: UiNodeDto | null): boolean | null => {
+		if (candidate === null || opennessByNodeId === null) {
+			return null;
+		}
+		const expanded = opennessByNodeId[String(candidate.node_id)];
+		return typeof expanded === 'boolean' ? expanded : null;
+	};
+
+	let localIsExpanded = $state(false);
+	let localExpansionNodeId = $state<NodeId | null>(null);
 
 	$effect.pre(() => {
-		if (didInitExpanded) {
+		if (opennessByNodeId !== null) {
 			return;
 		}
-		const shouldAutoExpandToTarget = node !== null && autoExpandAncestorNodeIds.has(node.node_id);
-		isExpanded = level < initiallyExpandedDepth || shouldAutoExpandToTarget;
-		didInitExpanded = true;
+		const nodeId = node?.node_id ?? null;
+		if (nodeId === null) {
+			localIsExpanded = false;
+			localExpansionNodeId = null;
+			return;
+		}
+		if (localExpansionNodeId === nodeId) {
+			return;
+		}
+		localIsExpanded = defaultExpandedForNode(node);
+		localExpansionNodeId = nodeId;
+	});
+
+	const setExpanded = (nextExpanded: boolean): void => {
+		if (node === null) {
+			return;
+		}
+		if (opennessByNodeId !== null) {
+			if (explicitExpandedForNode(node) === nextExpanded) {
+				return;
+			}
+			onNodeOpennessChange?.(node.node_id, nextExpanded);
+			return;
+		}
+		localIsExpanded = nextExpanded;
+	};
+
+	let isExpanded = $derived.by(() => {
+		const explicitExpanded = explicitExpandedForNode(node);
+		if (explicitExpanded !== null) {
+			return explicitExpanded;
+		}
+		if (opennessByNodeId !== null) {
+			return defaultExpandedForNode(node);
+		}
+		return localIsExpanded;
 	});
 
 	$effect(() => {
 		if (node === null || !autoExpandAncestorNodeIds.has(node.node_id)) {
 			return;
 		}
-		isExpanded = true;
+		if (opennessByNodeId !== null) {
+			if (explicitExpandedForNode(node) === true) {
+				return;
+			}
+			setExpanded(true);
+			return;
+		}
+		if (localIsExpanded) {
+			return;
+		}
+		setExpanded(true);
 	});
 
 	let isSelected = $derived(session?.isNodeSelected(node?.node_id ?? -1) ?? false);
@@ -182,7 +244,7 @@
 				onpointerenter={handlePointerEnter}
 				onpointerleave={handlePointerLeave}>
 				{#if hasArrow}
-					<div aria-hidden="true" onclick={() => (isExpanded = !isExpanded)}>
+					<div aria-hidden="true" onclick={() => setExpanded(!isExpanded)}>
 						<Arrow direction={isExpanded ? 'down' : 'right'} color={accentColor} />
 					</div>
 				{/if}
@@ -222,8 +284,10 @@
 						{transitionDurationMs}
 						{focusedNodeId}
 						{autoExpandAncestorNodeIds}
+						{opennessByNodeId}
 						{nodeFilter}
 						{nodeSelectable}
+						{onNodeOpennessChange}
 						{onSelectNode} />
 				{/each}
 			</div>

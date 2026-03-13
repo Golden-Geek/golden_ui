@@ -51,6 +51,7 @@ export interface WorkbenchSessionOptions {
 	scope?: UiSubscriptionScope;
 	bootstrapRetryMs?: number;
 	transportFactory?: UiTransportFactory;
+	enableGlobalShortcuts?: boolean;
 }
 
 export type WorkbenchConnectionStatus = 'disconnected' | 'connecting' | 'connected';
@@ -150,6 +151,7 @@ const isEditableTarget = (target: EventTarget | null): boolean => {
 export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): WorkbenchSession => {
 	const scope = options.scope ?? wholeGraphScope;
 	const retryMs = Math.max(100, options.bootstrapRetryMs ?? DEFAULT_RETRY_MS);
+	const enableGlobalShortcuts = options.enableGlobalShortcuts ?? true;
 	const graph = createGraphStore();
 	const shouldLogUiPerf = (() => {
 		if (typeof window === 'undefined') {
@@ -659,7 +661,7 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 		};
 
 		unregisterCommands = commandSuite.registerCommandHandlers();
-		if (typeof window !== 'undefined') {
+		if (enableGlobalShortcuts && typeof window !== 'undefined') {
 			window.addEventListener('keydown', onWindowKeydown, true);
 		}
 		void bootstrap();
@@ -668,7 +670,7 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 			stopped = true;
 			clearRetry();
 			rejectQueuedIntents(new Error('workbench session unmounted'));
-			if (typeof window !== 'undefined') {
+			if (enableGlobalShortcuts && typeof window !== 'undefined') {
 				window.removeEventListener('keydown', onWindowKeydown, true);
 			}
 			unregisterCommands();

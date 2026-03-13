@@ -3,7 +3,7 @@
 /**
  * Tuning parameters for sample-to-bezier fitting.
  */
-export type AnimationCurveBezierFitOptions = { 
+export type CurveBezierFitOptions = { 
 /**
  * Maximum tolerated absolute value error between the source samples and the fitted bezier curve.
  */

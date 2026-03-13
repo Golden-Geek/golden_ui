@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
 	import { slide, type SlideParams } from 'svelte/transition';
-	import type { UiNodeDto } from '../../../types';
+	import type { NodeId, UiNodeDto } from '../../../types';
 	import Self from './NodeInspector.svelte';
 	import { appState } from '../../../store/workbench.svelte';
 	import { sendPatchMetaIntent } from '../../../store/ui-intents';
@@ -37,22 +37,38 @@
 		nodes.length > 0 ? (session?.graph.state.nodesById.get(nodes[0]?.node_id) ?? nodes[0]) : null
 	);
 
+	const shouldRenderChildInInspector = (child: UiNodeDto): boolean => {
+		if (child.user_role !== 'itemRoot') {
+			return true;
+		}
+
+		if (child.meta.presentation?.show_in_nested_inspector) {
+			return true;
+		}
+
+		return session?.isNodeSelected(child.node_id) ?? false;
+	};
+
 	let isRoot = $derived(level === 0);
 	let isFirstLevel = $derived(level === 1);
 
 	let color = $derived(node ? getContainerColorForNode(node) : 'rgba(124, 138, 162, 1)');
-	let children = $derived.by(() => {
+	let childNodes = $derived.by(() => {
 		if (!includeChildren) {
 			return [];
 		}
 		if (maxChildLevel !== null && level >= maxChildLevel) {
 			return [];
 		}
-		return node?.children ?? [];
+
+		return (node?.children ?? [])
+			.map((childId: NodeId) => session?.getNodeData(childId))
+			.filter((child: UiNodeDto | null | undefined): child is UiNodeDto => child != null)
+			.filter((child: UiNodeDto) => shouldRenderChildInInspector(child));
 	});
 	let isParameter = $derived(node?.data.kind === 'parameter');
 	let showAsContainer = $derived(!isParameter);
-	let hasChildren = $derived(children.length > 0);
+	let hasChildren = $derived(childNodes.length > 0);
 	let canBeDisabled = $derived(node?.meta?.can_be_disabled ?? false);
 	let isNameChangeable = $derived(node?.meta?.user_permissions.can_edit_name ?? false);
 	let iconURL = $derived(getIconURLForNode(node));
@@ -275,15 +291,15 @@
 			<div class="node-inspector-children">
 				{#if !collapsed}
 					<div class="node-inspector-children-wrapper" transition:slide={{ duration: 200 }}>
-						{#each children as childId, index}
+						{#each childNodes as child, index (child.node_id)}
 							<Self
-								nodes={[session?.getNodeData(childId)!]}
+								nodes={[child]}
 								level={level + 1}
-								order={children.length === 1
+								order={childNodes.length === 1
 									? 'solo'
 									: index === 0
 										? 'first'
-										: index === children.length - 1
+										: index === childNodes.length - 1
 											? 'last'
 											: ''}
 								{layoutMode}

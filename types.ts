@@ -122,6 +122,8 @@ export interface UiNodePresentationHintsDto {
 	warnings?: UiNodeWarningDto[];
 	// If > 0, this node also surfaces warnings from descendants up to this depth.
 	show_child_warnings_max_depth?: number;
+	// Keeps this node visible when nested in another node's inspector.
+	show_in_nested_inspector?: boolean;
 }
 
 export interface UiNodeUserPermissionsDto {
