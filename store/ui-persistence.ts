@@ -3,6 +3,7 @@ import type { NodeId } from '../types';
 
 const PERSISTED_LAYOUT_KEY = 'golden_ui.layout.v1';
 const PERSISTED_SELECTION_KEY = 'golden_ui.selection.v1';
+const PERSISTED_LAST_PROJECT_PATH_KEY = 'golden_ui.project-path.v1';
 const PERSISTENCE_VERSION = 1;
 
 interface PersistedEnvelope<T> {
@@ -51,6 +52,18 @@ const writeStoredJson = (key: string, payload: unknown): void => {
 	}
 };
 
+const removeStoredValue = (key: string): void => {
+	if (!hasLocalStorage()) {
+		return;
+	}
+
+	try {
+		window.localStorage.removeItem(key);
+	} catch (error) {
+		console.warn(`[ui-persistence] Unable to remove "${key}".`, error);
+	}
+};
+
 const readStoredPayload = (key: string): unknown | null => {
 	const value = readStoredJson(key);
 	if (!isRecord(value)) {
@@ -88,6 +101,15 @@ const asNodeIdArray = (value: unknown): NodeId[] => {
 	return Array.from(uniqueNodeIds);
 };
 
+const asStoredProjectPath = (value: unknown): string | null => {
+	if (typeof value !== 'string') {
+		return null;
+	}
+
+	const normalized = value.trim();
+	return normalized.length > 0 ? normalized : null;
+};
+
 export const loadPersistedDockLayout = (): SerializedDockview | null => {
 	const payload = readStoredPayload(PERSISTED_LAYOUT_KEY);
 	return asSerializedDockview(payload);
@@ -106,6 +128,21 @@ export const savePersistedSelection = (nodeIds: NodeId[]): void => {
 	writeStoredJson(PERSISTED_SELECTION_KEY, nodeIds);
 };
 
+export const loadPersistedLastProjectPath = (): string | null => {
+	const payload = readStoredPayload(PERSISTED_LAST_PROJECT_PATH_KEY);
+	return asStoredProjectPath(payload);
+};
+
+export const savePersistedLastProjectPath = (path: string | null): void => {
+	const normalized = asStoredProjectPath(path);
+	if (normalized === null) {
+		removeStoredValue(PERSISTED_LAST_PROJECT_PATH_KEY);
+		return;
+	}
+
+	writeStoredJson(PERSISTED_LAST_PROJECT_PATH_KEY, normalized);
+};
+
 export const clearPersistedUiState = (): void => {
 	if (!hasLocalStorage()) {
 		return;
@@ -114,6 +151,7 @@ export const clearPersistedUiState = (): void => {
 	try {
 		window.localStorage.removeItem(PERSISTED_LAYOUT_KEY);
 		window.localStorage.removeItem(PERSISTED_SELECTION_KEY);
+		window.localStorage.removeItem(PERSISTED_LAST_PROJECT_PATH_KEY);
 	} catch (error) {
 		console.warn('[ui-persistence] Unable to clear persisted UI state.', error);
 	}

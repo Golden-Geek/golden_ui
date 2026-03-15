@@ -357,6 +357,7 @@ export interface UiHistoryState {
 	undo_len: number;
 	redo_len: number;
 	active_edit_session: boolean;
+	current_history_state_id: number;
 }
 
 export interface UiLogRecord {
@@ -374,6 +375,11 @@ export interface UiLoggerState {
 	records: UiLogRecord[];
 }
 
+export interface UiProjectFileSpec {
+	display_name: string;
+	extension: string;
+}
+
 export interface UiSnapshot {
 	protocol_version: string;
 	scope: UiSubscriptionScope;
@@ -382,6 +388,7 @@ export interface UiSnapshot {
 	schema: UiSchemaView;
 	history: UiHistoryState;
 	logger: UiLoggerState;
+	project_file: UiProjectFileSpec;
 }
 
 export type UiEventKind =
@@ -490,6 +497,7 @@ export interface UiClient {
 	projectNew(): Promise<void>;
 	projectSave(path: string): Promise<void>;
 	projectLoad(path: string): Promise<void>;
+	projectUploadLoad(fileName: string, contents: string): Promise<string>;
 }
 
 export const wholeGraphScope: UiSubscriptionScope = { kind: 'wholeGraph' };

@@ -20,6 +20,7 @@ import type {
 } from '../types';
 import { wholeGraphScope } from '../types';
 import { handleCommandShortcut } from './commands.svelte';
+import { resetProjectFileFormat, setProjectFileFormat } from './project-file-format.svelte';
 import { createWorkbenchDescriptionStore } from './session/descriptions.svelte';
 import { createWorkbenchFooterHoverStore } from './session/footer-hover.svelte';
 import { createWorkbenchHistoryStore } from './session/history.svelte';
@@ -69,6 +70,7 @@ export interface WorkbenchSession {
 	readonly historyBusy: boolean;
 	readonly canUndo: boolean;
 	readonly canRedo: boolean;
+	readonly currentHistoryStateId: number;
 	readonly hasActiveEditSession: boolean;
 	readonly editSessionEpoch: number;
 	getNodeData(nodeId: NodeId): UiNodeDto | null;
@@ -91,6 +93,7 @@ export interface WorkbenchSession {
 	dismissToast(toastId: number): void;
 	undo(): Promise<void>;
 	redo(): Promise<void>;
+	refreshSnapshot(): Promise<boolean>;
 	mount(): () => void;
 }
 
@@ -270,6 +273,7 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 
 	const applySnapshotToState = (snapshot: UiSnapshot): void => {
 		graph.loadSnapshot(snapshot);
+		setProjectFileFormat(snapshot.project_file);
 		descriptions.applySnapshotSchema(snapshot.schema);
 		footerHover.prune();
 		hasLoadedSnapshot = true;
@@ -290,6 +294,18 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 			snapshotRequestInFlight = null;
 		});
 		return snapshotRequestInFlight;
+	};
+
+	const refreshSnapshot = async (): Promise<boolean> => {
+		try {
+			const snapshot = await requestSnapshot();
+			applySnapshotToState(snapshot);
+			return true;
+		} catch (error) {
+			const message = error instanceof Error ? error.message : 'unknown refresh error';
+			appendUiLogRecord('error', UI_LOG_TAG_TRANSPORT, `Snapshot refresh failed: ${message}`);
+			return false;
+		}
 	};
 
 	const resyncSnapshot = async (successMessage?: string): Promise<void> => {
@@ -683,6 +699,7 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 			selection.reset();
 			commandSuite.reset();
 			logger.reset();
+			resetProjectFileFormat();
 			hasLoadedSnapshot = false;
 			connectionState = 'connecting';
 			syncConnectionStatus();
@@ -729,6 +746,9 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 		get canRedo(): boolean {
 			return history.canRedo;
 		},
+		get currentHistoryStateId(): number {
+			return history.currentHistoryStateId;
+		},
 		get hasActiveEditSession(): boolean {
 			return history.hasActiveEditSession;
 		},
@@ -755,6 +775,7 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 		dismissToast,
 		undo,
 		redo,
+		refreshSnapshot,
 		mount
 	};
 };

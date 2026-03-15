@@ -23,4 +23,8 @@ redo_len: number,
 /**
  * Whether an edit session is currently active.
  */
-active_edit_session: boolean, };
+active_edit_session: boolean, 
+/**
+ * Logical content-state id for the current graph relative to undo/redo history.
+ */
+current_history_state_id: number, };

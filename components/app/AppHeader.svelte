@@ -4,6 +4,9 @@
 	import { onMount } from 'svelte';
 	import { clearPersistedUiState } from '../../store/ui-persistence';
 	import { platform } from '../../store/platform.svelte';
+	import { projectFileDisplayName, projectFileState } from '../../store/project-files.svelte';
+	import { requestWindowExit } from '../../store/window-exit.svelte';
+	import FileMenu from './FileMenu.svelte';
 
 	let isWindowMaximized = $state(false);
 	let hasTauriWindowApi = $state(false);
@@ -11,6 +14,13 @@
 	const { session } = $props<{
 		session?: WorkbenchSession | null;
 	}>();
+
+	let projectTitle = $derived.by((): string => {
+		const fileName = projectFileDisplayName(projectFileState.currentPath);
+		return session.currentHistoryStateId !== projectFileState.savedHistoryStateId
+			? `${fileName}*`
+			: fileName;
+	});
 
 	const refreshMaximizeState = async (): Promise<void> => {
 		const maximized = await invokeDesktopCommand(
@@ -42,10 +52,7 @@
 	};
 
 	const closeWindow = async (): Promise<void> => {
-		const result = await invokeDesktopCommand('window_close', undefined, 'window-controls');
-		if (result === undefined) {
-			console.error('[window-controls] Tauri window API unavailable (close).');
-		}
+		await requestWindowExit();
 	};
 
 	const startDrag = async (): Promise<void> => {
@@ -83,7 +90,13 @@
 </script>
 
 <div class="gc-header {hasTauriWindowApi ? 'tauri' : ''}">
-	<div class="app-title">Chataigne 2.0.0</div>
+	<div class="header-start">
+		<FileMenu />
+		<div class="app-title">
+			<span class="project-title">{projectTitle}</span>
+			<span class="app-title-app">Chataigne 2.0.0</span>
+		</div>
+	</div>
 	<div
 		class="spacer"
 		data-tauri-drag-region
@@ -151,6 +164,44 @@
 </div>
 
 <style>
+	.header-start {
+		display: flex;
+		align-items: center;
+		gap: 0.7rem;
+		min-width: 0;
+	}
+
+	.app-title {
+		display: inline-flex;
+		align-items: baseline;
+		gap: 0.55rem;
+		min-width: 0;
+		white-space: nowrap;
+	}
+
+	.project-title {
+		max-width: min(34vw, 28rem);
+		overflow: hidden;
+		text-overflow: ellipsis;
+		font-size: 0.82rem;
+		font-weight: 700;
+		letter-spacing: 0.02em;
+		color: rgb(from var(--gc-color-text) r g b / 92%);
+	}
+
+	.app-title-app {
+		font-size: 0.68rem;
+		font-weight: 700;
+		letter-spacing: 0.08em;
+		text-transform: uppercase;
+		color: rgb(from var(--gc-color-text) r g b / 58%);
+	}
+
+	.controls {
+		display: flex;
+		align-items: center;
+	}
+
 	.history-actions {
 		display: flex;
 		gap: 0.25rem;

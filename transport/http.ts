@@ -17,6 +17,7 @@ import type {
 	UiParamConstraints,
 	UiParamDto,
 	UiFileConstraints,
+	UiProjectFileSpec,
 	UiReferenceConstraints,
 	UiReferenceTargets,
 	UiReferenceRoot,
@@ -45,7 +46,9 @@ import type { UiNodeTypeDescriptor as RustUiNodeTypeDescriptor } from '../genera
 import type { UiParamControlInfoDto as RustUiParamControlInfoResponse } from '../generated/rust_protocol/UiParamControlInfoDto';
 import type { UiParamControlInfoRequest as RustParamControlInfoRequest } from '../generated/rust_protocol/UiParamControlInfoRequest';
 import type { UiParamDto as RustUiParamDto } from '../generated/rust_protocol/UiParamDto';
+import type { UiProjectPathDto as RustProjectPathResponse } from '../generated/rust_protocol/UiProjectPathDto';
 import type { UiProjectPathRequest as RustProjectPathRequest } from '../generated/rust_protocol/UiProjectPathRequest';
+import type { UiProjectUploadRequest as RustProjectUploadRequest } from '../generated/rust_protocol/UiProjectUploadRequest';
 import type { UiReferenceTargetsDto as RustReferenceTargetsResponse } from '../generated/rust_protocol/UiReferenceTargetsDto';
 import type { UiReferenceTargetsRequest as RustReferenceTargetsRequest } from '../generated/rust_protocol/UiReferenceTargetsRequest';
 import type { UiReplayRequest as RustReplayRequest } from '../generated/rust_protocol/UiReplayRequest';
@@ -364,6 +367,29 @@ const fromRustFileConstraints = (file: unknown): UiFileConstraints | undefined =
 	return {
 		allowed_types,
 		allowed_extensions
+	};
+};
+
+const fromRustProjectFileSpec = (projectFile: unknown): UiProjectFileSpec => {
+	if (!isRecord(projectFile)) {
+		return {
+			display_name: 'Project',
+			extension: 'json'
+		};
+	}
+
+	const displayName =
+		typeof projectFile.display_name === 'string' && projectFile.display_name.trim().length > 0
+			? projectFile.display_name.trim()
+			: 'Project';
+	const extension =
+		typeof projectFile.extension === 'string' && projectFile.extension.trim().length > 0
+			? projectFile.extension.trim().replace(/^\.+/, '').toLowerCase()
+			: 'json';
+
+	return {
+		display_name: displayName,
+		extension: extension.length > 0 ? extension : 'json'
 	};
 };
 
@@ -984,7 +1010,8 @@ export const fromRustSnapshot = (snapshot: RustUiSnapshot): UiSnapshot => {
 			can_redo: false,
 			undo_len: 0,
 			redo_len: 0,
-			active_edit_session: false
+			active_edit_session: false,
+			current_history_state_id: 0
 		},
 		logger: {
 			max_entries: snapshot.logger?.max_entries ?? 0,
@@ -997,7 +1024,8 @@ export const fromRustSnapshot = (snapshot: RustUiSnapshot): UiSnapshot => {
 				repeat_count: record.repeat_count ?? undefined,
 				origin: record.origin ?? undefined
 			}))
-		}
+		},
+		project_file: fromRustProjectFileSpec(snapshot.project_file)
 	};
 };
 
@@ -1283,6 +1311,18 @@ export const createHttpUiClient = (options: HttpClientOptions = {}): UiClient =>
 		async projectLoad(path: string): Promise<void> {
 			const request: RustProjectPathRequest = { path };
 			await postJson<{ ok?: boolean }>('/project-load', request);
+		},
+
+		async projectUploadLoad(fileName: string, contents: string): Promise<string> {
+			const request: RustProjectUploadRequest = {
+				file_name: fileName,
+				contents
+			};
+			const response = await postJson<RustProjectPathResponse>('/project-upload-load', request);
+			if (typeof response.path !== 'string' || response.path.trim().length === 0) {
+				throw new Error('POST /project-upload-load returned an invalid project path');
+			}
+			return response.path;
 		}
 	};
 

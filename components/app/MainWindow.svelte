@@ -7,6 +7,7 @@
 	import type { NodeIconSet } from '../../store/node-types';
 	import { platform } from '../../store/platform.svelte';
 	import WorkbenchSessionRoot from './WorkbenchSessionRoot.svelte';
+	import WorkbenchOverlayHost from './WorkbenchOverlayHost.svelte';
 
 	const props = $props<{
 		wsUrl?: string;
@@ -32,6 +33,7 @@
 				userPanels={props.userPanels}
 				initialPanels={props.initialPanels}
 				nodeIcons={props.nodeIcons} />
+			<WorkbenchOverlayHost />
 			<AppFooter {session} />
 		</div>
 	{/if}

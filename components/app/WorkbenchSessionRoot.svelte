@@ -10,6 +10,7 @@
 		type WorkbenchSession,
 		type WorkbenchSessionOptions
 	} from '../../store/workbench.svelte';
+	import { mountWindowExitHandling } from '../../store/window-exit.svelte';
 
 	let {
 		wsUrl,
@@ -58,8 +59,10 @@
 
 	onMount(() => {
 		const cleanup = session.mount();
+		const closeHandlingCleanup = mountWindowExitHandling();
 
 		return () => {
+			closeHandlingCleanup();
 			if (!preserveSessionOnDestroy) {
 				cleanup();
 			}

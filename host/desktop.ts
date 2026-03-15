@@ -5,8 +5,12 @@ export interface DesktopCommandArgs {
 export interface DesktopFileDialogOptions {
 	allowedExtensions?: string[];
 	suggestedPath?: string | null;
+	filterLabel?: string;
+	title?: string;
 	logTag?: string;
 }
+
+const DESKTOP_WINDOW_CLOSE_REQUESTED_EVENT = 'gc-window-close-requested';
 
 const normalizeDialogPath = (value: unknown): string | null => {
 	if (typeof value !== 'string') {
@@ -19,6 +23,22 @@ const normalizeDialogPath = (value: unknown): string | null => {
 
 export const hasDesktopHost = (): boolean =>
 	typeof window !== 'undefined' && Boolean(window.__TAURI_INTERNALS__?.invoke);
+
+export const subscribeDesktopWindowCloseRequested = (
+	handler: () => void
+): (() => void) => {
+	if (typeof window === 'undefined' || !hasDesktopHost()) {
+		return () => {};
+	}
+
+	const listener = () => {
+		handler();
+	};
+	window.addEventListener(DESKTOP_WINDOW_CLOSE_REQUESTED_EVENT, listener);
+	return () => {
+		window.removeEventListener(DESKTOP_WINDOW_CLOSE_REQUESTED_EVENT, listener);
+	};
+};
 
 export const invokeDesktopCommand = async <T = unknown>(
 	command: string,
@@ -44,7 +64,9 @@ export const openDesktopFileDialog = async (
 	const selected = await invokeDesktopCommand<string | null>(
 		'open_file_dialog',
 		{
-			allowed_extensions: options.allowedExtensions
+			allowed_extensions: options.allowedExtensions,
+			filter_label: options.filterLabel,
+			title: options.title
 		},
 		options.logTag ?? 'desktop-host'
 	);
@@ -59,10 +81,18 @@ export const saveDesktopFileDialog = async (
 		'save_file_dialog',
 		{
 			suggested_path: options.suggestedPath ?? undefined,
-			allowed_extensions: options.allowedExtensions
+			allowed_extensions: options.allowedExtensions,
+			filter_label: options.filterLabel,
+			title: options.title
 		},
 		options.logTag ?? 'desktop-host'
 	);
 
 	return normalizeDialogPath(selected);
 };
+
+export const requestDesktopWindowClose = async (): Promise<unknown> =>
+	invokeDesktopCommand('window_close', undefined, 'window-controls');
+
+export const forceCloseDesktopWindow = async (): Promise<unknown> =>
+	invokeDesktopCommand('window_destroy', undefined, 'window-controls');

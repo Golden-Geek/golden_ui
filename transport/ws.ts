@@ -645,6 +645,10 @@ export const createWebSocketUiClient = (options: WebSocketUiClientOptions = {}):
 
 		async projectLoad(path) {
 			return httpClient.projectLoad(path);
+		},
+
+		async projectUploadLoad(fileName, contents) {
+			return httpClient.projectUploadLoad(fileName, contents);
 		}
 	};
 

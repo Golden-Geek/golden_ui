@@ -3,6 +3,7 @@ import type { EngineTime } from "./EngineTime";
 import type { UiHistoryState } from "./UiHistoryState";
 import type { UiLoggerState } from "./UiLoggerState";
 import type { UiNodeDto } from "./UiNodeDto";
+import type { UiProjectFileSpec } from "./UiProjectFileSpec";
 import type { UiSchemaView } from "./UiSchemaView";
 import type { UiSubscriptionScope } from "./UiSubscriptionScope";
 import type { UiUserContextsDto } from "./UiUserContextsDto";
@@ -39,6 +40,10 @@ history: UiHistoryState,
  * Current logger state.
  */
 logger: UiLoggerState, 
+/**
+ * App-provided project file metadata.
+ */
+project_file: UiProjectFileSpec, 
 /**
  * Current user-context scopes.
  */

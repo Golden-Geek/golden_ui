@@ -6,6 +6,7 @@ export interface WorkbenchHistoryStore {
 	readonly canRedo: boolean;
 	readonly hasActiveEditSession: boolean;
 	readonly editSessionEpoch: number;
+	readonly currentHistoryStateId: number;
 	applyHistoryState(history: UiHistoryState | undefined): void;
 	undo(runUndo: () => Promise<void>): Promise<void>;
 	redo(runRedo: () => Promise<void>): Promise<void>;
@@ -18,6 +19,7 @@ export const createWorkbenchHistoryStore = (): WorkbenchHistoryStore => {
 	let canRedo = $state(false);
 	let hasActiveEditSession = $state(false);
 	let editSessionEpoch = $state(0);
+	let currentHistoryStateId = $state(0);
 
 	const applyHistoryState = (history: UiHistoryState | undefined): void => {
 		if (!history) {
@@ -29,6 +31,7 @@ export const createWorkbenchHistoryStore = (): WorkbenchHistoryStore => {
 			editSessionEpoch += 1;
 		}
 		hasActiveEditSession = history.active_edit_session;
+		currentHistoryStateId = history.current_history_state_id;
 	};
 
 	const runHistoryAction = async (canRun: boolean, action: () => Promise<void>): Promise<void> => {
@@ -57,6 +60,7 @@ export const createWorkbenchHistoryStore = (): WorkbenchHistoryStore => {
 		canRedo = false;
 		hasActiveEditSession = false;
 		editSessionEpoch = 0;
+		currentHistoryStateId = 0;
 	};
 
 	return {
@@ -74,6 +78,9 @@ export const createWorkbenchHistoryStore = (): WorkbenchHistoryStore => {
 		},
 		get editSessionEpoch(): number {
 			return editSessionEpoch;
+		},
+		get currentHistoryStateId(): number {
+			return currentHistoryStateId;
 		},
 		applyHistoryState,
 		undo,
