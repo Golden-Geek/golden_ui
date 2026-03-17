@@ -75,9 +75,14 @@
 			<div class="gc-window-exit-copy">
 				<h2 id={dialogTitleId}>Save changes before exiting?</h2>
 				<p>
-					"{projectName}" has unsaved changes. Save before closing the app, discard the
-					changes, or stay here.
+					"{projectName}" has unsaved changes. Save before closing the app, discard the changes, or
+					stay here.
 				</p>
+				{#if windowExitState.errorMessage}
+					<p class="save-error" role="alert" aria-live="assertive">
+						{windowExitState.errorMessage}
+					</p>
+				{/if}
 			</div>
 			<div class="gc-window-exit-actions">
 				<button
@@ -97,10 +102,7 @@
 					<span>Discard</span>
 					<span class="shortcut">D / Backspace</span>
 				</button>
-				<button
-					type="button"
-					disabled={windowExitState.busy}
-					onclick={cancelWindowExit}>
+				<button type="button" disabled={windowExitState.busy} onclick={cancelWindowExit}>
 					<span>Cancel</span>
 					<span class="shortcut">C / Escape</span>
 				</button>
@@ -155,6 +157,14 @@
 		font-size: 0.86rem;
 		line-height: 1.5;
 		color: rgb(from var(--gc-color-text) r g b / 72%);
+	}
+
+	.save-error {
+		padding: 0.7rem 0.8rem;
+		border-radius: 0.7rem;
+		border: 0.06rem solid rgb(214 120 96 / 38%);
+		background: rgb(125 49 35 / 18%);
+		color: rgb(255 196 178);
 	}
 
 	.gc-window-exit-actions {

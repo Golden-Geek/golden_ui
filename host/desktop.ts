@@ -24,9 +24,7 @@ const normalizeDialogPath = (value: unknown): string | null => {
 export const hasDesktopHost = (): boolean =>
 	typeof window !== 'undefined' && Boolean(window.__TAURI_INTERNALS__?.invoke);
 
-export const subscribeDesktopWindowCloseRequested = (
-	handler: () => void
-): (() => void) => {
+export const subscribeDesktopWindowCloseRequested = (handler: () => void): (() => void) => {
 	if (typeof window === 'undefined' || !hasDesktopHost()) {
 		return () => {};
 	}
@@ -77,18 +75,27 @@ export const openDesktopFileDialog = async (
 export const saveDesktopFileDialog = async (
 	options: DesktopFileDialogOptions = {}
 ): Promise<string | null> => {
-	const selected = await invokeDesktopCommand<string | null>(
-		'save_file_dialog',
-		{
+	const invoke = window.__TAURI_INTERNALS__?.invoke;
+	if (!invoke) {
+		return null;
+	}
+
+	try {
+		const selected = (await invoke('save_file_dialog', {
 			suggested_path: options.suggestedPath ?? undefined,
 			allowed_extensions: options.allowedExtensions,
 			filter_label: options.filterLabel,
 			title: options.title
-		},
-		options.logTag ?? 'desktop-host'
-	);
+		})) as string | null;
 
-	return normalizeDialogPath(selected);
+		return normalizeDialogPath(selected);
+	} catch (error) {
+		const logTag = options.logTag ?? 'desktop-host';
+		console.error(`[${logTag}] save_file_dialog failed.`, error);
+		const message =
+			error instanceof Error && error.message.trim().length > 0 ? error.message : 'unknown error';
+		throw new Error(`Failed to open the desktop save dialog: ${message}`);
+	}
 };
 
 export const requestDesktopWindowClose = async (): Promise<unknown> =>

@@ -24,6 +24,8 @@
 			| { kind: 'bezier' }
 			| { kind: 'shape' }
 			| { kind: 'perlinNoise' }
+			| { kind: 'elastic' }
+			| { kind: 'bounce' }
 			| { kind: 'random' }
 			| { kind: 'script' }
 			| { kind: 'steps'; steps: number };

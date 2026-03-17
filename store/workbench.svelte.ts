@@ -88,6 +88,12 @@ export interface WorkbenchSession {
 	selectNode(nodeId: NodeId | null, selectionMode?: SelectionMode): void;
 	selectNodes(nodeIds: NodeId[], selectionMode?: SelectionMode): void;
 	clearSelection(): void;
+	appendUiLogRecord(
+		level: WorkbenchToastLevel,
+		tag: string,
+		message: string,
+		origin?: NodeId
+	): void;
 	sendIntent(intent: UiEditIntent): Promise<void>;
 	setLogUiUpdateHz(hz: number): void;
 	dismissToast(toastId: number): void;
@@ -770,6 +776,7 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 		selectNode: (nodeId, selectionMode) => selection.selectNode(nodeId, selectionMode),
 		selectNodes: (nodeIds, selectionMode) => selection.selectNodes(nodeIds, selectionMode),
 		clearSelection: () => selection.clearSelection(),
+		appendUiLogRecord,
 		sendIntent,
 		setLogUiUpdateHz,
 		dismissToast,

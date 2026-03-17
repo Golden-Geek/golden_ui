@@ -5,16 +5,17 @@ import {
 	subscribeDesktopWindowCloseRequested
 } from '../host/desktop';
 import {
+	attemptSaveProjectFile,
 	hasPendingProjectChanges,
 	projectFileDisplayName,
-	projectFileState,
-	saveProjectFile
+	projectFileState
 } from './project-files.svelte';
 import { appState } from './workbench.svelte';
 
 export const windowExitState = $state({
 	open: false,
-	busy: false
+	busy: false,
+	errorMessage: null as string | null
 });
 
 const closeWindowImmediately = async (): Promise<boolean> => {
@@ -42,11 +43,13 @@ const handleWindowCloseRequested = async (): Promise<void> => {
 
 	const currentHistoryStateId = appState.session?.currentHistoryStateId;
 	if (hasPendingProjectChanges(currentHistoryStateId)) {
+		windowExitState.errorMessage = null;
 		windowExitState.open = true;
 		return;
 	}
 
 	windowExitState.open = false;
+	windowExitState.errorMessage = null;
 	void closeWindowImmediately();
 };
 
@@ -71,6 +74,7 @@ export const cancelWindowExit = (): void => {
 	}
 
 	windowExitState.open = false;
+	windowExitState.errorMessage = null;
 };
 
 export const confirmWindowExitDiscard = async (): Promise<boolean> => {
@@ -79,6 +83,7 @@ export const confirmWindowExitDiscard = async (): Promise<boolean> => {
 	}
 
 	windowExitState.open = false;
+	windowExitState.errorMessage = null;
 	const closed = await closeWindowImmediately();
 	if (!closed) {
 		windowExitState.open = true;
@@ -92,9 +97,13 @@ export const confirmWindowExitSave = async (): Promise<boolean> => {
 	}
 
 	windowExitState.busy = true;
+	windowExitState.errorMessage = null;
 	try {
-		const saved = await saveProjectFile();
-		if (!saved) {
+		const saveResult = await attemptSaveProjectFile();
+		if (!saveResult.ok) {
+			if (!saveResult.cancelled) {
+				windowExitState.errorMessage = saveResult.message ?? 'Failed to save the project.';
+			}
 			return false;
 		}
 
@@ -115,6 +124,7 @@ export const getWindowExitProjectName = (): string =>
 export const mountWindowExitHandling = (): (() => void) => {
 	windowExitState.open = false;
 	windowExitState.busy = false;
+	windowExitState.errorMessage = null;
 
 	return subscribeDesktopWindowCloseRequested(() => {
 		void handleWindowCloseRequested();

@@ -22,6 +22,8 @@
 		| 'steps'
 		| 'shape'
 		| 'perlinNoise'
+		| 'elastic'
+		| 'bounce'
 		| 'random'
 		| 'script';
 	type CurveStepMode = 'stepSize' | 'numSteps';
@@ -78,6 +80,8 @@
 
 	type CompiledSegmentEasing =
 		| { kind: 'linear' }
+		| { kind: 'elastic' }
+		| { kind: 'bounce' }
 		| { kind: 'hold' }
 		| {
 				kind: 'bezier';
@@ -458,6 +462,8 @@
 		'steps',
 		'shape',
 		'perlinNoise',
+		'elastic',
+		'bounce',
 		'random',
 		'script'
 	];
@@ -468,6 +474,8 @@
 		steps: 'Steps',
 		shape: 'Shape',
 		perlinNoise: 'Perlin Noise',
+		elastic: 'Elastic',
+		bounce: 'Bounce',
 		random: 'Random',
 		script: 'Script'
 	};
@@ -546,6 +554,12 @@
 	};
 	const normalize_easing_kind = (value: string): CurveEasingKind => {
 		const normalized = value.trim().toLowerCase();
+		if (normalized === 'elastic') {
+			return 'elastic';
+		}
+		if (normalized === 'bounce') {
+			return 'bounce';
+		}
 		if (normalized === 'bezier') {
 			return 'bezier';
 		}
@@ -758,6 +772,41 @@
 		}
 		return clamp(envelope, 0, 1);
 	};
+	const elastic_progress = (progress: number): number => {
+		if (progress <= 0) {
+			return 0;
+		}
+		if (progress >= 1) {
+			return 1;
+		}
+		const oscillation = (progress * 10 - 0.75) * ((Math.PI * 2) / 3);
+		return Math.pow(2, -10 * progress) * Math.sin(oscillation) + 1;
+	};
+	const bounce_progress = (progress: number): number => {
+		if (progress <= 0) {
+			return 0;
+		}
+		if (progress >= 1) {
+			return 1;
+		}
+
+		let t = progress;
+		const n1 = 7.5625;
+		const d1 = 2.75;
+		if (t < 1 / d1) {
+			return n1 * t * t;
+		}
+		if (t < 2 / d1) {
+			t -= 1.5 / d1;
+			return n1 * t * t + 0.75;
+		}
+		if (t < 2.5 / d1) {
+			t -= 2.25 / d1;
+			return n1 * t * t + 0.9375;
+		}
+		t -= 2.625 / d1;
+		return n1 * t * t + 0.984375;
+	};
 	const shape_wave = (shape: CurveShape, phase_cycles: number): number => {
 		const phase = ((phase_cycles % 1) + 1) % 1;
 		if (shape === 'triangle') {
@@ -826,7 +875,11 @@
 				normalize_easing_kind(param_string_value(params[DECL_KIND]?.value, 'linear'));
 
 			let easing: CompiledSegmentEasing = { kind: 'linear' };
-			if (easing_kind === 'hold') {
+			if (easing_kind === 'elastic') {
+				easing = { kind: 'elastic' };
+			} else if (easing_kind === 'bounce') {
+				easing = { kind: 'bounce' };
+			} else if (easing_kind === 'hold') {
 				easing = { kind: 'hold' };
 			} else if (easing_kind === 'bezier') {
 				const out_position = param_number_value(params[DECL_OUT_POSITION]?.value, 1 / 3);
@@ -1016,6 +1069,12 @@
 
 		if (easing.kind === 'linear') {
 			return linear_value;
+		}
+		if (easing.kind === 'elastic') {
+			return segment.start_value + segment.value_delta * elastic_progress(progress);
+		}
+		if (easing.kind === 'bounce') {
+			return segment.start_value + segment.value_delta * bounce_progress(progress);
 		}
 		if (easing.kind === 'hold') {
 			return segment.start_value;
