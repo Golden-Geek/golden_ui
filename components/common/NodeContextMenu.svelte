@@ -4,18 +4,19 @@
 	import ContextMenu from './ContextMenu.svelte';
 	import ColorPicker from './ColorPicker.svelte';
 	import { appState } from '../../store/workbench.svelte';
-	import { sendPatchMetaIntent } from '../../store/ui-intents';
+	import { sendCreateUserItemIntent, sendPatchMetaIntent } from '../../store/ui-intents';
 	import type { ContextMenuAnchor, ContextMenuItem } from './context-menu';
 	import {
 		closeNodeContextMenu,
 		nodeContextMenuState,
 		openNodeContextMenu
 	} from '../../store/node-context-menu.svelte';
-	import type { NodeId, UiColorDto, UiNodeDto } from '../../types';
+	import type { NodeId, UiColorDto, UiCreatableUserItem, UiNodeDto } from '../../types';
 	import { getMainViewportBounds, remToPx } from './floating-panel';
 	import { getPanelByType, showPanel } from '../../store/ui-panels';
 	import { PERSISTED_PANEL_STATE_KEY } from '../../dockview/panel-persistence';
 	import { copyTextToClipboard } from '../../utils/clipboard';
+	import addIcon from '../../style/icons/node/add.svg';
 	import copyPathIcon from '../../style/icons/copy.svg';
 	import colorIcon from '../../style/icons/parameter/color.svg';
 	import settingsIcon from '../../style/icons/settings.svg';
@@ -172,41 +173,17 @@
 		closeColorSubMenu();
 	};
 
-	const handleDocumentPointerDown = (event: PointerEvent): void => {
-		if (contextNodeId === null) {
-			return;
-		}
-		if (isInsideCurrentMenuTree(event.target)) {
-			return;
-		}
-		closeMenu();
-	};
-
-	const handleDocumentKeydown = (event: KeyboardEvent): void => {
-		if (contextNodeId === null) {
-			return;
-		}
-		if (event.key === 'Escape') {
-			event.preventDefault();
-			closeMenu();
-		}
-	};
-
 	const handleWindowViewportChange = (): void => {
 		updateColorSubMenuPosition();
 	};
 
 	onMount(() => {
 		window.addEventListener('contextmenu', handleWindowContextMenu, true);
-		document.addEventListener('pointerdown', handleDocumentPointerDown, true);
-		document.addEventListener('keydown', handleDocumentKeydown);
 		window.addEventListener('resize', handleWindowViewportChange);
 		window.addEventListener('scroll', handleWindowViewportChange, true);
 
 		return () => {
 			window.removeEventListener('contextmenu', handleWindowContextMenu, true);
-			document.removeEventListener('pointerdown', handleDocumentPointerDown, true);
-			document.removeEventListener('keydown', handleDocumentKeydown);
 			window.removeEventListener('resize', handleWindowViewportChange);
 			window.removeEventListener('scroll', handleWindowViewportChange, true);
 		};
@@ -261,6 +238,7 @@
 			activeNode?.meta.user_permissions.can_edit_constraints && activeNode.data.kind === 'parameter'
 		)
 	);
+	let creatableItems = $derived(activeNode?.creatable_user_items ?? []);
 
 	const clamp01 = (value: number): number => {
 		if (!Number.isFinite(value)) {
@@ -466,6 +444,24 @@
 		closeMenu();
 	};
 
+	const createUserItem = (item: UiCreatableUserItem): void => {
+		if (!activeNode) {
+			return;
+		}
+		void sendCreateUserItemIntent(activeNode.node_id, item);
+		closeMenu();
+	};
+
+	const createItemSubmenu = (items: readonly UiCreatableUserItem[]): ContextMenuItem[] => {
+		return items.map((item) => ({
+			id: `create:${item.node_type}:${item.item_kind}`,
+			label: item.label,
+			action: () => {
+				createUserItem(item);
+			}
+		}));
+	};
+
 	const selectSetColor = (event: MouseEvent): void => {
 		if (colorSubMenu.open) {
 			closeColorSubMenu();
@@ -520,6 +516,17 @@
 		}
 
 		const items: ContextMenuItem[] = [
+			...(creatableItems.length > 0
+				? [
+						{
+							id: 'create-child',
+							label: 'Add',
+							icon: addIcon,
+							submenu: createItemSubmenu(creatableItems)
+						} satisfies ContextMenuItem,
+						{ separator: true } satisfies ContextMenuItem
+					]
+				: []),
 			{
 				id: 'copy-script-control-path',
 				label: 'Copy Script Control Path',
@@ -655,13 +662,17 @@
 	open={showMenu}
 	items={menuItems}
 	anchor={menuAnchor}
-	closeOnOutsidePointerDown={false}
-	closeOnEscape={false}
+	insideElements={[menuTreeDiv, colorSubMenuDiv]}
 	closeOnContextMenuOutside={false}
 	closeOnSelect={false}
 	minWidthRem={12}
 	zIndex={1300}
 	menuClassName="gc-node-context-menu"
+	onOpenChange={(nextOpen) => {
+		if (!nextOpen) {
+			closeMenu();
+		}
+	}}
 	onMenuTreeMount={captureMenuTree} />
 
 {#if showColorSubMenu}

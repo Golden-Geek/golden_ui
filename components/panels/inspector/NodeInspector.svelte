@@ -37,7 +37,34 @@
 		nodes.length > 0 ? (session?.graph.state.nodesById.get(nodes[0]?.node_id) ?? nodes[0]) : null
 	);
 
+	const isWithinUserContextScope = (candidate: UiNodeDto | null): boolean => {
+		if (!candidate || !session) {
+			return false;
+		}
+
+		let currentNodeId: NodeId | undefined = candidate.node_id;
+		while (currentNodeId !== undefined) {
+			const currentNode = session.graph.state.nodesById.get(currentNodeId);
+			if (!currentNode) {
+				return false;
+			}
+			if (currentNode.node_type === 'user_context') {
+				return true;
+			}
+			currentNodeId = session.graph.state.parentById.get(currentNodeId);
+		}
+
+		return false;
+	};
+
+	let showsAllItemRootsInInspector = $derived(isWithinUserContextScope(node));
+
 	const shouldRenderChildInInspector = (child: UiNodeDto): boolean => {
+		// Context authoring scopes treat user-made entries as primary content, not hidden aux items.
+		if (showsAllItemRootsInInspector) {
+			return true;
+		}
+
 		if (child.user_role !== 'itemRoot') {
 			return true;
 		}

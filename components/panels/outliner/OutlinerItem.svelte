@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { untrack } from 'svelte';
+	import { untrack, type Component } from 'svelte';
 	import { appState } from '../../../store/workbench.svelte';
 	import type { NodeId, UiNodeDto } from '../../../types';
 	import Self from './OutlinerItem.svelte';
@@ -9,6 +9,7 @@
 	import EnableButton from '../../common/EnableButton.svelte';
 	import { beginDashboardNodeDrag } from '../dashboard/dashboard-drag';
 	import Arrow from '../../common/Arrow.svelte';
+	import type { OutlinerDropTarget } from './drag-drop';
 
 	const EMPTY_AUTO_EXPAND_ANCESTORS: ReadonlySet<NodeId> = new Set<NodeId>();
 
@@ -17,6 +18,8 @@
 		level = 0,
 		maxLevels = undefined,
 		mode = 'outliner',
+		rowSupplementComponent: RowSupplementComponent = null,
+		canRenderNodeChildren = (_candidate: UiNodeDto) => true,
 		initiallyExpandedDepth = 5,
 		transitionDurationMs = 150,
 		focusedNodeId = null,
@@ -24,13 +27,22 @@
 		opennessByNodeId = null,
 		nodeFilter = (_candidate: UiNodeDto) => true,
 		nodeSelectable = (_candidate: UiNodeDto) => true,
+		nodeDraggable = (_candidate: UiNodeDto) => false,
+		activeDragNodeId = null,
+		dropTarget = null,
 		onNodeOpennessChange = null,
-		onSelectNode = null
+		onSelectNode = null,
+		onNodeDragStart = null,
+		onNodeDragOver = null,
+		onNodeDrop = null,
+		onNodeDragEnd = null
 	} = $props<{
 		node: UiNodeDto | null;
 		level?: number;
 		maxLevels?: number;
 		mode?: 'outliner' | 'tree';
+		rowSupplementComponent?: Component<{ node: UiNodeDto }> | null;
+		canRenderNodeChildren?: (candidate: UiNodeDto) => boolean;
 		initiallyExpandedDepth?: number;
 		transitionDurationMs?: number;
 		focusedNodeId?: number | null;
@@ -38,8 +50,15 @@
 		opennessByNodeId?: Readonly<Record<string, boolean>> | null;
 		nodeFilter?: (candidate: UiNodeDto) => boolean;
 		nodeSelectable?: (candidate: UiNodeDto) => boolean;
+		nodeDraggable?: (candidate: UiNodeDto) => boolean;
+		activeDragNodeId?: NodeId | null;
+		dropTarget?: OutlinerDropTarget | null;
 		onNodeOpennessChange?: ((nodeId: NodeId, expanded: boolean) => void) | null;
 		onSelectNode?: ((next: UiNodeDto, event: MouseEvent) => void) | null;
+		onNodeDragStart?: ((node: UiNodeDto, event: DragEvent) => void) | null;
+		onNodeDragOver?: ((node: UiNodeDto, event: DragEvent) => void) | null;
+		onNodeDrop?: ((node: UiNodeDto, event: DragEvent) => void | Promise<void>) | null;
+		onNodeDragEnd?: ((node: UiNodeDto, event: DragEvent) => void) | null;
 	}>();
 
 	let session = $derived(appState.session);
@@ -147,7 +166,14 @@
 	});
 
 	let isSelected = $derived(session?.isNodeSelected(node?.node_id ?? -1) ?? false);
-	let hasArrow = $derived(Boolean(node?.children && node.children.length > 0));
+	let hasChildren = $derived(Boolean(node?.children && node.children.length > 0));
+	let canRenderChildren = $derived(
+		hasChildren &&
+			node !== null &&
+			canRenderNodeChildren(node) &&
+			(maxLevels === undefined || level < maxLevels)
+	);
+	let hasArrow = $derived(canRenderChildren);
 	let canHaveVisibleWarnings = $derived.by((): boolean => {
 		if (!node) {
 			return false;
@@ -198,9 +224,17 @@
 	let isVisible = $derived(subtreeHasVisibleNode(node));
 	let showRow = $derived(node !== null);
 	let rowSelectable = $derived(isSelectable(node));
+	let rowDraggable = $derived(Boolean(node && isOutlinerMode && nodeDraggable(node)));
 	let isCurrentReference = $derived(
 		focusedNodeId !== null && node !== null && node.node_id === focusedNodeId
 	);
+	let isDragSource = $derived(Boolean(node && activeDragNodeId === node.node_id));
+	let activeDropZone = $derived.by(() => {
+		if (!node || dropTarget?.hoverNodeId !== node.node_id) {
+			return null;
+		}
+		return dropTarget.zone;
+	});
 	const footerHoverToken = Symbol('outliner-item-footer-hover');
 	let rowHovered = $state(false);
 
@@ -239,10 +273,20 @@
 				class:selected={!onSelectNode && isSelected}
 				class:has-arrow={hasArrow}
 				class:current-reference={isCurrentReference}
+				class:drag-source={isDragSource}
+				class:drop-before={activeDropZone === 'before'}
+				class:drop-inside={activeDropZone === 'inside'}
+				class:drop-after={activeDropZone === 'after'}
 				data-node-id={node.node_id}
 				class:non-selectable={!rowSelectable}
 				onpointerenter={handlePointerEnter}
-				onpointerleave={handlePointerLeave}>
+				onpointerleave={handlePointerLeave}
+				ondragover={(event) => {
+					onNodeDragOver?.(node, event);
+				}}
+				ondrop={(event) => {
+					void onNodeDrop?.(node, event);
+				}}>
 				{#if hasArrow}
 					<div aria-hidden="true" onclick={() => setExpanded(!isExpanded)}>
 						<Arrow direction={isExpanded ? 'down' : 'right'} color={accentColor} />
@@ -254,14 +298,22 @@
 				{/if}
 				<button
 					class="outliner-item-label"
+					class:draggable={rowDraggable}
 					class:non-selectable={!rowSelectable}
-					draggable={rowSelectable && isOutlinerMode}
+					draggable={rowDraggable}
 					type="button"
 					disabled={!rowSelectable}
 					ondragstart={(event) => {
 						beginDashboardNodeDrag(event, node);
+						onNodeDragStart?.(node, event);
+					}}
+					ondragend={(event) => {
+						onNodeDragEnd?.(node, event);
 					}}
 					onclick={(event) => selectNode(node, event)}>{meta?.label ?? ''}</button>
+				{#if RowSupplementComponent}
+					<RowSupplementComponent {node} />
+				{/if}
 				{#if isOutlinerMode}
 					<NodeWarningBadge {warnings} />
 				{/if}
@@ -272,14 +324,16 @@
 			</div>
 		{/if}
 
-		{#if isExpanded && hasArrow && (maxLevels == undefined || level < maxLevels)}
+		{#if isExpanded && canRenderChildren}
 			<div class="outliner-children" transition:slide|local={{ duration: transitionDurationMs }}>
-				{#each node.children as child}
+				{#each node.children as child (child)}
 					<Self
 						node={mainGraphState?.nodesById.get(child) ?? null}
 						level={level + 1}
 						{maxLevels}
 						{mode}
+						rowSupplementComponent={RowSupplementComponent}
+						{canRenderNodeChildren}
 						{initiallyExpandedDepth}
 						{transitionDurationMs}
 						{focusedNodeId}
@@ -287,8 +341,15 @@
 						{opennessByNodeId}
 						{nodeFilter}
 						{nodeSelectable}
+						{nodeDraggable}
+						{activeDragNodeId}
+						{dropTarget}
 						{onNodeOpennessChange}
-						{onSelectNode} />
+						{onSelectNode}
+						{onNodeDragStart}
+						{onNodeDragOver}
+						{onNodeDrop}
+						{onNodeDragEnd} />
 				{/each}
 			</div>
 		{/if}
@@ -306,8 +367,10 @@
 	.outliner-item-content {
 		display: flex;
 		align-items: center;
-		padding: 0.05rem 0 0.05rem 0.25rem 0rem;
+		padding: 0.05rem 0 0.05rem 0.25rem;
 		gap: 0.25rem;
+		position: relative;
+		border-radius: 0.35rem;
 	}
 
 	.outliner-item-content.non-selectable {
@@ -318,6 +381,32 @@
 		outline: solid 0.08rem color-mix(in srgb, var(--gc-color-selection) 82%, white 18%);
 		background-color: color-mix(in srgb, var(--gc-color-selection) 16%, transparent);
 		border-radius: 0.3rem;
+	}
+
+	.outliner-item-content.drag-source {
+		opacity: 0.55;
+	}
+
+	.outliner-item-content.drop-inside {
+		background-color: rgb(from var(--gc-color-selection) r g b / 0.12);
+		outline: solid 0.08rem rgb(from var(--gc-color-selection) r g b / 0.55);
+	}
+
+	.outliner-item-content.drop-before::before,
+	.outliner-item-content.drop-after::after {
+		content: '';
+		position: absolute;
+		inset-inline: 0;
+		border-block-start: solid 0.12rem rgb(from var(--gc-color-selection) r g b / 0.88);
+		pointer-events: none;
+	}
+
+	.outliner-item-content.drop-before::before {
+		inset-block-start: -0.08rem;
+	}
+
+	.outliner-item-content.drop-after::after {
+		inset-block-end: -0.08rem;
 	}
 
 	.outliner-item-content.has-arrow {
@@ -347,7 +436,6 @@
 		font: inherit;
 		text-align: left;
 		cursor: pointer;
-		cursor: grab;
 		outline: solid 1px transparent;
 		border-radius: 0.3rem;
 		transition:
@@ -355,11 +443,15 @@
 			outline 0.1s ease;
 	}
 
+	.outliner-item-label.draggable {
+		cursor: grab;
+	}
+
 	.outliner-item-label.non-selectable {
 		cursor: default;
 	}
 
-	.outliner-item-label:active {
+	.outliner-item-label.draggable:active {
 		cursor: grabbing;
 	}
 

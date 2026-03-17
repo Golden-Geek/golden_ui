@@ -38,7 +38,7 @@ const writePayload = (event: DragEvent, payload: DashboardDragPayload): void => 
 		});
 	}
 
-	transfer.effectAllowed = 'copy';
+	transfer.effectAllowed = 'copyMove';
 	transfer.setData(DASHBOARD_DRAG_MIME, JSON.stringify(payload));
 	transfer.setData('text/plain', payload.label);
 	transfer.setData('text/golden-node-id', String(payload.nodeId));
