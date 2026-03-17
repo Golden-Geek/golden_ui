@@ -450,6 +450,7 @@
 	const CURVE_SCULPT_SHIFT_FULL_STRENGTH_PX = 8;
 	const CURVE_DRAW_FIT_MAX_ERROR_PX = 4.5;
 	const CURVE_DRAW_FIT_MAX_KEYS = 12;
+	const VIEW_BOUNDS_ANIMATION_DURATION_MS = 220;
 	const KEY_HIT_RADIUS_REM = 0.7;
 	const CURVE_HIT_RADIUS_REM = 0.7;
 	const BEZIER_HANDLE_HIT_RADIUS_REM = 0.64;
@@ -515,6 +516,8 @@
 	let queued_drag_targets: Map<NodeId, DragPreview> | null = null;
 	let queued_bezier_handle_targets: Map<NodeId, BezierEasingPreview> | null = null;
 	let drag_commit_raf_id = 0;
+	let view_bounds_animation_frame = 0;
+	let view_bounds_animation_target: CurveViewBounds | null = null;
 	let pending_param_write_promises: Set<Promise<void>> = new Set();
 	let active_curve_draw_points = $derived.by(
 		() =>
@@ -3354,12 +3357,99 @@
 		return bounds;
 	};
 
-	const apply_view_bounds = (candidate: CurveViewBounds): void => {
+	const same_view_bounds = (
+		left: CurveViewBounds | null | undefined,
+		right: CurveViewBounds | null | undefined
+	): boolean => {
+		if (!left || !right) {
+			return left === right;
+		}
+		return (
+			Math.abs(left.x_min - right.x_min) <= CURVE_EPSILON &&
+			Math.abs(left.x_max - right.x_max) <= CURVE_EPSILON &&
+			Math.abs(left.y_min - right.y_min) <= CURVE_EPSILON &&
+			Math.abs(left.y_max - right.y_max) <= CURVE_EPSILON
+		);
+	};
+
+	const cancel_view_bounds_animation = (): void => {
+		if (view_bounds_animation_frame !== 0 && typeof window !== 'undefined') {
+			window.cancelAnimationFrame(view_bounds_animation_frame);
+		}
+		view_bounds_animation_frame = 0;
+		view_bounds_animation_target = null;
+	};
+
+	const set_view_bounds_instantly = (candidate: CurveViewBounds): void => {
 		const sanitized = sanitize_view_bounds({ ...candidate });
 		if (!sanitized) {
 			return;
 		}
+		cancel_view_bounds_animation();
 		fixed_view_bounds = sanitized;
+	};
+
+	const animate_view_bounds_to = (candidate: CurveViewBounds): void => {
+		const target_bounds = sanitize_view_bounds({ ...candidate });
+		if (!target_bounds) {
+			return;
+		}
+
+		const current_bounds = current_view_bounds();
+		if (!current_bounds) {
+			set_view_bounds_instantly(target_bounds);
+			return;
+		}
+
+		const start_bounds = sanitize_view_bounds({ ...current_bounds });
+		if (
+			!start_bounds ||
+			same_view_bounds(start_bounds, target_bounds) ||
+			typeof window === 'undefined'
+		) {
+			set_view_bounds_instantly(target_bounds);
+			return;
+		}
+
+		cancel_view_bounds_animation();
+		fixed_view_bounds = start_bounds;
+		view_bounds_animation_target = target_bounds;
+		const started_at_ms = typeof performance !== 'undefined' ? performance.now() : Date.now();
+		const interpolate = (start: number, end: number, progress: number): number =>
+			start + (end - start) * progress;
+		const step = (now_ms: number): void => {
+			const elapsed_ms = Math.max(0, now_ms - started_at_ms);
+			const progress = Math.min(1, elapsed_ms / VIEW_BOUNDS_ANIMATION_DURATION_MS);
+			const eased_progress = 1 - Math.pow(1 - progress, 3);
+			const interpolated_bounds = sanitize_view_bounds({
+				x_min: interpolate(start_bounds.x_min, target_bounds.x_min, eased_progress),
+				x_max: interpolate(start_bounds.x_max, target_bounds.x_max, eased_progress),
+				y_min: interpolate(start_bounds.y_min, target_bounds.y_min, eased_progress),
+				y_max: interpolate(start_bounds.y_max, target_bounds.y_max, eased_progress)
+			});
+			if (interpolated_bounds) {
+				fixed_view_bounds = interpolated_bounds;
+			}
+			if (progress >= 1) {
+				view_bounds_animation_frame = 0;
+				view_bounds_animation_target = null;
+				fixed_view_bounds = target_bounds;
+				return;
+			}
+			view_bounds_animation_frame = window.requestAnimationFrame(step);
+		};
+		view_bounds_animation_frame = window.requestAnimationFrame(step);
+	};
+
+	const apply_view_bounds = (
+		candidate: CurveViewBounds,
+		options: { animate?: boolean } = {}
+	): void => {
+		if (options.animate) {
+			animate_view_bounds_to(candidate);
+			return;
+		}
+		set_view_bounds_instantly(candidate);
 	};
 
 	$effect(() => {
@@ -3367,6 +3457,7 @@
 			return;
 		}
 		if (fixed_view_bounds !== null) {
+			cancel_view_bounds_animation();
 			fixed_view_bounds = null;
 		}
 	});
@@ -3379,6 +3470,7 @@
 		}
 		const sanitized = sanitize_view_bounds({ ...current_fixed });
 		if (!sanitized) {
+			cancel_view_bounds_animation();
 			fixed_view_bounds = null;
 			return;
 		}
@@ -5420,17 +5512,24 @@
 			return false;
 		}
 
-		apply_view_bounds({
-			x_min: padded_x.min,
-			x_max: padded_x.max,
-			y_min: padded_y.min,
-			y_max: padded_y.max
-		});
+		apply_view_bounds(
+			{
+				x_min: padded_x.min,
+				x_max: padded_x.max,
+				y_min: padded_y.min,
+				y_max: padded_y.max
+			},
+			{ animate: true }
+		);
 		return true;
 	};
 
 	const home_view = (): void => {
-		fixed_view_bounds = default_curve_view_bounds();
+		const next_bounds = default_curve_view_bounds();
+		if (!next_bounds) {
+			return;
+		}
+		apply_view_bounds(next_bounds, { animate: true });
 	};
 
 	const key_anchor_point = (): { position: number; value: number } => {
@@ -5638,6 +5737,7 @@
 				window.cancelAnimationFrame(drag_commit_raf_id);
 				drag_commit_raf_id = 0;
 			}
+			cancel_view_bounds_animation();
 			finish_drag();
 			finish_canvas_pan();
 			finish_curve_draw(undefined, false);
