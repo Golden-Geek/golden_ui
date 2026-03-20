@@ -27,7 +27,6 @@
 		bindDashboardGenericWidgetTarget,
 		bindDashboardNodeWidgetTarget,
 		createDashboardContainerWidget,
-		createDashboardGenericWidget,
 		createDashboardNodeWidget,
 		duplicateDashboardWidget,
 		type DashboardGenericWidgetKind,
@@ -2443,10 +2442,7 @@
 		if (!payload) {
 			return null;
 		}
-		const targetNode =
-			payload.kind === 'parameter'
-				? resolveDraggedParameterNode(payload)
-				: resolveDraggedNode(payload);
+		const targetNode = resolveDraggedNode(payload);
 		if (!targetNode) {
 			return null;
 		}
@@ -2490,26 +2486,9 @@
 						snapPx: surfaceSnapGrid.enabled ? surfaceSnapGrid.step * rootRemPx : 0
 					}
 				: undefined;
-		if (payload.kind === 'parameter') {
-			const defaults = getDashboardGenericWidgetCreationDefaults(
-				targetNode,
-				context,
-				placementOptions
-			);
-			return {
-				label: targetNode.meta.label,
-				targetKind: payload.kind,
-				placement: defaults.placement,
-				targetIndex: insertionTarget?.targetIndex ?? null,
-				genericWidgetKind: defaults.widgetKind,
-				previewText: defaults.text ?? null,
-				previewPlaceholder: defaults.placeholder ?? null,
-				multiline: defaults.multiline ?? false
-			};
-		}
 		return {
 			label: targetNode.meta.label,
-			targetKind: payload.kind,
+			targetKind: 'node',
 			placement: getDashboardNodeWidgetCreationDefaults(targetNode, context, placementOptions),
 			targetIndex: insertionTarget?.targetIndex ?? null,
 			genericWidgetKind: null,
@@ -2612,16 +2591,6 @@
 					knownDirectChildIds: [...liveNode.children]
 				}
 			: null;
-		if (payload?.kind === 'parameter') {
-			const created = await createDashboardGenericWidget(getGraph, liveNode.node_id, targetNode, {
-				placement: dropPreview?.placement,
-				targetIndex: dropPreview?.targetIndex ?? undefined
-			});
-			if (!created) {
-				pendingSurfaceDrop = null;
-			}
-			return;
-		}
 		const created = await createDashboardNodeWidget(getGraph, liveNode.node_id, targetNode, {
 			placement: dropPreview?.placement,
 			targetIndex: dropPreview?.targetIndex ?? undefined

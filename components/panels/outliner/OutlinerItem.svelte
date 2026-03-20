@@ -7,7 +7,7 @@
 	import { slide } from 'svelte/transition';
 	import NodeWarningBadge from '../../common/NodeWarningBadge.svelte';
 	import EnableButton from '../../common/EnableButton.svelte';
-	import { beginDashboardNodeDrag } from '../dashboard/dashboard-drag';
+	import { beginDashboardNodeDrag, beginDashboardParameterDrag } from '../dashboard/dashboard-drag';
 	import Arrow from '../../common/Arrow.svelte';
 	import type { OutlinerDropTarget } from './drag-drop';
 
@@ -224,7 +224,11 @@
 	let isVisible = $derived(subtreeHasVisibleNode(node));
 	let showRow = $derived(node !== null);
 	let rowSelectable = $derived(isSelectable(node));
-	let rowDraggable = $derived(Boolean(node && isOutlinerMode && nodeDraggable(node)));
+	let rowMoveDraggable = $derived(Boolean(node && isOutlinerMode && nodeDraggable(node)));
+	let rowDashboardDraggable = $derived(
+		Boolean(node && isOutlinerMode && mainGraphState?.rootId !== node.node_id)
+	);
+	let rowDraggable = $derived(rowMoveDraggable || rowDashboardDraggable);
 	let isCurrentReference = $derived(
 		focusedNodeId !== null && node !== null && node.node_id === focusedNodeId
 	);
@@ -304,11 +308,19 @@
 					type="button"
 					disabled={!rowSelectable}
 					ondragstart={(event) => {
-						beginDashboardNodeDrag(event, node);
-						onNodeDragStart?.(node, event);
+						if (node.data.kind === 'parameter') {
+							beginDashboardParameterDrag(event, node);
+						} else {
+							beginDashboardNodeDrag(event, node);
+						}
+						if (rowMoveDraggable) {
+							onNodeDragStart?.(node, event);
+						}
 					}}
 					ondragend={(event) => {
-						onNodeDragEnd?.(node, event);
+						if (rowMoveDraggable) {
+							onNodeDragEnd?.(node, event);
+						}
 					}}
 					onclick={(event) => selectNode(node, event)}>{meta?.label ?? ''}</button>
 				{#if RowSupplementComponent}
@@ -367,7 +379,7 @@
 	.outliner-item-content {
 		display: flex;
 		align-items: center;
-		padding: 0.05rem 0 0.05rem 0.25rem;
+		padding: 0.05rem 0 0.05rem 0.05rem;
 		gap: 0.25rem;
 		position: relative;
 		border-radius: 0.35rem;
