@@ -31,6 +31,11 @@ export interface UiIntentBatchResult {
 	readonly appliedCount: number;
 }
 
+export interface CreateUserItemResult {
+	readonly success: boolean;
+	readonly createdNodeId: NodeId | null;
+}
+
 const sendUiIntent = async (intent: UiEditIntent): Promise<boolean> => {
 	const session = appState.session;
 	if (!session) {
@@ -162,7 +167,7 @@ export const sendDuplicateNodeIntent = async (
 export const sendCreateUserItemIntent = async (
 	parent: NodeId,
 	item: UiCreatableUserItem
-): Promise<boolean> => {
+): Promise<CreateUserItemResult> => {
 	return sendCreateUserItemByTypeIntent(parent, item.node_type, item.label);
 };
 
@@ -170,19 +175,59 @@ interface CreateUserItemOptions {
 	initial_params?: UiCreateUserItemInitialParam[];
 }
 
+const waitForCreatedDirectChild = async (
+	parent: NodeId,
+	knownChildren: ReadonlySet<NodeId>,
+	nodeType: string,
+	timeoutMs = 450
+): Promise<NodeId | null> => {
+	const deadline = Date.now() + timeoutMs;
+	while (Date.now() <= deadline) {
+		const session = appState.session;
+		const parentNode = session?.graph.state.nodesById.get(parent);
+		if (parentNode) {
+			for (const childId of parentNode.children) {
+				if (knownChildren.has(childId)) {
+					continue;
+				}
+				const child = session?.graph.state.nodesById.get(childId);
+				if (child?.node_type === nodeType) {
+					return childId;
+				}
+			}
+		}
+		await new Promise((resolve) => {
+			setTimeout(resolve, 16);
+		});
+	}
+	return null;
+};
+
 export const sendCreateUserItemByTypeIntent = async (
 	parent: NodeId,
 	node_type: string,
 	label?: string,
 	options?: CreateUserItemOptions
-): Promise<boolean> => {
-	return sendUiIntent({
+): Promise<CreateUserItemResult> => {
+	const session = appState.session;
+	const knownChildren = new Set(session?.graph.state.nodesById.get(parent)?.children ?? []);
+	const success = await sendUiIntent({
 		kind: 'createUserItem',
 		parent,
 		node_type,
 		label,
 		initial_params: options?.initial_params
 	});
+	if (!success) {
+		return {
+			success: false,
+			createdNodeId: null
+		};
+	}
+	return {
+		success: true,
+		createdNodeId: await waitForCreatedDirectChild(parent, knownChildren, node_type)
+	};
 };
 
 export const sendFitAnimationCurvePathIntent = async (

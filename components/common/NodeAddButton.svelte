@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { sendCreateUserItemIntent } from '../../store/ui-intents';
+	import { appState } from '../../store/workbench.svelte';
 	import type { UiCreatableUserItem, UiNodeDto } from '../../types';
 	import ContextMenu from './ContextMenu.svelte';
 	import type { ContextMenuAnchor, ContextMenuItem } from './context-menu';
@@ -50,7 +51,10 @@
 			return;
 		}
 		addMenuOpen = false;
-		await sendCreateUserItemIntent(node.node_id, item);
+		const result = await sendCreateUserItemIntent(node.node_id, item);
+		if (result.createdNodeId !== null) {
+			appState.session?.selectNode(result.createdNodeId, 'REPLACE');
+		}
 	};
 
 	let menuAnchor = $derived.by((): ContextMenuAnchor | null => {

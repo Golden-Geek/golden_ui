@@ -5395,7 +5395,7 @@
 		};
 		const created = await sendCreateUserItemIntent(liveNode.node_id, key_creatable_item);
 		adding_key = false;
-		if (!created) {
+		if (!created.success) {
 			pending_create_target = null;
 			await edit_session.end();
 		}

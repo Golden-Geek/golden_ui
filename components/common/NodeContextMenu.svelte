@@ -448,7 +448,11 @@
 		if (!activeNode) {
 			return;
 		}
-		void sendCreateUserItemIntent(activeNode.node_id, item);
+		void sendCreateUserItemIntent(activeNode.node_id, item).then((result) => {
+			if (result.createdNodeId !== null) {
+				session?.selectNode(result.createdNodeId, 'REPLACE');
+			}
+		});
 		closeMenu();
 	};
 

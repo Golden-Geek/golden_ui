@@ -501,10 +501,7 @@ const buildDashboardWidgetPlacementInitialParams = (
 		);
 	}
 
-	if (
-		parentLayoutKind === 'free' ||
-		parentLayoutKind === 'vertical'
-	) {
+	if (parentLayoutKind === 'free' || parentLayoutKind === 'vertical') {
 		params.push(
 			createInitialParam('layout/height', {
 				kind: 'css_value',
@@ -750,7 +747,7 @@ export const createDashboardNodeWidget = async (
 				)
 			}
 		);
-		if (!created) {
+		if (!created.success) {
 			return false;
 		}
 		const createdWidget = await waitForDirectItemChild(
@@ -814,7 +811,7 @@ export const createDashboardGenericWidget = async (
 				)
 			}
 		);
-		if (!created) {
+		if (!created.success) {
 			return false;
 		}
 		const createdWidget = await waitForDirectItemChild(
@@ -908,7 +905,7 @@ export const createDashboardContainerWidget = async (
 				)
 			}
 		);
-		if (!created) {
+		if (!created.success) {
 			return null;
 		}
 
@@ -1074,9 +1071,7 @@ export const moveDashboardWidgetToSurface = async (
 		const sourceParentId = graph?.parentById.get(widgetNodeId);
 		const currentOrderingState = getDashboardWidgetOrderingState(graph, widgetNodeId);
 		const normalizedTargetIndex =
-			typeof targetIndex === 'number'
-				? Math.max(0, Math.round(targetIndex))
-				: undefined;
+			typeof targetIndex === 'number' ? Math.max(0, Math.round(targetIndex)) : undefined;
 		const needsMove =
 			sourceParentId !== newParentId ||
 			(normalizedTargetIndex !== undefined &&
