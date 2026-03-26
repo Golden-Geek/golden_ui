@@ -219,6 +219,7 @@
 				{readOnly}
 				disabled={!enabled}
 				label={hasRange ? sliderLabel : ''}
+				forceInfinite={isInteger}
 				onValueChange={(nextValue: number) => {
 					commitValue(nextValue);
 				}}

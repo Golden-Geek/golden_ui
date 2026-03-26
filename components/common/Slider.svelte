@@ -15,10 +15,11 @@
 		bgColor = 'var(--gc-color-slider-bg)',
 		fgColor = 'var(--gc-color-slider-fg)',
 		label = '',
-		showValue = false
+		showValue = false,
+		forceInfinite = false
 	} = $props();
 
-	let infiniteMode = $derived(min === undefined || max === undefined);
+	let infiniteMode = $derived(min === undefined || max === undefined || forceInfinite);
 	let sliderDiv = $state(null as HTMLDivElement | null);
 
 	let valueAtDown = $state(0);
