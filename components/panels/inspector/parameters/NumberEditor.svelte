@@ -29,6 +29,7 @@
 	let constraints = $derived(param?.constraints);
 	let readOnly = $derived(Boolean(param?.read_only));
 	let enabled = $derived(liveNode.meta.enabled);
+	let widgetHint = $derived((param?.ui_hints.widget ?? '').trim().toLowerCase());
 
 	let kind = $derived(param?.value.kind ?? 'float');
 	let isInteger = $derived(kind === 'int');
@@ -48,7 +49,14 @@
 	let isEditing = $state(false);
 	let editSession = createUiEditSession('Edit number', 'param-number');
 	const NUMERIC_EPSILON = 1e-9;
-	let showValueField = $derived(presentation.show_value_field !== false);
+	let fieldOnlyWidget = $derived(
+		widgetHint === 'text' ||
+			widgetHint === 'input' ||
+			widgetHint === 'field' ||
+			widgetHint === 'number_field'
+	);
+	let showSlider = $derived(!fieldOnlyWidget);
+	let showValueField = $derived(fieldOnlyWidget || presentation.show_value_field !== false);
 	let fractionDigits = $derived(
 		isInteger ? 0 : Math.max(0, Math.min(8, Math.round(presentation.max_decimals ?? 3)))
 	);
@@ -198,23 +206,26 @@
 <div
 	class="number-property-container"
 	class:infinite={!hasRange}
+	class:field-only={!showSlider}
 	class:widget-layout={layoutMode === 'widget'}>
-	<div class="slider-wrapper">
-		<Slider
-			value={displayedSliderValue}
-			{min}
-			{max}
-			{step}
-			{stepBase}
-			{readOnly}
-			disabled={!enabled}
-			label={hasRange ? sliderLabel : ''}
-			onValueChange={(nextValue: number) => {
-				commitValue(nextValue);
-			}}
-			onStartEdit={startEdit}
-			onEndEdit={endEdit} />
-	</div>
+	{#if showSlider}
+		<div class="slider-wrapper">
+			<Slider
+				value={displayedSliderValue}
+				{min}
+				{max}
+				{step}
+				{stepBase}
+				{readOnly}
+				disabled={!enabled}
+				label={hasRange ? sliderLabel : ''}
+				onValueChange={(nextValue: number) => {
+					commitValue(nextValue);
+				}}
+				onStartEdit={startEdit}
+				onEndEdit={endEdit} />
+		</div>
+	{/if}
 
 	{#if showValueField}
 		{#if showsInlineFieldLabel}
@@ -294,6 +305,16 @@
 	.number-property-container.widget-layout .slider-wrapper {
 		flex: 1 1 auto;
 		height: 100%;
+	}
+
+	.number-property-container.field-only .number-field {
+		width: 100%;
+		max-width: none;
+		margin-left: 0;
+	}
+
+	.number-property-container.field-only .number-field-shell {
+		flex: 1 1 auto;
 	}
 
 	.number-field {

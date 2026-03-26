@@ -52,7 +52,7 @@
 		}
 		addMenuOpen = false;
 		const result = await sendCreateUserItemIntent(node.node_id, item);
-		if (result.createdNodeId !== null) {
+		if (result.selectWhenCreated && result.createdNodeId !== null) {
 			appState.session?.selectNode(result.createdNodeId, 'REPLACE');
 		}
 	};

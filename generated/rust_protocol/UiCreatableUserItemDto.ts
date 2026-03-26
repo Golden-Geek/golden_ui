@@ -15,4 +15,8 @@ item_kind: string,
 /**
  * Suggested default label.
  */
-label: string, };
+label: string, 
+/**
+ * Whether UI creation flows should auto-select the created item.
+ */
+select_when_created: boolean, };

@@ -324,6 +324,7 @@ export interface UiCreatableUserItem {
 	node_type: string;
 	item_kind: string;
 	label: string;
+	select_when_created: boolean;
 }
 
 export interface UiNodeTypeDescriptor {

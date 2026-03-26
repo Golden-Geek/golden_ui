@@ -34,6 +34,7 @@ export interface UiIntentBatchResult {
 export interface CreateUserItemResult {
 	readonly success: boolean;
 	readonly createdNodeId: NodeId | null;
+	readonly selectWhenCreated: boolean;
 }
 
 const sendUiIntent = async (intent: UiEditIntent): Promise<boolean> => {
@@ -168,11 +169,14 @@ export const sendCreateUserItemIntent = async (
 	parent: NodeId,
 	item: UiCreatableUserItem
 ): Promise<CreateUserItemResult> => {
-	return sendCreateUserItemByTypeIntent(parent, item.node_type, item.label);
+	return sendCreateUserItemByTypeIntent(parent, item.node_type, item.label, {
+		select_when_created: item.select_when_created
+	});
 };
 
 interface CreateUserItemOptions {
 	initial_params?: UiCreateUserItemInitialParam[];
+	select_when_created?: boolean;
 }
 
 const waitForCreatedDirectChild = async (
@@ -221,12 +225,14 @@ export const sendCreateUserItemByTypeIntent = async (
 	if (!success) {
 		return {
 			success: false,
-			createdNodeId: null
+			createdNodeId: null,
+			selectWhenCreated: options?.select_when_created ?? true
 		};
 	}
 	return {
 		success: true,
-		createdNodeId: await waitForCreatedDirectChild(parent, knownChildren, node_type)
+		createdNodeId: await waitForCreatedDirectChild(parent, knownChildren, node_type),
+		selectWhenCreated: options?.select_when_created ?? true
 	};
 };
 

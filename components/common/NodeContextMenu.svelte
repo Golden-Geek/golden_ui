@@ -449,7 +449,7 @@
 			return;
 		}
 		void sendCreateUserItemIntent(activeNode.node_id, item).then((result) => {
-			if (result.createdNodeId !== null) {
+			if (result.selectWhenCreated && result.createdNodeId !== null) {
 				session?.selectNode(result.createdNodeId, 'REPLACE');
 			}
 		});
