@@ -400,6 +400,12 @@ export type UiEventKind =
 			old_state: UiParameterControlState;
 			new_state: UiParameterControlState;
 	  }
+	| {
+			kind: 'paramConstraintsChanged';
+			param: NodeId;
+			old_constraints: UiParamConstraints;
+			new_constraints: UiParamConstraints;
+	  }
 	| { kind: 'childAdded'; parent: NodeId; child: NodeId; decl_id: string }
 	| { kind: 'childRemoved'; parent: NodeId; child: NodeId }
 	| { kind: 'childReplaced'; parent: NodeId; old: NodeId; new: NodeId; decl_id: string }
@@ -441,6 +447,7 @@ export type UiEditIntent =
 	| { kind: 'endEdit'; client_edit_id: string }
 	| { kind: 'setParam'; node: NodeId; value: ParamValue; behaviour: ParamEventBehaviour }
 	| { kind: 'setParamControlState'; node: NodeId; state: UiParameterControlState }
+	| { kind: 'setParamConstraints'; node: NodeId; constraints: UiParamConstraints }
 	| { kind: 'moveNode'; node: NodeId; new_parent: NodeId; new_prev_sibling?: NodeId }
 	| { kind: 'removeNode'; node: NodeId }
 	| { kind: 'removeNodes'; nodes: NodeId[] }

@@ -231,6 +231,23 @@ const reduceEventInPlace = (
 			});
 			break;
 		}
+		case 'paramConstraintsChanged': {
+			const node = state.nodesById.get(event.kind.param);
+			if (!node || node.data.kind !== 'parameter') {
+				state.requiresResync = true;
+				break;
+			}
+			const updatedParam = {
+				...node.data.param,
+				constraints: event.kind.new_constraints
+			};
+			state.paramsById.set(event.kind.param, updatedParam);
+			state.nodesById.set(event.kind.param, {
+				...node,
+				data: { kind: 'parameter', param: updatedParam }
+			});
+			break;
+		}
 		case 'childAdded': {
 			addToChildren(state.childrenById, event.kind.parent, event.kind.child);
 			state.parentById.set(event.kind.child, event.kind.parent);

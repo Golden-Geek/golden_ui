@@ -4,6 +4,7 @@ import type { EngineTime } from "./EngineTime";
 import type { NodeId } from "./NodeId";
 import type { NodeMetaPatch } from "./NodeMetaPatch";
 import type { ParamValue } from "./ParamValue";
+import type { ParameterConstraints } from "./ParameterConstraints";
 import type { UiParameterControlStateDto } from "./UiParameterControlStateDto";
 import type { JsonValue } from "./serde_json/JsonValue";
 
@@ -38,7 +39,19 @@ old_state: UiParameterControlStateDto,
 /**
  * New control state.
  */
-new_state: UiParameterControlStateDto, } | { "kind": "childAdded", 
+new_state: UiParameterControlStateDto, } | { "kind": "paramConstraintsChanged", 
+/**
+ * Parameter node id.
+ */
+param: NodeId, 
+/**
+ * Previous constraints.
+ */
+old_constraints: ParameterConstraints, 
+/**
+ * New constraints.
+ */
+new_constraints: ParameterConstraints, } | { "kind": "childAdded", 
 /**
  * Parent id.
  */

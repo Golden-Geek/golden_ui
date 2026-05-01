@@ -4,14 +4,27 @@
 	import ContextMenu from './ContextMenu.svelte';
 	import ColorPicker from './ColorPicker.svelte';
 	import { appState } from '../../store/workbench.svelte';
-	import { sendCreateUserItemIntent, sendPatchMetaIntent } from '../../store/ui-intents';
+	import {
+		sendCreateUserItemIntent,
+		sendPatchMetaIntent,
+		sendSetParamConstraintsIntent
+	} from '../../store/ui-intents';
 	import type { ContextMenuAnchor, ContextMenuItem } from './context-menu';
 	import {
 		closeNodeContextMenu,
 		nodeContextMenuState,
 		openNodeContextMenu
 	} from '../../store/node-context-menu.svelte';
-	import type { NodeId, UiColorDto, UiCreatableUserItem, UiNodeDto } from '../../types';
+	import type {
+		NodeId,
+		ParamConstraintPolicy,
+		ParamValue,
+		UiColorDto,
+		UiCreatableUserItem,
+		UiNodeDto,
+		UiParamConstraints,
+		UiRangeConstraint
+	} from '../../types';
 	import { getMainViewportBounds, remToPx } from './floating-panel';
 	import { getPanelByType, showPanel } from '../../store/ui-panels';
 	import { PERSISTED_PANEL_STATE_KEY } from '../../dockview/panel-persistence';
@@ -240,6 +253,255 @@
 	);
 	let creatableItems = $derived(activeNode?.creatable_user_items ?? []);
 
+	const numericConstraintKinds = new Set<ParamValue['kind']>([
+		'int',
+		'float',
+		'css_value',
+		'vec2',
+		'vec3',
+		'color'
+	]);
+	const uniformRangePresets: readonly { id: string; label: string; min: number; max: number }[] = [
+		{ id: 'zero-one', label: '0 to 1', min: 0, max: 1 },
+		{ id: 'minus-one-one', label: '-1 to 1', min: -1, max: 1 },
+		{ id: 'zero-hundred', label: '0 to 100', min: 0, max: 100 },
+		{ id: 'zero-255', label: '0 to 255', min: 0, max: 255 },
+		{ id: 'zero-360', label: '0 to 360', min: 0, max: 360 },
+		{ id: 'minus-180-180', label: '-180 to 180', min: -180, max: 180 },
+		{ id: 'minus-90-90', label: '-90 to 90', min: -90, max: 90 }
+	];
+	const integerStepPresets = [1, 2, 5, 10];
+	const fractionalStepPresets = [0.001, 0.01, 0.1, 1, 5, 10];
+
+	const isNumericConstraintKind = (kind: ParamValue['kind']): boolean => {
+		return numericConstraintKinds.has(kind);
+	};
+
+	const cloneConstraints = (constraints: UiParamConstraints): UiParamConstraints => {
+		return JSON.parse(JSON.stringify(constraints)) as UiParamConstraints;
+	};
+
+	const sanitizeNumber = (value: number | undefined): number | undefined => {
+		return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+	};
+
+	const sanitizeNumberList = (values: number[] | undefined): number[] | undefined => {
+		if (!Array.isArray(values)) {
+			return undefined;
+		}
+		const sanitized = values.filter((value) => typeof value === 'number' && Number.isFinite(value));
+		return sanitized.length > 0 ? sanitized : undefined;
+	};
+
+	const normalizeRangeConstraint = (
+		range: UiRangeConstraint | undefined
+	): UiRangeConstraint | undefined => {
+		if (!range) {
+			return undefined;
+		}
+		if (range.kind === 'uniform') {
+			const min = sanitizeNumber(range.min);
+			const max = sanitizeNumber(range.max);
+			if (min === undefined && max === undefined) {
+				return undefined;
+			}
+			return {
+				kind: 'uniform',
+				min,
+				max
+			};
+		}
+		const min = sanitizeNumberList(range.min);
+		const max = sanitizeNumberList(range.max);
+		if (min === undefined && max === undefined) {
+			return undefined;
+		}
+		return {
+			kind: 'components',
+			min,
+			max
+		};
+	};
+
+	const finalizeConstraints = (constraints: UiParamConstraints): UiParamConstraints => {
+		const next = cloneConstraints(constraints);
+		next.range = normalizeRangeConstraint(next.range);
+		next.step = sanitizeNumber(next.step);
+		if (next.step !== undefined && next.step <= 0) {
+			next.step = undefined;
+		}
+		next.step_base = next.step !== undefined ? sanitizeNumber(next.step_base) : undefined;
+		next.policy = next.policy ?? 'ClampAdapt';
+		return next;
+	};
+
+	const sameNumber = (a: number | undefined, b: number | undefined): boolean => {
+		if (a === undefined || b === undefined) {
+			return a === b;
+		}
+		return Math.abs(a - b) <= 1e-9;
+	};
+
+	const currentNodeById = (nodeId: NodeId): UiNodeDto | null => {
+		return graphState?.nodesById.get(nodeId) ?? null;
+	};
+
+	const updateNodeConstraints = (
+		nodeId: NodeId,
+		transform: (draft: UiParamConstraints) => void
+	): void => {
+		const node = currentNodeById(nodeId);
+		if (!node || node.data.kind !== 'parameter') {
+			return;
+		}
+		const draft = cloneConstraints(node.data.param.constraints);
+		transform(draft);
+		void sendSetParamConstraintsIntent(nodeId, finalizeConstraints(draft));
+	};
+
+	const hasCurrentUniformRange = (
+		constraints: UiParamConstraints,
+		min: number,
+		max: number
+	): boolean => {
+		return (
+			constraints.range?.kind === 'uniform' &&
+			sameNumber(constraints.range.min, min) &&
+			sameNumber(constraints.range.max, max)
+		);
+	};
+
+	const resettableNumericConstraints = (constraints: UiParamConstraints): boolean => {
+		return (
+			constraints.range !== undefined ||
+			constraints.step !== undefined ||
+			constraints.step_base !== undefined ||
+			constraints.policy === 'Reject'
+		);
+	};
+
+	const buildConstraintMenuItems = (node: UiNodeDto): ContextMenuItem[] => {
+		if (node.data.kind !== 'parameter') {
+			return [];
+		}
+
+		const paramKind = node.data.param.value.kind;
+		const constraints = node.data.param.constraints;
+		const supportsNumericConstraints = isNumericConstraintKind(paramKind);
+		const stepPresets = paramKind === 'int' ? integerStepPresets : fractionalStepPresets;
+		const items: ContextMenuItem[] = [];
+
+		if (supportsNumericConstraints) {
+			items.push({
+				id: 'constraint-range',
+				label: 'Range',
+				submenu: [
+					...uniformRangePresets.map((preset) => ({
+						id: `constraint-range-${preset.id}`,
+						label: preset.label,
+						hint: hasCurrentUniformRange(constraints, preset.min, preset.max) ? 'Current' : undefined,
+						action: () => {
+							updateNodeConstraints(node.node_id, (draft) => {
+								draft.range = {
+									kind: 'uniform',
+									min: preset.min,
+									max: preset.max
+								};
+							});
+						}
+					})),
+					{ separator: true },
+					{
+						id: 'constraint-range-clear',
+						label: 'Clear Range',
+						disabled: constraints.range === undefined,
+						action: () => {
+							updateNodeConstraints(node.node_id, (draft) => {
+								draft.range = undefined;
+							});
+						}
+					}
+				]
+			});
+			items.push({
+				id: 'constraint-step',
+				label: 'Step',
+				submenu: [
+					...stepPresets.map((step) => ({
+						id: `constraint-step-${String(step).replace('.', '_')}`,
+						label: `${step}`,
+						hint: sameNumber(constraints.step, step) ? 'Current' : undefined,
+						action: () => {
+							updateNodeConstraints(node.node_id, (draft) => {
+								draft.step = step;
+							});
+						}
+					})),
+					{ separator: true },
+					{
+						id: 'constraint-step-clear',
+						label: 'Clear Step',
+						disabled: constraints.step === undefined,
+						action: () => {
+							updateNodeConstraints(node.node_id, (draft) => {
+								draft.step = undefined;
+								draft.step_base = undefined;
+							});
+						}
+					}
+				]
+			});
+			items.push({
+				id: 'constraint-policy',
+				label: 'Constraint Policy',
+				submenu: ([
+					['ClampAdapt', 'Clamp / Adapt'],
+					['Reject', 'Reject']
+				] as const).map(([policy, label]) => ({
+					id: `constraint-policy-${policy}`,
+					label,
+					hint: constraints.policy === policy ? 'Current' : undefined,
+					action: () => {
+						updateNodeConstraints(node.node_id, (draft) => {
+							draft.policy = policy satisfies ParamConstraintPolicy;
+						});
+					}
+				}))
+			});
+		}
+
+		if (supportsNumericConstraints && resettableNumericConstraints(constraints)) {
+			items.push({ separator: true });
+		}
+
+		if (resettableNumericConstraints(constraints)) {
+			items.push({
+				id: 'constraint-reset',
+				label: supportsNumericConstraints ? 'Reset Numeric Constraints' : 'Reset Constraints',
+				action: () => {
+					updateNodeConstraints(node.node_id, (draft) => {
+						draft.range = undefined;
+						draft.step = undefined;
+						draft.step_base = undefined;
+						draft.policy = 'ClampAdapt';
+					});
+				}
+			});
+		}
+
+		if (items.length === 0) {
+			return [
+				{
+					id: 'constraint-unavailable',
+					label: 'No editable constraints here',
+					disabled: true
+				}
+			];
+		}
+
+		return items;
+	};
+
 	const clamp01 = (value: number): number => {
 		if (!Number.isFinite(value)) {
 			return 0;
@@ -429,16 +691,6 @@
 		isColorEditing = false;
 	};
 
-	const setConstraints = (): void => {
-		if (!canSetConstraints || !activeNode || activeNode.data.kind !== 'parameter') {
-			return;
-		}
-		void copyTextToClipboard(JSON.stringify(activeNode.data.param.constraints, null, 2));
-		console.warn(
-			'[ui] set constraints intent is not available yet; copied current constraints JSON'
-		);
-	};
-
 	const selectCopyScriptControlPath = (_event: MouseEvent): void => {
 		copyScriptControlPath();
 		closeMenu();
@@ -472,11 +724,6 @@
 			return;
 		}
 		openColorSubMenu(event);
-	};
-
-	const selectSetConstraints = (_event: MouseEvent): void => {
-		setConstraints();
-		closeMenu();
 	};
 
 	const selectDuplicateNode = (_event: MouseEvent): void => {
@@ -556,7 +803,7 @@
 				id: 'set-constraints',
 				label: 'Set Constraints',
 				icon: settingsIcon,
-				action: selectSetConstraints
+				submenu: buildConstraintMenuItems(activeNode)
 			});
 		}
 

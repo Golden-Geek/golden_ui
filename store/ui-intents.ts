@@ -8,6 +8,7 @@ import type {
 	UiCreateUserItemInitialParam,
 	UiEditIntent,
 	UiNodeMetaDto,
+	UiParamConstraints,
 	UiParameterControlState,
 	UiScriptConfig
 } from '../types';
@@ -95,6 +96,17 @@ export const sendSetParamControlStateIntent = async (
 		kind: 'setParamControlState',
 		node,
 		state
+	});
+};
+
+export const sendSetParamConstraintsIntent = async (
+	node: NodeId,
+	constraints: UiParamConstraints
+): Promise<boolean> => {
+	return sendUiIntent({
+		kind: 'setParamConstraints',
+		node,
+		constraints
 	});
 };
 

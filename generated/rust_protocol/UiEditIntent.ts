@@ -4,6 +4,7 @@ import type { CurveFitPoint } from "./CurveFitPoint";
 import type { NodeId } from "./NodeId";
 import type { NodeMetaPatch } from "./NodeMetaPatch";
 import type { ParamValue } from "./ParamValue";
+import type { ParameterConstraints } from "./ParameterConstraints";
 import type { ParameterEventBehaviour } from "./ParameterEventBehaviour";
 import type { UiCreateUserItemInitialParam } from "./UiCreateUserItemInitialParam";
 import type { UiParameterControlStateDto } from "./UiParameterControlStateDto";
@@ -43,7 +44,15 @@ node: NodeId,
 /**
  * New control state payload.
  */
-state: UiParameterControlStateDto, } | { "kind": "moveNode", 
+state: UiParameterControlStateDto, } | { "kind": "setParamConstraints", 
+/**
+ * Target parameter node id.
+ */
+node: NodeId, 
+/**
+ * New constraints payload.
+ */
+constraints: ParameterConstraints, } | { "kind": "moveNode", 
 /**
  * Target node id.
  */

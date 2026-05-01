@@ -551,6 +551,68 @@ const fromRustConstraints = (
 	};
 };
 
+const toRustReferenceRoot = (
+	root: UiReferenceRoot
+): NonNullable<NonNullable<RustUiParamDto['constraints']>['reference']>['root'] => {
+	switch (root.kind) {
+		case 'uuid':
+			return { Uuid: root.uuid };
+		case 'relativeToOwner':
+			return { RelativeToOwner: { path: [...root.path] } };
+		case 'engineRoot':
+		default:
+			return 'EngineRoot';
+	}
+};
+
+const toRustConstraints = (
+	constraints: UiParamConstraints
+): NonNullable<RustUiParamDto['constraints']> => ({
+	range: constraints.range
+		? constraints.range.kind === 'uniform'
+			? {
+					kind: 'uniform',
+					min: constraints.range.min,
+					max: constraints.range.max
+				}
+			: {
+					kind: 'components',
+					min: constraints.range.min ? [...constraints.range.min] : undefined,
+					max: constraints.range.max ? [...constraints.range.max] : undefined
+				}
+		: undefined,
+	step: constraints.step,
+	step_base: constraints.step_base,
+	enum_options: constraints.enum_options.map((option) => ({
+		variant_id: option.variant_id,
+		value: toRustParamValue(option.value),
+		label: option.label,
+		tags: [...option.tags],
+		ordering: option.ordering
+	})),
+	policy: constraints.policy,
+	reference: constraints.reference
+		? {
+				root: toRustReferenceRoot(constraints.reference.root),
+				target_kind:
+					constraints.reference.target_kind === 'parameterOnly'
+						? 'ParameterOnly'
+						: 'AnyNode',
+				allowed_node_types: [...constraints.reference.allowed_node_types],
+				allowed_parameter_types: [...constraints.reference.allowed_parameter_types],
+				allow_projections: constraints.reference.allow_projections,
+				custom_filter_key: constraints.reference.custom_filter_key,
+				default_search_filter: constraints.reference.default_search_filter
+			}
+		: undefined,
+	file: constraints.file
+		? {
+				allowed_types: [...constraints.file.allowed_types],
+				allowed_extensions: [...constraints.file.allowed_extensions]
+			}
+		: undefined
+});
+
 const isUiParameterControlMode = (value: unknown): value is UiParameterControlMode =>
 	value === 'manual' ||
 	value === 'contextLink' ||
@@ -951,6 +1013,23 @@ const fromRustEvent = (event: RustUiEventDto): UiEventDto => {
 				}
 			};
 		}
+		if (nestedKind.kind === 'paramConstraintsChanged') {
+			return {
+				...(event as Omit<UiEventDto, 'kind'>),
+				kind: {
+					kind: 'paramConstraintsChanged',
+					param: Number(nestedKind.param ?? 0),
+					old_constraints: fromRustConstraints(
+						nestedKind.old_constraints as RustUiParamDto['constraints'],
+						undefined
+					),
+					new_constraints: fromRustConstraints(
+						nestedKind.new_constraints as RustUiParamDto['constraints'],
+						undefined
+					)
+				}
+			};
+		}
 		return event as unknown as UiEventDto;
 	}
 
@@ -977,6 +1056,23 @@ const fromRustEvent = (event: RustUiEventDto): UiEventDto => {
 				param: Number((event as Record<string, unknown>).param ?? 0),
 				old_state: fromRustControlState((event as Record<string, unknown>).old_state),
 				new_state: fromRustControlState((event as Record<string, unknown>).new_state)
+			}
+		};
+	}
+	if (nestedKind === 'paramConstraintsChanged') {
+		return {
+			...(event as Omit<UiEventDto, 'kind'>),
+			kind: {
+				kind: 'paramConstraintsChanged',
+				param: Number((event as Record<string, unknown>).param ?? 0),
+				old_constraints: fromRustConstraints(
+					(event as Record<string, unknown>).old_constraints as RustUiParamDto['constraints'],
+					undefined
+				),
+				new_constraints: fromRustConstraints(
+					(event as Record<string, unknown>).new_constraints as RustUiParamDto['constraints'],
+					undefined
+				)
 			}
 		};
 	}
@@ -1138,6 +1234,12 @@ export const toRustIntent = (intent: UiEditIntent): RustUiEditIntent => {
 				mode: intent.state.mode,
 				spec: intent.state.spec
 			}
+		} as RustUiEditIntent;
+	}
+	if (intent.kind === 'setParamConstraints') {
+		return {
+			...intent,
+			constraints: toRustConstraints(intent.constraints)
 		} as RustUiEditIntent;
 	}
 	return intent as RustUiEditIntent;
