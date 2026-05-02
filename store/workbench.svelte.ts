@@ -22,6 +22,7 @@ import { wholeGraphScope } from '../types';
 import { handleCommandShortcut } from './commands.svelte';
 import { resetProjectFileFormat, setProjectFileFormat } from './project-file-format.svelte';
 import { createWorkbenchDescriptionStore } from './session/descriptions.svelte';
+import { createWorkbenchCustomEventStore } from './session/custom-events.svelte';
 import { createWorkbenchFooterHoverStore } from './session/footer-hover.svelte';
 import { createWorkbenchHistoryStore } from './session/history.svelte';
 import { createWorkbenchLoggerStore } from './session/logger.svelte';
@@ -77,6 +78,7 @@ export interface WorkbenchSession {
 	getSelectedNodes(): UiNodeDto[];
 	getFirstSelectedNode(): UiNodeDto | null;
 	getNodeDescription(node: UiNodeDto | null | undefined): string | null;
+	getCustomEventSequence(topic: string, origin?: NodeId | null): number;
 	getFooterHoverInfo(): FooterHoverInfo | null;
 	getNodeVisibleWarnings(nodeId: NodeId): NodeWarningRecord[];
 	getActiveWarnings(): NodeWarningRecord[];
@@ -183,6 +185,7 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 	const selection = createWorkbenchSelectionStore(graph);
 	const warnings = createWorkbenchWarningStore(graph);
 	const descriptions = createWorkbenchDescriptionStore();
+	const customEvents = createWorkbenchCustomEventStore();
 	const footerHover = createWorkbenchFooterHoverStore(graph, {
 		getNodeDescription: (node) => descriptions.getNodeDescription(node)
 	});
@@ -202,6 +205,9 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 
 	const getNodeDescription = (node: UiNodeDto | null | undefined): string | null =>
 		descriptions.getNodeDescription(node);
+
+	const getCustomEventSequence = (topic: string, origin?: NodeId | null): number =>
+		customEvents.getCustomEventSequence(topic, origin);
 
 	const clearFooterHover = (token: symbol): void => {
 		footerHover.clearFooterHover(token);
@@ -352,6 +358,7 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 
 	const applyBatch = (batch: UiEventBatch): void => {
 		const graphEvents = logger.partitionBatchEvents(batch.events);
+		customEvents.applyBatchEvents(graphEvents);
 
 		if (graphEvents.length > 0) {
 			const warningDataChanged = warnings.batchAffectsWarnings({
@@ -700,6 +707,7 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 			graph.reset();
 			warnings.reset();
 			descriptions.reset();
+			customEvents.reset();
 			footerHover.reset();
 			history.reset();
 			selection.reset();
@@ -765,6 +773,7 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 		getSelectedNodes: () => selection.getSelectedNodes(),
 		getFirstSelectedNode: () => selection.getFirstSelectedNode(),
 		getNodeDescription,
+		getCustomEventSequence,
 		getFooterHoverInfo,
 		getNodeVisibleWarnings: (nodeId) => warnings.getNodeVisibleWarnings(nodeId),
 		getActiveWarnings: () => warnings.getActiveWarnings(),

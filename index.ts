@@ -29,6 +29,15 @@ export { default as Watcher } from './components/common/Watcher.svelte';
 
 export { default as UnknownPanel } from './components/panels/UnknownPanel.svelte';
 export { default as Outliner } from './components/panels/outliner/OutlinerPanel.svelte';
+export {
+	registerOutlinerRowSupplement,
+	registerOutlinerRowSupplements,
+	unregisterOutlinerRowSupplement,
+	clearCustomOutlinerRowSupplements,
+	resolveOutlinerRowSupplement,
+	type OutlinerRowSupplementEntry,
+	type OutlinerRowSupplementRegistry
+} from './components/panels/outliner/outliner-row-registry';
 export { default as Inspector } from './components/panels/inspector/InspectorPanel.svelte';
 export { default as LoggerPanel } from './components/panels/logger/LoggerPanel.svelte';
 export { default as WarningsPanel } from './components/panels/warnings/WarningsPanel.svelte';

@@ -10,6 +10,7 @@
 	import { beginDashboardNodeDrag, beginDashboardParameterDrag } from '../dashboard/dashboard-drag';
 	import Arrow from '../../common/Arrow.svelte';
 	import type { OutlinerDropTarget } from './drag-drop';
+	import { resolveOutlinerRowSupplement } from './outliner-row-registry';
 
 	const EMPTY_AUTO_EXPAND_ANCESTORS: ReadonlySet<NodeId> = new Set<NodeId>();
 
@@ -65,6 +66,9 @@
 	let mainGraphState = $derived(session?.graph.state ?? null);
 	let meta = $derived(node?.meta ?? null);
 	let isOutlinerMode = $derived(mode === 'outliner');
+	let ResolvedRowSupplementComponent = $derived(
+		RowSupplementComponent ?? resolveOutlinerRowSupplement(node)?.component ?? null
+	);
 	let iconURL = $derived(getIconURLForNode(node));
 	let accentColor = $derived(node ? getContainerColorForNode(node) : 'rgba(124, 138, 162, 1)');
 
@@ -323,8 +327,8 @@
 						}
 					}}
 					onclick={(event) => selectNode(node, event)}>{meta?.label ?? ''}</button>
-				{#if RowSupplementComponent}
-					<RowSupplementComponent {node} />
+				{#if ResolvedRowSupplementComponent}
+					<ResolvedRowSupplementComponent {node} />
 				{/if}
 				{#if isOutlinerMode}
 					<NodeWarningBadge {warnings} />
