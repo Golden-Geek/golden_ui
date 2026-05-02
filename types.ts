@@ -122,8 +122,10 @@ export interface UiNodePresentationHintsDto {
 	warnings?: UiNodeWarningDto[];
 	// If > 0, this node also surfaces warnings from descendants up to this depth.
 	show_child_warnings_max_depth?: number;
-	// Keeps this node visible when nested in another node's inspector.
+	// Defaults to visible; set false to hide this item unless selected directly.
 	show_in_nested_inspector?: boolean;
+	// Defaults to visible; set false when a custom inspector renders this node elsewhere.
+	show_in_inspector_content?: boolean;
 }
 
 export interface UiNodeUserPermissionsDto {

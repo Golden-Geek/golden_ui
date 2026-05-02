@@ -60,7 +60,10 @@
 	let showsAllItemRootsInInspector = $derived(isWithinUserContextScope(node));
 
 	const shouldRenderChildInInspector = (child: UiNodeDto): boolean => {
-		// Context authoring scopes treat user-made entries as primary content, not hidden aux items.
+		if (child.meta.presentation?.show_in_inspector_content === false) {
+			return false;
+		}
+
 		if (showsAllItemRootsInInspector) {
 			return true;
 		}
@@ -69,7 +72,8 @@
 			return true;
 		}
 
-		if (child.meta.presentation?.show_in_nested_inspector) {
+		// Item roots are visible by default; only an explicit opt-out hides them here.
+		if (child.meta.presentation?.show_in_nested_inspector !== false) {
 			return true;
 		}
 
@@ -101,7 +105,7 @@
 	let iconURL = $derived(getIconURLForNode(node));
 	let warnings = $derived(node ? session?.getNodeVisibleWarnings(node.node_id) : null);
 	let customInspectorEntry = $derived(
-		node && showAsContainer ? resolveNodeInspector(node.node_type) : null
+		node && showAsContainer ? resolveNodeInspector(node) : null
 	);
 	let CustomInspectorComponent = $derived(customInspectorEntry?.component ?? null);
 

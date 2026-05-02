@@ -33,38 +33,43 @@ const builtinNodeInspectorRegistry: NodeInspectorRegistry = {
 
 const customNodeInspectorRegistry = new Map<string, NodeInspectorEntry>();
 
-const normalizeNodeType = (nodeType: string): string => nodeType.trim();
+const normalizeInspectorKey = (key: string): string => key.trim();
 
-export const registerNodeInspector = (nodeType: string, entry: NodeInspectorEntry): void => {
-	const normalizedNodeType = normalizeNodeType(nodeType);
-	if (!normalizedNodeType) {
-		throw new Error('Node inspector registration requires a non-empty node type.');
+export const registerNodeInspector = (key: string, entry: NodeInspectorEntry): void => {
+	const normalizedKey = normalizeInspectorKey(key);
+	if (!normalizedKey) {
+		throw new Error('Node inspector registration requires a non-empty node type or item kind.');
 	}
-	customNodeInspectorRegistry.set(normalizedNodeType, entry);
+	customNodeInspectorRegistry.set(normalizedKey, entry);
 };
 
 export const registerNodeInspectors = (entries: NodeInspectorRegistry): void => {
-	for (const [nodeType, entry] of Object.entries(entries)) {
-		registerNodeInspector(nodeType, entry);
+	for (const [key, entry] of Object.entries(entries)) {
+		registerNodeInspector(key, entry);
 	}
 };
 
-export const unregisterNodeInspector = (nodeType: string): void => {
-	customNodeInspectorRegistry.delete(normalizeNodeType(nodeType));
+export const unregisterNodeInspector = (key: string): void => {
+	customNodeInspectorRegistry.delete(normalizeInspectorKey(key));
 };
 
 export const clearCustomNodeInspectors = (): void => {
 	customNodeInspectorRegistry.clear();
 };
 
-export const resolveNodeInspector = (nodeType: string): NodeInspectorEntry | null => {
-	const normalizedNodeType = normalizeNodeType(nodeType);
+export const resolveNodeInspector = (nodeOrType: UiNodeDto | string): NodeInspectorEntry | null => {
+	const normalizedNodeType = normalizeInspectorKey(
+		typeof nodeOrType === 'string' ? nodeOrType : nodeOrType.node_type
+	);
 	if (!normalizedNodeType) {
 		return null;
 	}
+	const normalizedItemKind =
+		typeof nodeOrType === 'string' ? '' : normalizeInspectorKey(nodeOrType.user_item_kind);
 	return (
 		customNodeInspectorRegistry.get(normalizedNodeType) ??
 		builtinNodeInspectorRegistry[normalizedNodeType] ??
+		(normalizedItemKind ? customNodeInspectorRegistry.get(normalizedItemKind) : null) ??
 		null
 	);
 };

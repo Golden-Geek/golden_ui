@@ -972,7 +972,9 @@ const fromRustNode = (node: RustUiNodeDto, enumOptionsById: EnumOptionsById): Ui
 						: undefined,
 					show_child_warnings_max_depth:
 						node.meta.presentation.show_child_warnings_max_depth ?? undefined,
-					show_in_nested_inspector: node.meta.presentation.show_in_nested_inspector ?? undefined
+					show_in_nested_inspector: node.meta.presentation.show_in_nested_inspector ?? undefined,
+					show_in_inspector_content:
+						node.meta.presentation.show_in_inspector_content ?? undefined
 				}
 			: undefined
 	},

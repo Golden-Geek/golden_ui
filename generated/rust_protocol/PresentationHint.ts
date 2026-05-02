@@ -21,7 +21,14 @@ show_child_warnings_max_depth?: number,
 /**
  * Whether this node stays visible when rendered as a nested inspector child.
  *
- * Managed items default to hidden in nested inspectors unless directly selected
- * or rendered as the inspector root.
+ * Nodes default to visible at any nested inspector level. Set this to `false`
+ * only for item roots that should stay hidden unless selected directly.
  */
-show_in_nested_inspector?: boolean, };
+show_in_nested_inspector?: boolean, 
+/**
+ * Whether this node is rendered in its parent's inspector content area.
+ *
+ * Nodes default to visible in inspector content. Set this to `false` for controls
+ * that are rendered by a custom inspector location such as a header action.
+ */
+show_in_inspector_content?: boolean, };
