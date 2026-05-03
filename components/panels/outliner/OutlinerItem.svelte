@@ -328,9 +328,7 @@
 						}
 					}}
 					onclick={(event) => selectNode(node, event)}>{meta?.label ?? ''}</button>
-				{#if isOutlinerMode}
-					<NodeWarningBadge {warnings} />
-				{/if}
+				<NodeWarningBadge {warnings} />
 
 				{#if ResolvedRowSupplementComponent}
 					<ResolvedRowSupplementComponent {node} />
