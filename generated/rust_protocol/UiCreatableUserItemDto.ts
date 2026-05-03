@@ -17,6 +17,10 @@ item_kind: string,
  */
 label: string, 
 /**
+ * Optional Add menu submenu path, excluding the item label.
+ */
+menu_path?: Array<string>, 
+/**
  * Whether UI creation flows should auto-select the created item.
  */
 select_when_created: boolean, };

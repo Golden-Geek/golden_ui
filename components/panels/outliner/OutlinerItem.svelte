@@ -300,10 +300,11 @@
 						<Arrow direction={isExpanded ? 'down' : 'right'} color={accentColor} />
 					</div>
 				{/if}
-				<img class="outliner-item-icon" src={iconURL} alt="" aria-hidden="true" />
-				{#if isOutlinerMode && meta?.can_be_disabled}
+				{#if meta?.can_be_disabled}
 					<EnableButton {node} />
 				{/if}
+				<img class="outliner-item-icon" src={iconURL} alt="" aria-hidden="true" />
+
 				<button
 					class="outliner-item-label"
 					class:draggable={rowDraggable}
@@ -327,13 +328,16 @@
 						}
 					}}
 					onclick={(event) => selectNode(node, event)}>{meta?.label ?? ''}</button>
-				{#if ResolvedRowSupplementComponent}
-					<ResolvedRowSupplementComponent {node} />
-				{/if}
 				{#if isOutlinerMode}
 					<NodeWarningBadge {warnings} />
 				{/if}
-				<span class="outliner-item-spacer"></span>
+
+				{#if ResolvedRowSupplementComponent}
+					<ResolvedRowSupplementComponent {node} />
+				{:else}
+					<span class="outliner-item-spacer"></span>
+				{/if}
+
 				{#if isOutlinerMode}
 					<span class="outliner-item-type">{node.node_type}</span>
 				{/if}

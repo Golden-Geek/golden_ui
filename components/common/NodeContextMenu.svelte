@@ -26,6 +26,7 @@
 		UiRangeConstraint
 	} from '../../types';
 	import { getMainViewportBounds, remToPx } from './floating-panel';
+	import { buildCreatableItemMenu } from './creatable-item-menu';
 	import { getPanelByType, showPanel } from '../../store/ui-panels';
 	import { PERSISTED_PANEL_STATE_KEY } from '../../dockview/panel-persistence';
 	import { copyTextToClipboard } from '../../utils/clipboard';
@@ -399,7 +400,9 @@
 					...uniformRangePresets.map((preset) => ({
 						id: `constraint-range-${preset.id}`,
 						label: preset.label,
-						hint: hasCurrentUniformRange(constraints, preset.min, preset.max) ? 'Current' : undefined,
+						hint: hasCurrentUniformRange(constraints, preset.min, preset.max)
+							? 'Current'
+							: undefined,
 						action: () => {
 							updateNodeConstraints(node.node_id, (draft) => {
 								draft.range = {
@@ -454,10 +457,12 @@
 			items.push({
 				id: 'constraint-policy',
 				label: 'Constraint Policy',
-				submenu: ([
-					['ClampAdapt', 'Clamp / Adapt'],
-					['Reject', 'Reject']
-				] as const).map(([policy, label]) => ({
+				submenu: (
+					[
+						['ClampAdapt', 'Clamp / Adapt'],
+						['Reject', 'Reject']
+					] as const
+				).map(([policy, label]) => ({
 					id: `constraint-policy-${policy}`,
 					label,
 					hint: constraints.policy === policy ? 'Current' : undefined,
@@ -708,16 +713,6 @@
 		closeMenu();
 	};
 
-	const createItemSubmenu = (items: readonly UiCreatableUserItem[]): ContextMenuItem[] => {
-		return items.map((item) => ({
-			id: `create:${item.node_type}:${item.item_kind}`,
-			label: item.label,
-			action: () => {
-				createUserItem(item);
-			}
-		}));
-	};
-
 	const selectSetColor = (event: MouseEvent): void => {
 		if (colorSubMenu.open) {
 			closeColorSubMenu();
@@ -773,7 +768,7 @@
 							id: 'create-child',
 							label: 'Add',
 							icon: addIcon,
-							submenu: createItemSubmenu(creatableItems)
+							submenu: buildCreatableItemMenu(creatableItems, createUserItem)
 						} satisfies ContextMenuItem,
 						{ separator: true } satisfies ContextMenuItem
 					]

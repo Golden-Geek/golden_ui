@@ -5,6 +5,7 @@ import type {
 	ParamValue,
 	UiAck,
 	UiClient,
+	UiCreatableUserItem,
 	UiEditIntent,
 	UiEventBatch,
 	UiEventDto,
@@ -77,6 +78,7 @@ export type { RustUiEventBatch };
 type RustUiEventDto = RustUiEventBatch['events'][number];
 type RustScriptConfig = RustScriptConfigRequest['config'];
 type RustScriptSource = RustScriptConfig['source'];
+type RustCreatableUserItem = NonNullable<RustUiNodeDto['creatable_user_items']>[number];
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
 	typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -595,9 +597,7 @@ const toRustConstraints = (
 		? {
 				root: toRustReferenceRoot(constraints.reference.root),
 				target_kind:
-					constraints.reference.target_kind === 'parameterOnly'
-						? 'ParameterOnly'
-						: 'AnyNode',
+					constraints.reference.target_kind === 'parameterOnly' ? 'ParameterOnly' : 'AnyNode',
 				allowed_node_types: [...constraints.reference.allowed_node_types],
 				allowed_parameter_types: [...constraints.reference.allowed_parameter_types],
 				allow_projections: constraints.reference.allow_projections,
@@ -928,6 +928,18 @@ const fromRustNodeData = (
 	return { kind: 'node', node_type: data.node_type };
 };
 
+const fromRustCreatableUserItem = (item: RustCreatableUserItem): UiCreatableUserItem => ({
+	node_type: item.node_type,
+	item_kind: item.item_kind,
+	label: item.label,
+	menu_path: Array.isArray(item.menu_path)
+		? item.menu_path
+				.map((segment) => (typeof segment === 'string' ? segment.trim() : ''))
+				.filter((segment) => segment.length > 0)
+		: [],
+	select_when_created: Boolean(item.select_when_created)
+});
+
 const fromRustNode = (node: RustUiNodeDto, enumOptionsById: EnumOptionsById): UiNodeDto => ({
 	node_id: node.node_id,
 	uuid: node.uuid,
@@ -973,8 +985,7 @@ const fromRustNode = (node: RustUiNodeDto, enumOptionsById: EnumOptionsById): Ui
 					show_child_warnings_max_depth:
 						node.meta.presentation.show_child_warnings_max_depth ?? undefined,
 					show_in_nested_inspector: node.meta.presentation.show_in_nested_inspector ?? undefined,
-					show_in_inspector_content:
-						node.meta.presentation.show_in_inspector_content ?? undefined
+					show_in_inspector_content: node.meta.presentation.show_in_inspector_content ?? undefined
 				}
 			: undefined
 	},
@@ -982,7 +993,7 @@ const fromRustNode = (node: RustUiNodeDto, enumOptionsById: EnumOptionsById): Ui
 	user_role: node.user_role ?? 'regular',
 	user_item_kind: node.user_item_kind ?? node.node_type,
 	accepted_user_item_kinds: [...(node.accepted_user_item_kinds ?? [])],
-	creatable_user_items: [...(node.creatable_user_items ?? [])],
+	creatable_user_items: (node.creatable_user_items ?? []).map(fromRustCreatableUserItem),
 	children: [...(node.children ?? [])]
 });
 

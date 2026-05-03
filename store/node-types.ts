@@ -17,6 +17,24 @@ import parameterReferenceIcon from '../style/icons/parameter/reference.svg';
 import parameterFileIcon from '../style/icons/parameter/file.svg';
 import curveKeyIcon from '../style/icons/node/curve/key.svg';
 
+const detectedNodeIconModules = import.meta.glob('../../assets/icons/nodes/*.{svg,png}', {
+	eager: true,
+	import: 'default'
+}) as Record<string, string>;
+
+const detectedNodeIcons = Object.entries(detectedNodeIconModules).reduce<Record<string, string>>(
+	(result, [path, iconUrl]) => {
+		const fileName = path.split('/').at(-1) ?? '';
+		const iconName = fileName.replace(/\.[^.]+$/, '');
+		const extension = fileName.split('.').at(-1)?.toLowerCase();
+		if (!(iconName in result) || extension === 'svg') {
+			result[iconName] = iconUrl;
+		}
+		return result;
+	},
+	{}
+);
+
 const DEFAULT_FALLBACK_ICON = nodeAddIcon;
 const DEFAULT_MANAGER_ICON = nodeManagerIcon;
 const DEFAULT_PARAMETER_ICON = parameterTriggerIcon;
@@ -73,6 +91,7 @@ const resolveNodeIcons = (overrides?: NodeIconSet): ResolvedNodeIconSet => ({
 	fallback: overrides?.fallback ?? defaultNodeIcons.fallback,
 	nodeTypes: {
 		...defaultNodeIcons.nodeTypes,
+		...detectedNodeIcons,
 		...(overrides?.nodeTypes ?? {})
 	},
 	parameterKinds: {
@@ -85,6 +104,30 @@ let activeNodeIcons: ResolvedNodeIconSet = resolveNodeIcons();
 
 export const configureNodeIcons = (overrides?: NodeIconSet): void => {
 	activeNodeIcons = resolveNodeIcons(overrides);
+};
+
+export const getIconURLForNodeType = (
+	nodeType: string | null | undefined,
+	itemKind?: string | null
+): string | null => {
+	const normalizedNodeType = nodeType?.trim() ?? '';
+	const normalizedItemKind = itemKind?.trim() ?? '';
+
+	if (normalizedNodeType.length > 0) {
+		const icon = activeNodeIcons.nodeTypes[normalizedNodeType];
+		if (icon) {
+			return icon;
+		}
+	}
+
+	if (normalizedItemKind.length > 0) {
+		const icon = activeNodeIcons.nodeTypes[normalizedItemKind];
+		if (icon) {
+			return icon;
+		}
+	}
+
+	return null;
 };
 
 export const getIconURLForNode = (node: UiNodeDto | null): string => {
@@ -103,8 +146,7 @@ export const getIconURLForNode = (node: UiNodeDto | null): string => {
 		);
 	}
 
-	let result =
-		activeNodeIcons.nodeTypes[node.node_type] ?? activeNodeIcons.nodeTypes[node.user_item_kind];
+	let result = getIconURLForNodeType(node.node_type, node.user_item_kind);
 	if (!result) {
 		// Fallback to manager icon if it's a node type we don't have a specific icon for, but it has creatable items (i.e. it's a manager of some kind)
 		if (isManager) {

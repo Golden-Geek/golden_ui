@@ -4,6 +4,7 @@
 	import type { UiCreatableUserItem, UiNodeDto } from '../../types';
 	import ContextMenu from './ContextMenu.svelte';
 	import type { ContextMenuAnchor, ContextMenuItem } from './context-menu';
+	import { buildCreatableItemMenu } from './creatable-item-menu';
 	import addIcon from '../../style/icons/node/add.svg';
 
 	let { node }: { node: UiNodeDto } = $props();
@@ -70,13 +71,7 @@
 	});
 
 	let menuItems = $derived.by((): ContextMenuItem[] => {
-		return creatableItems.map((item) => ({
-			id: `${item.node_type}:${item.item_kind}`,
-			label: item.label,
-			action: () => {
-				void createItem(item);
-			}
-		}));
+		return buildCreatableItemMenu(creatableItems, createItem);
 	});
 </script>
 

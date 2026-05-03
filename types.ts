@@ -326,6 +326,7 @@ export interface UiCreatableUserItem {
 	node_type: string;
 	item_kind: string;
 	label: string;
+	menu_path: string[];
 	select_when_created: boolean;
 }
 
