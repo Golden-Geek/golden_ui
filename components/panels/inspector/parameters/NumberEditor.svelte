@@ -310,7 +310,6 @@
 
 	.number-property-container.field-only .number-field {
 		width: 100%;
-		max-width: none;
 		margin-left: 0;
 	}
 
@@ -321,13 +320,13 @@
 	.number-field {
 		height: 100%;
 		box-sizing: border-box;
-		max-width: 4rem;
+		max-width: 5rem;
 		margin-left: 0.25rem;
 		width: 40%;
 	}
 
 	.infinite .number-field {
-		width: 100%;
+		max-width: 5rem;
 	}
 
 	.number-field-shell {
