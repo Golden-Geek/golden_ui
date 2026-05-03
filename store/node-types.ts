@@ -246,7 +246,7 @@ const getDerivedColorForNode = (node: UiNodeDto): UiColorDto => {
 		if (node.node_type === 'folder') {
 			return { r: 0.8, g: 0.8, b: 0.8, a: 0.5 };
 		} else if (node.user_item_kind.trim().length > 0) {
-			return { r: 1, g: 0.5, b: 0.8, a: 0.5 };
+			return { r: 0.8, g: 0.8, b: 0.8, a: 0.5 };
 		}
 	}
 
