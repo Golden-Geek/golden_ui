@@ -89,6 +89,7 @@
 	let layoutRaf = 0;
 	let closeTimer = 0;
 	let lastAnchorPointer = $state<{ x: number; y: number; time: number } | null>(null);
+	let latchedAnchorPointer = $state<{ x: number; y: number } | null>(null);
 
 	const submenuItemsFor = (item: ContextMenuItem): ContextMenuItem[] => {
 		return normalizeContextMenuItems(item.submenu);
@@ -293,13 +294,12 @@
 			return null;
 		}
 
-		if (preferPointerAnchor && lastAnchorPointer) {
-			const pointerAgeMs = performance.now() - lastAnchorPointer.time;
-			if (pointerAgeMs <= 500) {
+		if (preferPointerAnchor) {
+			if (latchedAnchorPointer) {
 				const placement = computePointAnchoredMenuPlacement({
 					bounds,
-					anchorX: lastAnchorPointer.x,
-					anchorY: lastAnchorPointer.y,
+					anchorX: latchedAnchorPointer.x,
+					anchorY: latchedAnchorPointer.y,
 					menuWidth: width,
 					menuHeight: height,
 					marginRem: viewportPaddingRem
@@ -308,6 +308,23 @@
 					left: placement.left,
 					top: placement.top
 				};
+			} else if (lastAnchorPointer) {
+				const pointerAgeMs = performance.now() - lastAnchorPointer.time;
+				if (pointerAgeMs <= 500) {
+					latchedAnchorPointer = { x: lastAnchorPointer.x, y: lastAnchorPointer.y };
+					const placement = computePointAnchoredMenuPlacement({
+						bounds,
+						anchorX: latchedAnchorPointer.x,
+						anchorY: latchedAnchorPointer.y,
+						menuWidth: width,
+						menuHeight: height,
+						marginRem: viewportPaddingRem
+					});
+					return {
+						left: placement.left,
+						top: placement.top
+					};
+				}
 			}
 		}
 
@@ -556,6 +573,7 @@
 		}
 		submenuPath = [];
 		menuPositions = {};
+		latchedAnchorPointer = null;
 	});
 
 	$effect(() => {
