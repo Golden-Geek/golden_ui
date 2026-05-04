@@ -109,7 +109,12 @@
 	);
 	let CustomInspectorComponent = $derived(customInspectorEntry?.component ?? null);
 
-	let collapsed = $derived(level > 3 && !isParameter);
+	let defaultCollapsed = $derived(
+		Boolean(node?.meta.presentation?.collapsed ?? (level > 3 && !isParameter))
+	);
+	let collapsedOverride = $state<boolean | null>(null);
+	let collapsedOverrideNodeId = $state<NodeId | null>(null);
+	let collapsed = $derived(collapsedOverride ?? defaultCollapsed);
 
 	let titleTextElem: HTMLSpanElement | null = $state(null as HTMLSpanElement | null);
 	let enableButtonElem: HTMLDivElement | null = $state(null as HTMLDivElement | null);
@@ -131,6 +136,15 @@
 
 		renameInputElem.focus();
 		renameInputElem.select();
+	});
+
+	$effect.pre(() => {
+		const nodeId = node?.node_id ?? null;
+		if (collapsedOverrideNodeId === nodeId) {
+			return;
+		}
+		collapsedOverride = null;
+		collapsedOverrideNodeId = nodeId;
 	});
 
 	const startRename = (): void => {
@@ -167,11 +181,11 @@
 	};
 
 	const toggleCollapsed = (): void => {
-		collapsed = !collapsed;
+		collapsedOverride = !collapsed;
 	};
 
 	const setCollapsed = (nextCollapsed: boolean): void => {
-		collapsed = nextCollapsed;
+		collapsedOverride = nextCollapsed;
 	};
 
 	const handlePointerEnter = (): void => {

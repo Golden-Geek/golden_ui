@@ -118,6 +118,8 @@ export interface UiColorDto {
 
 export interface UiNodePresentationHintsDto {
 	color?: UiColorDto;
+	// Default collapsed state for tree/inspector containers until the user toggles them.
+	collapsed?: boolean;
 	// Warnings that belong to this node.
 	warnings?: UiNodeWarningDto[];
 	// If > 0, this node also surfaces warnings from descendants up to this depth.

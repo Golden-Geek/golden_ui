@@ -96,7 +96,13 @@
 		if (candidate === null) {
 			return false;
 		}
-		return level < initiallyExpandedDepth || autoExpandAncestorNodeIds.has(candidate.node_id);
+		if (autoExpandAncestorNodeIds.has(candidate.node_id)) {
+			return true;
+		}
+		if (candidate.meta.presentation?.collapsed === true) {
+			return false;
+		}
+		return level < initiallyExpandedDepth;
 	};
 
 	const explicitExpandedForNode = (candidate: UiNodeDto | null): boolean | null => {

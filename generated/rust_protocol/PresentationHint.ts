@@ -11,6 +11,10 @@ export type PresentationHint = {
  */
 color?: Color | null, 
 /**
+ * Whether UI tree/inspector containers should start collapsed until a user chooses otherwise.
+ */
+collapsed?: boolean, 
+/**
  * Warnings attached to this node, keyed by warning id.
  */
 warnings?: Array<NodeWarning>, 
