@@ -246,7 +246,7 @@ input[type='checkbox']:disabled {
 
 input[type='checkbox'].readonly {
 	border-color: rgb(from var(--gc-color-readonly) r g b / 40%) !important;
-	background-color: rgb(from var(--gc-color-readonly) r g b / 30%) !important;
+	background-color: rgb(from var(--gc-color-readonly) r g b / 5%) !important;
 }
 
 input[type='checkbox'].readonly:checked::after {

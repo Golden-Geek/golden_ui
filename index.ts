@@ -53,6 +53,7 @@ export type {
 	NodeInspectorComponentProps,
 	NodeInspectorEntry,
 	NodeInspectorOrder,
+	NodeInspectorPanelHeaderComponentProps,
 	NodeInspectorRegistry
 } from './components/panels/inspector/node-inspector-registry';
 

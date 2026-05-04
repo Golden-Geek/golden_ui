@@ -1,7 +1,8 @@
 <script lang="ts">
-	import { untrack } from 'svelte';
+	import { untrack, type Snippet } from 'svelte';
 	import NodeDataInspector from './NodeDataInspector.svelte';
 	import NodeInspector from './NodeInspector.svelte';
+	import { resolveNodeInspector } from './node-inspector-registry';
 
 	import { appState } from '../../../store/workbench.svelte.ts';
 	import {
@@ -79,6 +80,8 @@
 	let computedPanelTitle = $derived(node ? `Inspector: ${node.meta.label}` : 'Inspector');
 
 	let warningCount = $derived(warnings ? warnings.length : 0);
+	let customInspectorEntry = $derived(node ? resolveNodeInspector(node) : null);
+	let CustomPanelHeaderComponent = $derived(customInspectorEntry?.panelHeaderComponent ?? null);
 	let renameInputElem: HTMLInputElement | null = $state(null as HTMLInputElement | null);
 	let renamingState = $state({
 		isRenaming: false,
@@ -414,120 +417,136 @@
 </script>
 
 <div class="inspector">
-	<div
-		class="inspector-header"
-		role="group"
-		data-node-id={node?.node_id}
-		style="--node-accent-color: {headerAccentColor}"
-		onpointerenter={handleHeaderPointerEnter}
-		onpointerleave={handleHeaderPointerLeave}>
-		{#if node == null}
-			<span class="title-text">No node selected</span>
-		{:else}
-			<span class="header-icon">
-				{#if iconURL}
-					<img src={iconURL} alt="" />
-				{/if}
-			</span>
-
-			{#if node.meta.can_be_disabled}
-				<EnableButton {node} />
-			{/if}
-
-			{#if renamingState.isRenaming}
-				<input
-					class="title-input"
-					bind:this={renameInputElem}
-					bind:value={renamingState.renameDraft}
-					onblur={() => {
-						void commitRename();
-					}}
-					onkeydown={(e) => {
-						if (e.key === 'Enter') {
-							void commitRename();
-							return;
-						}
-						if (e.key === 'Escape') {
-							cancelRename();
-						}
-					}} />
+	{#snippet builtInHeader(headerExtra?: Snippet)}
+		<div
+			class="inspector-header"
+			role="group"
+			data-node-id={node?.node_id}
+			style="--node-accent-color: {headerAccentColor}"
+			onpointerenter={handleHeaderPointerEnter}
+			onpointerleave={handleHeaderPointerLeave}>
+			{#if node == null}
+				<span class="title-text">No node selected</span>
 			{:else}
-				<span
-					class="title-text {isNameChangeable ? 'name-changeable' : ''}"
-					role="textbox"
-					tabindex="-1"
-					ondblclick={() => {
-						startRename();
-					}}
-					title={isNameChangeable ? 'Double-click to rename' : undefined}>
-					{node.meta.label}
+				<span class="header-icon">
+					{#if iconURL}
+						<img src={iconURL} alt="" />
+					{/if}
 				</span>
+
+				{#if node.meta.can_be_disabled}
+					<EnableButton {node} />
+				{/if}
+
+				{#if renamingState.isRenaming}
+					<input
+						class="title-input"
+						bind:this={renameInputElem}
+						bind:value={renamingState.renameDraft}
+						onblur={() => {
+							void commitRename();
+						}}
+						onkeydown={(e) => {
+							if (e.key === 'Enter') {
+								void commitRename();
+								return;
+							}
+							if (e.key === 'Escape') {
+								cancelRename();
+							}
+						}} />
+				{:else}
+					<span
+						class="title-text {isNameChangeable ? 'name-changeable' : ''}"
+						role="textbox"
+						tabindex="-1"
+						ondblclick={() => {
+							startRename();
+						}}
+						title={isNameChangeable ? 'Double-click to rename' : undefined}>
+						{node.meta.label}
+					</span>
+				{/if}
+
+				{#if headerExtra}
+					{@render headerExtra()}
+				{:else}
+					<div class="spacer"></div>
+				{/if}
+
+				<!-- <div
+					class="node-id-badge"
+					role="button"
+					tabindex="-1"
+					onmouseenter={() => (badgeOver = true)}
+					onmouseleave={() => (badgeOver = false)}>
+					<button
+						class="copy-button"
+						title="Copy path to clipboard"
+						onclick={() => {
+							if (node) {
+								navigator.clipboard.writeText(node.uuid);
+							}
+						}}>
+						Copy
+					</button>
+					{#if badgeOver}
+						<div class="node-id" transition:slide={{ duration: 200, axis: 'x' }}>{node.decl_id}</div>
+					{/if}
+				</div> -->
 			{/if}
 
-			<!-- <div
-				class="node-id-badge"
-				role="button"
-				tabindex="-1"
-				onmouseenter={() => (badgeOver = true)}
-				onmouseleave={() => (badgeOver = false)}>
+			{#if node}
+				<NodeAddButton {node} />
+			{/if}
+
+			<div class="inspector-nav-tools">
 				<button
-					class="copy-button"
-					title="Copy path to clipboard"
-					onclick={() => {
-						if (node) {
-							navigator.clipboard.writeText(node.uuid);
-						}
-					}}>
-					Copy
+					type="button"
+					class="inspector-nav-button"
+					title="Inspect parent node"
+					disabled={!canInspectParent}
+					onclick={inspectParentNode}>
+					<Arrow direction="up" />
 				</button>
-				{#if badgeOver}
-					<div class="node-id" transition:slide={{ duration: 200, axis: 'x' }}>{node.decl_id}</div>
-				{/if}
-			</div> -->
-		{/if}
+				<button
+					type="button"
+					class="inspector-nav-button"
+					title="Inspect previous node"
+					disabled={!canGoHistoryBackward}
+					onclick={inspectPreviousNode}>
+					<Arrow direction="left" />
+				</button>
+				<button
+					type="button"
+					class="inspector-nav-button"
+					title="Inspect next node"
+					disabled={!canGoHistoryForward}
+					onclick={inspectNextNode}>
+					<Arrow direction="right" />
+				</button>
 
-		<div class="spacer"></div>
-
-		{#if node}
-			<NodeAddButton {node} />
-		{/if}
-
-		<div class="inspector-nav-tools">
-			<button
-				type="button"
-				class="inspector-nav-button"
-				title="Inspect parent node"
-				disabled={!canInspectParent}
-				onclick={inspectParentNode}>
-				<Arrow direction="up" />
-			</button>
-			<button
-				type="button"
-				class="inspector-nav-button"
-				title="Inspect previous node"
-				disabled={!canGoHistoryBackward}
-				onclick={inspectPreviousNode}>
-				<Arrow direction="left" />
-			</button>
-			<button
-				type="button"
-				class="inspector-nav-button"
-				title="Inspect next node"
-				disabled={!canGoHistoryForward}
-				onclick={inspectNextNode}>
-				<Arrow direction="right" />
-			</button>
-
-			<button
-				type="button"
-				class="inspector-nav-button lock-toggle"
-				title={inspectorLocked ? 'Unlock inspector from node' : 'Lock inspector to current node'}
-				disabled={node === null}
-				class:is-active={inspectorLocked}
-				onclick={toggleInspectorLock}>
-			</button>
+				<button
+					type="button"
+					class="inspector-nav-button lock-toggle"
+					title={inspectorLocked ? 'Unlock inspector from node' : 'Lock inspector to current node'}
+					disabled={node === null}
+					class:is-active={inspectorLocked}
+					onclick={toggleInspectorLock}>
+				</button>
+			</div>
 		</div>
-	</div>
+	{/snippet}
+
+	{#if node !== null && CustomPanelHeaderComponent}
+		<CustomPanelHeaderComponent {node}>
+			{#snippet defaultHeader(headerExtra?: Snippet)}
+				{@render builtInHeader(headerExtra)}
+			{/snippet}
+		</CustomPanelHeaderComponent>
+	{:else}
+		{@render builtInHeader()}
+	{/if}
 
 	{#if node !== null}
 		{#if warningCount > 0}

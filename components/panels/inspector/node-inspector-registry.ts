@@ -20,8 +20,14 @@ export interface NodeInspectorComponentProps {
 	defaultChildren?: Snippet<[String?]>;
 }
 
+export interface NodeInspectorPanelHeaderComponentProps {
+	node: UiNodeDto;
+	defaultHeader?: Snippet<[Snippet?]>;
+}
+
 export interface NodeInspectorEntry {
-	component: any;
+	component?: any;
+	panelHeaderComponent?: any;
 }
 
 export type NodeInspectorRegistry = Record<string, NodeInspectorEntry>;
