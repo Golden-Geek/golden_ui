@@ -15,6 +15,7 @@
 		nodeContextMenuState,
 		openNodeContextMenu
 	} from '../../store/node-context-menu.svelte';
+	import { resolveNodeContextMenuItems } from './node-context-menu-registry';
 	import type {
 		NodeId,
 		ParamConstraintPolicy,
@@ -252,6 +253,19 @@
 			activeNode?.meta.user_permissions.can_edit_constraints && activeNode.data.kind === 'parameter'
 		)
 	);
+	let customNodeContextMenuItems = $derived.by((): ContextMenuItem[] => {
+		if (!activeNode) {
+			return [];
+		}
+		return resolveNodeContextMenuItems({
+			node: activeNode,
+			parentNode,
+			graphState,
+			session,
+			closeMenu,
+			patchMeta: sendPatchMetaIntent
+		});
+	});
 	let creatableItems = $derived(activeNode?.creatable_user_items ?? []);
 
 	const numericConstraintKinds = new Set<ParamValue['kind']>([
@@ -800,6 +814,10 @@
 				icon: settingsIcon,
 				submenu: buildConstraintMenuItems(activeNode)
 			});
+		}
+		if (customNodeContextMenuItems.length > 0) {
+			items.push({ separator: true });
+			items.push(...customNodeContextMenuItems);
 		}
 
 		if (canDuplicate || canDelete) {

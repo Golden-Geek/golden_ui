@@ -26,6 +26,15 @@ export { default as DashboardRouteLayout } from './components/routes/DashboardRo
 export { default as DashboardRoute } from './components/routes/DashboardRoute.svelte';
 export { default as DashboardPageRoute } from './components/routes/DashboardPageRoute.svelte';
 export { default as Watcher } from './components/common/Watcher.svelte';
+export {
+	registerNodeContextMenuContributor,
+	registerNodeContextMenuContributors,
+	unregisterNodeContextMenuContributor,
+	clearCustomNodeContextMenuContributors,
+	type NodeContextMenuContributorContext,
+	type NodeContextMenuContributorEntry,
+	type NodeContextMenuContributorRegistry
+} from './components/common/node-context-menu-registry';
 
 export { default as UnknownPanel } from './components/panels/UnknownPanel.svelte';
 export { default as Outliner } from './components/panels/outliner/OutlinerPanel.svelte';
