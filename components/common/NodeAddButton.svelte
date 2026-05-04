@@ -95,7 +95,7 @@
 				anchor={menuAnchor}
 				insideElements={[addMenuTrigger]}
 				minWidthRem={10}
-				maxWidthCss="min(18rem, calc(100vw - 2rem))" />
+				maxWidthCss="max-content" />
 		{/if}
 	</div>
 {/if}

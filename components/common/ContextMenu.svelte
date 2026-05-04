@@ -64,7 +64,7 @@
 		closeOnViewportChange = true,
 		closeOnSelect = true,
 		minWidthRem = 10,
-		maxWidthCss = 'min(22rem, calc(100vw - 2rem))',
+		maxWidthCss = 'max-content',
 		viewportPaddingRem = 0.45,
 		submenuGapRem = 0.3,
 		zIndex = 1300,
@@ -845,10 +845,7 @@
 	}
 
 	.gc-context-item-label {
-		min-inline-size: 0;
 		white-space: nowrap;
-		overflow: hidden;
-		text-overflow: ellipsis;
 	}
 
 	.gc-context-item-hint {

@@ -30,6 +30,8 @@
 
 	let draftValue = $state('');
 	let inlineLabel = $derived(typeof insideLabel === 'string' ? insideLabel.trim() : '');
+	let widgetHint = $derived((param?.ui_hints?.widget ?? '').trim().toLowerCase());
+	let multiline = $derived(widgetHint === 'textarea' || widgetHint === 'multiline');
 	let showsInlineLabel = $derived(layoutMode === 'widget' && inlineLabel.length > 0);
 
 	$effect(() => {
@@ -116,56 +118,110 @@
 			);
 		}
 	};
+
+	const updateDraftValue = (event: Event): void => {
+		draftValue = (event.target as HTMLInputElement | HTMLTextAreaElement).value;
+	};
+
+	const commitTargetValue = (target: HTMLInputElement | HTMLTextAreaElement): void => {
+		void commitValue(target.value);
+	};
+
+	const resetTargetValue = (target: HTMLInputElement | HTMLTextAreaElement): void => {
+		draftValue = value;
+		target.blur();
+	};
 </script>
 
 {#if showsInlineLabel}
-	<div class="string-editor-shell widget-layout">
+	<div class="string-editor-shell widget-layout" class:multiline-layout={multiline}>
 		<span class="string-editor-prefix">{inlineLabel} :</span>
+		{#if multiline}
+			<textarea
+				class="string-editor inline-labeled multiline"
+				value={draftValue}
+				disabled={!enabled}
+				rows="5"
+				class:readonly={readOnly}
+				oninput={updateDraftValue}
+				onblur={(event) => {
+					commitTargetValue(event.target as HTMLTextAreaElement);
+				}}
+				onkeydown={(event) => {
+					const target = event.target as HTMLTextAreaElement;
+					if ((event.key === 'Enter' && (event.ctrlKey || event.metaKey)) || event.key === 'Tab') {
+						commitTargetValue(target);
+					}
+					if (event.key === 'Escape') {
+						resetTargetValue(target);
+					}
+					}}></textarea>
+		{:else}
+			<input
+				type="text"
+				class="string-editor inline-labeled"
+				value={draftValue}
+				disabled={!enabled}
+				class:readonly={readOnly}
+				onchange={(event) => {
+					commitTargetValue(event.target as HTMLInputElement);
+				}}
+				onkeydown={(event) => {
+					if (event.key === 'Enter') {
+						const target = event.target as HTMLInputElement;
+						commitTargetValue(target);
+						target.blur();
+					}
+					if (event.key === 'Escape') {
+						resetTargetValue(event.target as HTMLInputElement);
+					}
+				}} />
+		{/if}
+	</div>
+{:else}
+	{#if multiline}
+		<textarea
+			class="string-editor multiline"
+			class:widget-layout={layoutMode === 'widget'}
+			value={draftValue}
+			disabled={!enabled}
+			rows="5"
+			class:readonly={readOnly}
+			oninput={updateDraftValue}
+			onblur={(event) => {
+				commitTargetValue(event.target as HTMLTextAreaElement);
+			}}
+			onkeydown={(event) => {
+				const target = event.target as HTMLTextAreaElement;
+				if ((event.key === 'Enter' && (event.ctrlKey || event.metaKey)) || event.key === 'Tab') {
+					commitTargetValue(target);
+				}
+				if (event.key === 'Escape') {
+					resetTargetValue(target);
+				}
+			}}></textarea>
+	{:else}
 		<input
 			type="text"
-			class="string-editor inline-labeled"
+			class="string-editor"
+			class:widget-layout={layoutMode === 'widget'}
 			value={draftValue}
 			disabled={!enabled}
 			class:readonly={readOnly}
 			onchange={(event) => {
-				const nextValue = (event.target as HTMLInputElement).value;
-				void commitValue(nextValue);
+				commitTargetValue(event.target as HTMLInputElement);
 			}}
 			onkeydown={(event) => {
 				if (event.key === 'Enter') {
 					const target = event.target as HTMLInputElement;
-					void commitValue(target.value);
+					commitTargetValue(target);
 					target.blur();
 				}
 				if (event.key === 'Escape') {
-					draftValue = value;
-					(event.target as HTMLInputElement).blur();
+					resetTargetValue(event.target as HTMLInputElement);
 				}
 			}} />
-	</div>
-{:else}
-	<input
-		type="text"
-		class="string-editor"
-		class:widget-layout={layoutMode === 'widget'}
-		value={draftValue}
-		disabled={!enabled}
-		class:readonly={readOnly}
-		onchange={(event) => {
-			const nextValue = (event.target as HTMLInputElement).value;
-			void commitValue(nextValue);
-		}}
-		onkeydown={(event) => {
-			if (event.key === 'Enter') {
-				const target = event.target as HTMLInputElement;
-				void commitValue(target.value);
-				target.blur();
-			}
-			if (event.key === 'Escape') {
-				draftValue = value;
-				(event.target as HTMLInputElement).blur();
-			}
-		}} />
+	{/if}
 {/if}
 
 <style>
@@ -181,6 +237,10 @@
 		background: rgb(from var(--gc-color-background) r g b / 0.48);
 		border: solid 0.06rem rgb(from var(--gc-color-panel-outline) r g b / 0.48);
 		box-sizing: border-box;
+	}
+
+	.string-editor-shell.multiline-layout {
+		align-items: flex-start;
 	}
 
 	.string-editor-prefix {
@@ -208,5 +268,13 @@
 		padding: 0;
 		min-inline-size: 0;
 		outline: none;
+	}
+
+	.string-editor.multiline {
+		min-block-size: 6rem;
+		resize: vertical;
+		padding: 0.55rem 0.7rem;
+		line-height: 1.45;
+		font: inherit;
 	}
 </style>

@@ -377,7 +377,7 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 			}
 			selection.reconcileSelection();
 			if (graph.state.requiresResync) {
-				void resyncSnapshot('Snapshot resynced.');
+				void resyncSnapshot();
 			}
 		}
 	};
