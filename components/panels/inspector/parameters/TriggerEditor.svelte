@@ -1,8 +1,16 @@
 <script lang="ts">
 	import parameterTriggerIcon from '../../../../style/icons/parameter/trigger.svg';
+	import { TRIGGER_PARAM_EVENT_TOPIC } from '../../../../store/session/custom-events.svelte';
 	import { appState } from '../../../../store/workbench.svelte';
 	import { sendSetParamIntent } from '../../../../store/ui-intents';
 	import type { UiNodeDto } from '../../../../types';
+
+	type TriggerHitSource = 'manual' | 'engine';
+
+	const HIT_DURATION_MS = 140;
+	const MANUAL_ECHO_WINDOW_MS = 180;
+
+	const nowMs = (): number => (typeof performance !== 'undefined' ? performance.now() : Date.now());
 
 	let {
 		node,
@@ -19,13 +27,27 @@
 	let param = $derived(liveNode.data.kind === 'parameter' ? liveNode.data.param : null);
 	let readOnly = $derived(Boolean(param?.read_only));
 	let enabled = $derived(liveNode.meta.enabled);
+	let triggerSequence = $derived(
+		session?.getCustomEventSequence(TRIGGER_PARAM_EVENT_TOPIC, liveNode.node_id) ?? 0
+	);
 
 	let hitTimeout = $state<ReturnType<typeof setTimeout> | null>(null);
 	let isHit = $state(false);
+	let activeHitSource = $state<TriggerHitSource | null>(null);
+	let lastObservedTriggerSequence = $state<number | null>(null);
+	let pendingManualEchoDeadlines = $state<number[]>([]);
 	let inlineLabel = $derived(typeof insideLabel === 'string' ? insideLabel.trim() : '');
 	let showsInlineLabel = $derived(layoutMode === 'widget' && inlineLabel.length > 0);
 
-	const hit = (): void => {
+	const prunePendingManualEchoes = (): void => {
+		const currentTime = nowMs();
+		pendingManualEchoDeadlines = pendingManualEchoDeadlines.filter(
+			(deadline) => deadline > currentTime
+		);
+	};
+
+	const hit = (source: TriggerHitSource): void => {
+		activeHitSource = source;
 		isHit = true;
 		if (hitTimeout !== null) {
 			clearTimeout(hitTimeout);
@@ -33,14 +55,50 @@
 
 		hitTimeout = setTimeout(() => {
 			isHit = false;
-		}, 40);
+			activeHitSource = null;
+		}, HIT_DURATION_MS);
 	};
+
+	$effect(() => {
+		return () => {
+			if (hitTimeout !== null) {
+				clearTimeout(hitTimeout);
+			}
+		};
+	});
+
+	$effect(() => {
+		const currentSequence = triggerSequence;
+
+		if (lastObservedTriggerSequence === null) {
+			lastObservedTriggerSequence = currentSequence;
+			return;
+		}
+
+		if (currentSequence <= lastObservedTriggerSequence) {
+			return;
+		}
+
+		const sequenceDelta = currentSequence - lastObservedTriggerSequence;
+		lastObservedTriggerSequence = currentSequence;
+		prunePendingManualEchoes();
+
+		const suppressedManualEchoes = Math.min(sequenceDelta, pendingManualEchoDeadlines.length);
+		if (suppressedManualEchoes > 0) {
+			pendingManualEchoDeadlines = pendingManualEchoDeadlines.slice(suppressedManualEchoes);
+		}
+
+		if (sequenceDelta > suppressedManualEchoes) {
+			hit('engine');
+		}
+	});
 
 	const fireTrigger = (): void => {
 		if (!param || param.value.kind !== 'trigger' || readOnly || !enabled) {
 			return;
 		}
-		hit();
+		pendingManualEchoDeadlines = [...pendingManualEchoDeadlines, nowMs() + MANUAL_ECHO_WINDOW_MS];
+		hit('manual');
 		void sendSetParamIntent(liveNode.node_id, { kind: 'trigger' }, param.event_behaviour);
 	};
 </script>
@@ -51,9 +109,11 @@
 	class:widget-layout={layoutMode === 'widget'}
 	class:with-inline-label={showsInlineLabel}
 	class:active={isHit}
+	class:active-manual={isHit && activeHitSource === 'manual'}
+	class:active-engine={isHit && activeHitSource === 'engine'}
 	disabled={!enabled}
 	class:readonly={readOnly}
-	onclick={fireTrigger}
+	onmousedown={fireTrigger}
 	onkeydown={(event) => {
 		if (event.key === 'Enter' || event.key === ' ') {
 			event.preventDefault();
@@ -81,11 +141,6 @@
 		height: 1.2rem;
 		box-sizing: border-box;
 		filter: brightness(100%);
-		transition:
-			filter 0.2s,
-			background-color 0.2s,
-			border-color 0.2s,
-			opacity 0.2s;
 	}
 
 	.trigger:hover {
@@ -115,8 +170,22 @@
 	}
 
 	.trigger.active {
+		filter: brightness(122%);
+		transition:
+			filter 0.1s,
+			background-color 0.1s,
+			border-color 0.1s,
+			opacity 0.1s;
+	}
+
+	.trigger.active-manual {
 		background: var(--gc-color-trigger-on);
 		border-color: hsl(from var(--gc-color-trigger-on) h s calc(l * 1.2)) !important;
+	}
+
+	.trigger.active-engine {
+		background: var(--gc-color-trigger-engine);
+		border-color: hsl(from var(--gc-color-trigger-engine) h s calc(l * 1.2)) !important;
 	}
 
 	.trigger img {

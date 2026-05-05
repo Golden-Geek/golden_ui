@@ -30,6 +30,7 @@
 	let readOnly = $derived(Boolean(param?.read_only));
 	let enabled = $derived(liveNode.meta.enabled);
 	let widgetHint = $derived((param?.ui_hints.widget ?? '').trim().toLowerCase());
+	let timeWidget = $derived(widgetHint === 'time');
 
 	let kind = $derived(param?.value.kind ?? 'float');
 	let isInteger = $derived(kind === 'int');
@@ -50,7 +51,8 @@
 	let editSession = createUiEditSession('Edit number', 'param-number');
 	const NUMERIC_EPSILON = 1e-9;
 	let fieldOnlyWidget = $derived(
-		widgetHint === 'text' ||
+		timeWidget ||
+			widgetHint === 'text' ||
 			widgetHint === 'input' ||
 			widgetHint === 'field' ||
 			widgetHint === 'number_field'
@@ -69,8 +71,10 @@
 			: ''
 	);
 	let showsInlineFieldLabel = $derived(!hasRange && showValueField && sliderLabel.length > 0);
-	let formattedDraftValue = $derived(draftValue.toFixed(fractionDigits));
-	let formattedValue = $derived(value.toFixed(fractionDigits));
+	let formattedDraftValue = $derived(
+		timeWidget ? formatTimeValue(draftValue) : draftValue.toFixed(fractionDigits)
+	);
+	let formattedValue = $derived(timeWidget ? formatTimeValue(value) : value.toFixed(fractionDigits));
 	let displayedSliderValue = $derived.by(() => {
 		if (min !== undefined && draftValue < min) {
 			return min;
@@ -91,6 +95,67 @@
 	onDestroy(() => {
 		void editSession.end();
 	});
+
+	function formatTimeValue(seconds: number): string {
+		if (!Number.isFinite(seconds)) {
+			return '00:00:00.000';
+		}
+
+		const sign = seconds < 0 ? '-' : '';
+		let remainingMs = Math.round(Math.abs(seconds) * 1000);
+		const hours = Math.floor(remainingMs / 3_600_000);
+		remainingMs -= hours * 3_600_000;
+		const minutes = Math.floor(remainingMs / 60_000);
+		remainingMs -= minutes * 60_000;
+		const wholeSeconds = Math.floor(remainingMs / 1000);
+		const milliseconds = remainingMs - wholeSeconds * 1000;
+
+		return `${sign}${hours.toString().padStart(2, '0')}:${minutes
+			.toString()
+			.padStart(2, '0')}:${wholeSeconds.toString().padStart(2, '0')}.${milliseconds
+			.toString()
+			.padStart(3, '0')}`;
+	}
+
+	function parseTimeValue(text: string): number | null {
+		const raw = text.trim();
+		if (raw.length === 0) {
+			return null;
+		}
+
+		const sign = raw.startsWith('-') ? -1 : 1;
+		const unsigned = sign < 0 ? raw.slice(1) : raw;
+		const [clockPart, fractionalPart = ''] = unsigned.split('.');
+		if (unsigned.split('.').length > 2 || !/^\d*$/.test(fractionalPart)) {
+			return null;
+		}
+
+		const segments = clockPart.split(':');
+		if (segments.length === 0 || segments.length > 3 || segments.some((segment) => !/^\d+$/.test(segment))) {
+			return null;
+		}
+
+		let hours = 0;
+		let minutes = 0;
+		let wholeSeconds = 0;
+		if (segments.length === 3) {
+			hours = Number(segments[0]);
+			minutes = Number(segments[1]);
+			wholeSeconds = Number(segments[2]);
+		} else if (segments.length === 2) {
+			minutes = Number(segments[0]);
+			wholeSeconds = Number(segments[1]);
+		} else {
+			wholeSeconds = Number(segments[0]);
+		}
+
+		if ((segments.length === 3 && minutes >= 60) || segments.length >= 2 && wholeSeconds >= 60) {
+			return null;
+		}
+
+		const milliseconds = Number((fractionalPart + '000').slice(0, 3));
+		return sign * (hours * 3600 + minutes * 60 + wholeSeconds + milliseconds / 1000);
+	}
 
 	const normalizeValue = (candidate: number): number | null => {
 		let nextValue = candidate;
@@ -178,8 +243,8 @@
 		if (!numberInput) {
 			return;
 		}
-		const parsedValue = Number(numberInput.value);
-		if (Number.isFinite(parsedValue)) {
+		const parsedValue = timeWidget ? parseTimeValue(numberInput.value) : Number(numberInput.value);
+		if (parsedValue !== null && Number.isFinite(parsedValue)) {
 			commitValue(parsedValue);
 		} else {
 			numberInput.value = formattedDraftValue;
@@ -234,9 +299,10 @@
 				<span class="number-field-prefix">{sliderLabel} :</span>
 				<input
 					bind:this={numberInput}
-					type="number"
-					step={fieldStep}
+					type={timeWidget ? 'text' : 'number'}
+					step={timeWidget ? undefined : fieldStep}
 					class="number-field inline-labeled"
+					class:time-field={timeWidget}
 					disabled={!enabled}
 					class:readonly={readOnly}
 					value={formattedDraftValue}
@@ -255,9 +321,10 @@
 		{:else}
 			<input
 				bind:this={numberInput}
-				type="number"
-				step={fieldStep}
+				type={timeWidget ? 'text' : 'number'}
+				step={timeWidget ? undefined : fieldStep}
 				class="number-field"
+				class:time-field={timeWidget}
 				disabled={!enabled}
 				class:readonly={readOnly}
 				value={formattedDraftValue}
@@ -329,6 +396,11 @@
 		max-width: 5rem;
 	}
 
+	.number-field.time-field {
+		font-variant-numeric: tabular-nums;
+		max-width: 9rem;
+	}
+
 	.number-field-shell {
 		display: flex;
 		flex: 1 1 auto;
@@ -356,6 +428,11 @@
 		width: auto;
 		max-width: none;
 		margin-left: 0;
+	}
+
+	.number-property-container.widget-layout .number-field.time-field {
+		inline-size: clamp(7rem, 26%, 10rem);
+		min-inline-size: 7rem;
 	}
 
 	.number-property-container.widget-layout.infinite .slider-wrapper {

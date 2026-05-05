@@ -25,6 +25,7 @@
 
 	--gc-color-trigger: #5a5a5aac;
 	--gc-color-trigger-on: #d81dac;
+	--gc-color-trigger-engine: var(--gc-color-focus);
 
 	--gc-color-checkbox-bg: #151515c6;
 	--gc-color-checkbox-fg: #b527c8;
