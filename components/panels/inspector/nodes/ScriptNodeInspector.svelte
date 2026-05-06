@@ -388,7 +388,7 @@
 		{/if}
 	</div>
 
-	{@render defaultChildren?.('cool')}
+	{@render defaultChildren?.()}
 {/if}
 
 <style>
