@@ -45,6 +45,7 @@ export interface NodeIconSet {
 	fallback?: string;
 	nodeTypes?: Record<string, string>;
 	parameterKinds?: Record<string, string>;
+	categories?: Record<string, string>;
 }
 
 type ResolvedNodeIconSet = {
@@ -53,6 +54,7 @@ type ResolvedNodeIconSet = {
 	fallback: string;
 	nodeTypes: Record<string, string>;
 	parameterKinds: Record<string, string>;
+	categories: Record<string, string>;
 };
 
 const defaultNodeIcons: ResolvedNodeIconSet = {
@@ -82,7 +84,8 @@ const defaultNodeIcons: ResolvedNodeIconSet = {
 		vec2: parameterVec2Icon,
 		vec3: parameterVec3Icon,
 		reference: parameterReferenceIcon
-	}
+	},
+	categories: {}
 };
 
 const resolveNodeIcons = (overrides?: NodeIconSet): ResolvedNodeIconSet => ({
@@ -97,6 +100,10 @@ const resolveNodeIcons = (overrides?: NodeIconSet): ResolvedNodeIconSet => ({
 	parameterKinds: {
 		...defaultNodeIcons.parameterKinds,
 		...(overrides?.parameterKinds ?? {})
+	},
+	categories: {
+		...defaultNodeIcons.categories,
+		...(overrides?.categories ?? {})
 	}
 });
 
@@ -154,6 +161,14 @@ export const getIconURLForNode = (node: UiNodeDto | null): string => {
 		}
 	}
 	return result ?? activeNodeIcons.fallback;
+};
+
+export const getIconURLForCategory = (category: string | null | undefined): string | null => {
+	const normalizedCategory = category?.trim() ?? '';
+	if (normalizedCategory.length === 0) {
+		return null;
+	}
+	return activeNodeIcons.categories[normalizedCategory] ?? null;
 };
 
 const clampChannel = (value: number, fallback: number): number => {

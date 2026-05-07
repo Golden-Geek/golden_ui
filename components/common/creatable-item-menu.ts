@@ -1,5 +1,5 @@
 import type { UiCreatableUserItem } from '../../types';
-import { getIconURLForNodeType } from '../../store/node-types';
+import { getIconURLForNodeType, getIconURLForCategory } from '../../store/node-types';
 import type { ContextMenuItem } from './context-menu';
 
 type CreateItemHandler = (item: UiCreatableUserItem) => void | Promise<void>;
@@ -62,6 +62,7 @@ const createBranchItem = (
 ): ContextMenuItem => ({
 	id: `create-path:${branch.path.join('/')}`,
 	label: branch.label,
+	icon: getIconURLForCategory(branch.label) ?? undefined,
 	submenu: finalizeEntries(branch.children, onCreateItem)
 });
 
