@@ -3,4 +3,19 @@ import type { ParamValue } from "./ParamValue";
 import type { ParameterConstraints } from "./ParameterConstraints";
 import type { UiParameterControlStateDto } from "./UiParameterControlStateDto";
 
-export type UiParamPatch = { value?: ParamValue | null, control?: UiParameterControlStateDto | null, constraints?: ParameterConstraints | null, };
+/**
+ * Incremental parameter patch for one UI parameter node.
+ */
+export type UiParamPatch = { 
+/**
+ * Replacement parameter value.
+ */
+value?: ParamValue | null, 
+/**
+ * Replacement control state.
+ */
+control?: UiParameterControlStateDto | null, 
+/**
+ * Replacement runtime constraints.
+ */
+constraints?: ParameterConstraints | null, };

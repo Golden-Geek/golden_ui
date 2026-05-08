@@ -17,7 +17,27 @@ export type UiEventDto = {
 /**
  * Event time.
  */
-time: EngineTime, } & ({ "kind": "graphTransaction", tx_id: number, epoch: number, base_graph_version: number, next_graph_version: number, ops: Array<UiGraphOp>, } | { "kind": "paramChanged", 
+time: EngineTime, } & ({ "kind": "graphTransaction", 
+/**
+ * Monotonic transaction id within the current project epoch.
+ */
+tx_id: number, 
+/**
+ * Project epoch this transaction belongs to.
+ */
+epoch: number, 
+/**
+ * Graph version expected before applying `ops`.
+ */
+base_graph_version: number, 
+/**
+ * Graph version after applying `ops`.
+ */
+next_graph_version: number, 
+/**
+ * Ordered patch operations applied atomically by the UI.
+ */
+ops: Array<UiGraphOp>, } | { "kind": "paramChanged", 
 /**
  * Parameter node id.
  */

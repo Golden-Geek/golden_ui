@@ -7,4 +7,91 @@ import type { UiNodeDto } from "./UiNodeDto";
 import type { UiNodeMetaPatch } from "./UiNodeMetaPatch";
 import type { UiParamPatch } from "./UiParamPatch";
 
-export type UiGraphOp = { "kind": "nodeCreated", snapshot: UiNodeDto, parent?: NodeId | null, index?: number | null, } | { "kind": "subtreeRemoved", root: NodeId, removed_ids: Array<NodeId>, parent_after?: UiChildrenOrderPatch | null, } | { "kind": "nodeMoved", node: NodeId, old_parent?: NodeId | null, new_parent?: NodeId | null, old_parent_after?: UiChildrenOrderPatch | null, new_parent_after?: UiChildrenOrderPatch | null, } | { "kind": "childrenReordered", parent: NodeId, children: Array<NodeId>, } | { "kind": "nodeMetaPatched", node: NodeId, patch: UiNodeMetaPatch, } | { "kind": "paramPatched", node: NodeId, param: NodeId, patch: UiParamPatch, } | { "kind": "historyPatched", history: UiHistoryState, } | { "kind": "loggerPatched", records_added: Array<LogRecord>, dropped_before?: number | null, };
+/**
+ * One deterministic graph patch operation inside an atomic UI transaction.
+ */
+export type UiGraphOp = { "kind": "nodeCreated", 
+/**
+ * Full UI snapshot for the created node.
+ */
+snapshot: UiNodeDto, 
+/**
+ * Parent receiving the node, if attached.
+ */
+parent?: NodeId | null, 
+/**
+ * Direct child index under `parent`, if known.
+ */
+index?: number | null, } | { "kind": "subtreeRemoved", 
+/**
+ * Root of the removed subtree.
+ */
+root: NodeId, 
+/**
+ * Root and descendant ids removed by this operation.
+ */
+removed_ids: Array<NodeId>, 
+/**
+ * Post-removal child order for the former parent.
+ */
+parent_after?: UiChildrenOrderPatch | null, } | { "kind": "nodeMoved", 
+/**
+ * Node that moved.
+ */
+node: NodeId, 
+/**
+ * Previous parent before the move.
+ */
+old_parent?: NodeId | null, 
+/**
+ * New parent after the move.
+ */
+new_parent?: NodeId | null, 
+/**
+ * Post-move child order for the previous parent.
+ */
+old_parent_after?: UiChildrenOrderPatch | null, 
+/**
+ * Post-move child order for the new parent.
+ */
+new_parent_after?: UiChildrenOrderPatch | null, } | { "kind": "childrenReordered", 
+/**
+ * Parent whose children were reordered.
+ */
+parent: NodeId, 
+/**
+ * Complete direct child order after the reorder.
+ */
+children: Array<NodeId>, } | { "kind": "nodeMetaPatched", 
+/**
+ * Node whose metadata changed.
+ */
+node: NodeId, 
+/**
+ * Metadata fields that changed.
+ */
+patch: UiNodeMetaPatch, } | { "kind": "paramPatched", 
+/**
+ * Node owning the parameter in the UI graph.
+ */
+node: NodeId, 
+/**
+ * Parameter node that changed.
+ */
+param: NodeId, 
+/**
+ * Parameter fields that changed.
+ */
+patch: UiParamPatch, } | { "kind": "historyPatched", 
+/**
+ * Current history state after the transaction.
+ */
+history: UiHistoryState, } | { "kind": "loggerPatched", 
+/**
+ * New logger records appended by the transaction.
+ */
+records_added: Array<LogRecord>, 
+/**
+ * Earliest retained record id after dropping old records.
+ */
+dropped_before?: number | null, };
