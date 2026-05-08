@@ -310,8 +310,19 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 
 	const refreshSnapshot = async (): Promise<boolean> => {
 		try {
+			const fetchStartedAt = typeof performance !== 'undefined' ? performance.now() : Date.now();
 			const snapshot = await requestSnapshot();
+			const fetchElapsedMs =
+				(typeof performance !== 'undefined' ? performance.now() : Date.now()) - fetchStartedAt;
+			const applyStartedAt = typeof performance !== 'undefined' ? performance.now() : Date.now();
 			applySnapshotToState(snapshot);
+			const applyElapsedMs =
+				(typeof performance !== 'undefined' ? performance.now() : Date.now()) - applyStartedAt;
+			logUiPerf(
+				`refresh snapshot fetch_ms=${fetchElapsedMs.toFixed(1)} apply_ms=${applyElapsedMs.toFixed(
+					1
+				)} nodes=${snapshot.nodes.length}`
+			);
 			return true;
 		} catch (error) {
 			const message = error instanceof Error ? error.message : 'unknown refresh error';
