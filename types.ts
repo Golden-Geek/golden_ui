@@ -397,7 +397,38 @@ export interface UiSnapshot {
 	project_file: UiProjectFileSpec;
 }
 
+export interface UiChildrenOrderPatch {
+	parent: NodeId;
+	children: NodeId[];
+}
+
+export type UiGraphOp =
+	| { kind: 'nodeCreated'; snapshot: UiNodeDto; parent?: NodeId | null; index?: number | null }
+	| { kind: 'subtreeRemoved'; root: NodeId; removed_ids: NodeId[]; parent_after?: UiChildrenOrderPatch | null }
+	| {
+			kind: 'nodeMoved';
+			node: NodeId;
+			old_parent?: NodeId | null;
+			new_parent?: NodeId | null;
+			old_parent_after?: UiChildrenOrderPatch | null;
+			new_parent_after?: UiChildrenOrderPatch | null;
+	  }
+	| { kind: 'childrenReordered'; parent: NodeId; children: NodeId[] }
+	| { kind: 'nodeMetaPatched'; node: NodeId; patch: Partial<UiNodeMetaDto> }
+	| { kind: 'paramPatched'; node: NodeId; param: NodeId; patch: { value?: ParamValue; control?: UiParameterControlState; constraints?: UiParamConstraints } }
+	| { kind: 'historyPatched'; history: UiHistoryState }
+	| { kind: 'loggerPatched'; records_added: UiLogRecord[]; dropped_before?: number | null };
+
+export interface UiGraphTransaction {
+	tx_id: number;
+	epoch: number;
+	base_graph_version: number;
+	next_graph_version: number;
+	ops: UiGraphOp[];
+}
+
 export type UiEventKind =
+	| { kind: 'graphTransaction' } & UiGraphTransaction
 	| { kind: 'paramChanged'; param: NodeId; old_value: ParamValue; new_value: ParamValue }
 	| {
 			kind: 'paramControlChanged';

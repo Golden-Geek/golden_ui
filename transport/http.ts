@@ -1327,12 +1327,47 @@ export const createHttpUiClient = (options: HttpClientOptions = {}): UiClient =>
 
 	const client: UiClient = {
 		async snapshot(scope: UiSubscriptionScope = wholeGraphScope): Promise<UiSnapshot> {
+			const totalStart = typeof performance !== 'undefined' ? performance.now() : Date.now();
 			const request: RustSnapshotRequest = {
 				scope: toRustScope(scope),
 				cancel_active_edit_session: true
 			};
-			const snapshot = await postJson<RustUiSnapshot>('/snapshot', request);
-			return fromRustSnapshot(snapshot);
+			const fetchStart = typeof performance !== 'undefined' ? performance.now() : Date.now();
+			const response = await fetchImpl(`${baseUrl}/snapshot`, {
+				method: 'POST',
+				headers: {
+					'content-type': 'application/json',
+					'x-gc-ui-client-instance': clientInstanceId
+				},
+				body: JSON.stringify(request)
+			});
+			const fetchMs = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - fetchStart;
+
+			const readStart = typeof performance !== 'undefined' ? performance.now() : Date.now();
+			const text = await response.text();
+			const readMs = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - readStart;
+
+			const parseStart = typeof performance !== 'undefined' ? performance.now() : Date.now();
+			let body: unknown = undefined;
+			if (text.length > 0) {
+				try {
+					body = JSON.parse(text) as unknown;
+				} catch {
+					body = text;
+				}
+			}
+
+			if (!response.ok) {
+				throw formatError(`POST /snapshot`, response, body);
+			}
+
+			const snapshot = body as RustUiSnapshot;
+			const parsed = fromRustSnapshot(snapshot);
+			const parseMs = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - parseStart;
+			const totalMs = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - totalStart;
+
+			(parsed as any).__timings = { fetchMs, readMs, parseMs, totalMs, bytes: text.length };
+			return parsed;
 		},
 
 		subscribe(

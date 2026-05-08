@@ -5,6 +5,7 @@ import type { NodeId } from "./NodeId";
 import type { NodeMetaPatch } from "./NodeMetaPatch";
 import type { ParamValue } from "./ParamValue";
 import type { ParameterConstraints } from "./ParameterConstraints";
+import type { UiGraphOp } from "./UiGraphOp";
 import type { UiNodeDto } from "./UiNodeDto";
 import type { UiParameterControlStateDto } from "./UiParameterControlStateDto";
 import type { JsonValue } from "./serde_json/JsonValue";
@@ -16,7 +17,7 @@ export type UiEventDto = {
 /**
  * Event time.
  */
-time: EngineTime, } & ({ "kind": "paramChanged", 
+time: EngineTime, } & ({ "kind": "graphTransaction", tx_id: number, epoch: number, base_graph_version: number, next_graph_version: number, ops: Array<UiGraphOp>, } | { "kind": "paramChanged", 
 /**
  * Parameter node id.
  */

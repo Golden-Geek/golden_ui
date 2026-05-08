@@ -388,6 +388,55 @@ const reduceEventInPlace = (
 			state.nodesById.set(event.kind.node, applyMetaPatch(node, event.kind.patch));
 			break;
 		}
+		case 'graphTransaction': {
+			for (const op of event.kind.ops) {
+				if (op.kind === 'nodeCreated') {
+					upsertNodeSnapshot(state, op.snapshot);
+					requiresRootRecompute = true;
+				} else if (op.kind === 'subtreeRemoved') {
+					if (state.nodesById.has(op.root)) {
+						removeSubtree(state, op.root);
+						requiresRootRecompute = true;
+					}
+					if (op.parent_after) {
+						setNodeChildren(state, op.parent_after.parent, op.parent_after.children);
+					}
+				} else if (op.kind === 'nodeMoved') {
+					if (op.old_parent_after) {
+						setNodeChildren(state, op.old_parent_after.parent, op.old_parent_after.children);
+					}
+					if (op.new_parent_after) {
+						setNodeChildren(state, op.new_parent_after.parent, op.new_parent_after.children);
+					}
+					if (op.new_parent_after && op.old_parent_after) {
+						state.parentById.set(op.node, op.new_parent_after.parent);
+					}
+					requiresRootRecompute = true;
+				} else if (op.kind === 'childrenReordered') {
+					setNodeChildren(state, op.parent, op.children);
+					requiresRootRecompute = true;
+				} else if (op.kind === 'nodeMetaPatched') {
+					const node = state.nodesById.get(op.node);
+					if (node) {
+						state.nodesById.set(op.node, applyMetaPatch(node, op.patch));
+					}
+				} else if (op.kind === 'paramPatched') {
+					const param = state.paramsById.get(op.param);
+					if (param) {
+						if (op.patch.value !== undefined) {
+							param.value = op.patch.value;
+						}
+						if (op.patch.control !== undefined) {
+							param.control = op.patch.control;
+						}
+						if (op.patch.constraints !== undefined) {
+							param.constraints = op.patch.constraints;
+						}
+					}
+				}
+			}
+			break;
+		}
 		case 'custom': {
 			if (event.kind.topic === '__transport.resync_required') {
 				if (shouldIgnoreTransportResync(event.kind.payload)) {

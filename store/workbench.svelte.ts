@@ -1,3 +1,4 @@
+import { tick } from 'svelte';
 import { createGraphStore, type GraphStore } from './graph.svelte';
 import {
 	createDefaultUiClient,
@@ -297,6 +298,19 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 		syncConnectionStatus();
 	};
 
+	const logSnapshotTiming = (context: string, snapshot: UiSnapshot, applyStartedAt: number) => {
+		const applyElapsedMs = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - applyStartedAt;
+		const flushStartedAt = typeof performance !== 'undefined' ? performance.now() : Date.now();
+		tick().then(() => {
+			const flushElapsedMs = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - flushStartedAt;
+			const t = (snapshot as any).__timings || {};
+			const totalMs = (t.totalMs || 0) + applyElapsedMs + flushElapsedMs;
+			logUiPerf(
+				`[ui] snapshot ${context} nodes=${snapshot.nodes.length} bytes=${t.bytes || 0} fetch_ms=${(t.fetchMs || 0).toFixed(0)} read_ms=${(t.readMs || 0).toFixed(0)} parse_ms=${(t.parseMs || 0).toFixed(0)} apply_graph_ms=${applyElapsedMs.toFixed(0)} flush_ms=${flushElapsedMs.toFixed(0)} total_ms=${totalMs.toFixed(0)}`
+			);
+		});
+	};
+
 	const requestSnapshot = (): Promise<UiSnapshot> => {
 		if (snapshotRequestInFlight) {
 			return snapshotRequestInFlight;
@@ -310,19 +324,10 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 
 	const refreshSnapshot = async (): Promise<boolean> => {
 		try {
-			const fetchStartedAt = typeof performance !== 'undefined' ? performance.now() : Date.now();
 			const snapshot = await requestSnapshot();
-			const fetchElapsedMs =
-				(typeof performance !== 'undefined' ? performance.now() : Date.now()) - fetchStartedAt;
 			const applyStartedAt = typeof performance !== 'undefined' ? performance.now() : Date.now();
 			applySnapshotToState(snapshot);
-			const applyElapsedMs =
-				(typeof performance !== 'undefined' ? performance.now() : Date.now()) - applyStartedAt;
-			logUiPerf(
-				`refresh snapshot fetch_ms=${fetchElapsedMs.toFixed(1)} apply_ms=${applyElapsedMs.toFixed(
-					1
-				)} nodes=${snapshot.nodes.length}`
-			);
+			logSnapshotTiming('refresh', snapshot, applyStartedAt);
 			return true;
 		} catch (error) {
 			const message = error instanceof Error ? error.message : 'unknown refresh error';
@@ -339,22 +344,13 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 		resyncInFlight = true;
 		resyncQueued = false;
 		try {
-			const fetchStartedAt = typeof performance !== 'undefined' ? performance.now() : Date.now();
 			const snapshot = await requestSnapshot();
-			const fetchElapsedMs =
-				(typeof performance !== 'undefined' ? performance.now() : Date.now()) - fetchStartedAt;
 			const applyStartedAt = typeof performance !== 'undefined' ? performance.now() : Date.now();
 			applySnapshotToState(snapshot);
 			if (successMessage) {
 				appendUiLogRecord('info', UI_LOG_TAG_TRANSPORT, successMessage);
 			}
-			const applyElapsedMs =
-				(typeof performance !== 'undefined' ? performance.now() : Date.now()) - applyStartedAt;
-			logUiPerf(
-				`resync snapshot fetch_ms=${fetchElapsedMs.toFixed(1)} apply_ms=${applyElapsedMs.toFixed(
-					1
-				)} nodes=${snapshot.nodes.length}`
-			);
+			logSnapshotTiming('resync', snapshot, applyStartedAt);
 		} catch (error) {
 			const message = error instanceof Error ? error.message : 'unknown resync error';
 			appendUiLogRecord('error', UI_LOG_TAG_TRANSPORT, `Resync failed: ${message}`);
