@@ -1119,6 +1119,28 @@ const fromRustEvent = (event: RustUiEventDto): UiEventDto => {
 		};
 	}
 
+	if (nestedKind === 'graphTransaction') {
+		const payload = event as Record<string, unknown>;
+		const rawOps = Array.isArray(payload.ops) ? payload.ops : [];
+		const ops = rawOps.map((op: unknown) => {
+			if (isRecord(op) && op.kind === 'nodeCreated') {
+				return { ...op, snapshot: fromRustEventNodeSnapshot(op.snapshot) };
+			}
+			return op;
+		});
+		return {
+			...(event as Omit<UiEventDto, 'kind'>),
+			kind: {
+				kind: 'graphTransaction',
+				tx_id: Number(payload.tx_id ?? 0),
+				epoch: Number(payload.epoch ?? 0),
+				base_graph_version: Number(payload.base_graph_version ?? 0),
+				next_graph_version: Number(payload.next_graph_version ?? 0),
+				ops
+			} as UiEventDto['kind']
+		};
+	}
+
 	const payload = { ...(event as Record<string, unknown>) };
 	delete payload.time;
 	delete payload.kind;

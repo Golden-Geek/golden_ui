@@ -191,16 +191,17 @@ const applyMetaPatch = (node: UiNodeDto, patch: Partial<UiNodeMetaDto>): UiNodeD
 });
 
 const upsertNodeSnapshot = (state: GraphState, node: UiNodeDto): void => {
+	const children = node.children ?? [];
 	state.nodesById.set(node.node_id, {
 		...node,
-		children: [...node.children]
+		children: [...children]
 	});
 	if (node.data.kind === 'parameter') {
 		state.paramsById.set(node.node_id, node.data.param);
 	} else {
 		state.paramsById.delete(node.node_id);
 	}
-	setNodeChildren(state, node.node_id, node.children);
+	setNodeChildren(state, node.node_id, children);
 };
 
 const shouldIgnoreTransportResync = (payload: unknown): boolean => {
