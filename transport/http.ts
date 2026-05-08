@@ -998,6 +998,13 @@ const fromRustNode = (node: RustUiNodeDto, enumOptionsById: EnumOptionsById): Ui
 	children: [...(node.children ?? [])]
 });
 
+const fromRustEventNodeSnapshot = (value: unknown): UiNodeDto | undefined => {
+	if (!isRecord(value)) {
+		return undefined;
+	}
+	return fromRustNode(value as RustUiNodeDto, new Map());
+};
+
 const fromRustEvent = (event: RustUiEventDto): UiEventDto => {
 	if (!isRecord(event)) {
 		return event as UiEventDto;
@@ -1044,6 +1051,16 @@ const fromRustEvent = (event: RustUiEventDto): UiEventDto => {
 				}
 			};
 		}
+		if (nestedKind.kind === 'nodeCreated') {
+			return {
+				...(event as Omit<UiEventDto, 'kind'>),
+				kind: {
+					kind: 'nodeCreated',
+					node: Number(nestedKind.node ?? 0),
+					snapshot: fromRustEventNodeSnapshot(nestedKind.snapshot)
+				}
+			};
+		}
 		return event as unknown as UiEventDto;
 	}
 
@@ -1087,6 +1104,17 @@ const fromRustEvent = (event: RustUiEventDto): UiEventDto => {
 					(event as Record<string, unknown>).new_constraints as RustUiParamDto['constraints'],
 					undefined
 				)
+			}
+		};
+	}
+	if (nestedKind === 'nodeCreated') {
+		const payload = event as Record<string, unknown>;
+		return {
+			...(event as Omit<UiEventDto, 'kind'>),
+			kind: {
+				kind: 'nodeCreated',
+				node: Number(payload.node ?? 0),
+				snapshot: fromRustEventNodeSnapshot(payload.snapshot)
 			}
 		};
 	}

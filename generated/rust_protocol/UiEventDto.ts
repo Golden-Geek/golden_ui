@@ -5,6 +5,7 @@ import type { NodeId } from "./NodeId";
 import type { NodeMetaPatch } from "./NodeMetaPatch";
 import type { ParamValue } from "./ParamValue";
 import type { ParameterConstraints } from "./ParameterConstraints";
+import type { UiNodeDto } from "./UiNodeDto";
 import type { UiParameterControlStateDto } from "./UiParameterControlStateDto";
 import type { JsonValue } from "./serde_json/JsonValue";
 
@@ -63,7 +64,11 @@ child: NodeId,
 /**
  * Declared slot id.
  */
-decl_id: DeclId, } | { "kind": "childRemoved", 
+decl_id: DeclId, 
+/**
+ * Current direct child order for the parent when available.
+ */
+parent_children?: Array<NodeId> | null, } | { "kind": "childRemoved", 
 /**
  * Parent id.
  */
@@ -99,7 +104,15 @@ old_parent: NodeId,
 /**
  * New parent id.
  */
-new_parent: NodeId, } | { "kind": "childReordered", 
+new_parent: NodeId, 
+/**
+ * Current direct child order for the previous parent when available.
+ */
+old_parent_children?: Array<NodeId> | null, 
+/**
+ * Current direct child order for the new parent when available.
+ */
+new_parent_children?: Array<NodeId> | null, } | { "kind": "childReordered", 
 /**
  * Parent id.
  */
@@ -107,11 +120,19 @@ parent: NodeId,
 /**
  * Child id.
  */
-child: NodeId, } | { "kind": "nodeCreated", 
+child: NodeId, 
+/**
+ * Current direct child order for the parent when available.
+ */
+parent_children?: Array<NodeId> | null, } | { "kind": "nodeCreated", 
 /**
  * Node id.
  */
-node: NodeId, } | { "kind": "nodeDeleted", 
+node: NodeId, 
+/**
+ * Node snapshot for incremental UI insertion when the node is still live.
+ */
+snapshot?: UiNodeDto | null, } | { "kind": "nodeDeleted", 
 /**
  * Node id.
  */

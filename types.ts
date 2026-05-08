@@ -411,12 +411,25 @@ export type UiEventKind =
 			old_constraints: UiParamConstraints;
 			new_constraints: UiParamConstraints;
 	  }
-	| { kind: 'childAdded'; parent: NodeId; child: NodeId; decl_id: string }
+	| {
+			kind: 'childAdded';
+			parent: NodeId;
+			child: NodeId;
+			decl_id: string;
+			parent_children?: NodeId[] | null;
+	  }
 	| { kind: 'childRemoved'; parent: NodeId; child: NodeId }
 	| { kind: 'childReplaced'; parent: NodeId; old: NodeId; new: NodeId; decl_id: string }
-	| { kind: 'childMoved'; child: NodeId; old_parent: NodeId; new_parent: NodeId }
-	| { kind: 'childReordered'; parent: NodeId; child: NodeId }
-	| { kind: 'nodeCreated'; node: NodeId }
+	| {
+			kind: 'childMoved';
+			child: NodeId;
+			old_parent: NodeId;
+			new_parent: NodeId;
+			old_parent_children?: NodeId[] | null;
+			new_parent_children?: NodeId[] | null;
+	  }
+	| { kind: 'childReordered'; parent: NodeId; child: NodeId; parent_children?: NodeId[] | null }
+	| { kind: 'nodeCreated'; node: NodeId; snapshot?: UiNodeDto | null }
 	| { kind: 'nodeDeleted'; node: NodeId }
 	| { kind: 'metaChanged'; node: NodeId; patch: Partial<UiNodeMetaDto> }
 	| { kind: 'custom'; topic: string; origin?: NodeId; payload: unknown };

@@ -112,6 +112,22 @@ const addToChildren = (
 	childrenById.set(parent, [...existing, child]);
 };
 
+const setNodeChildren = (state: GraphState, parent: NodeId, children: NodeId[]): void => {
+	const previous = state.childrenById.get(parent) ?? [];
+	const next = [...children];
+	const nextSet = new Set(next);
+	for (const child of previous) {
+		if (!nextSet.has(child) && state.parentById.get(child) === parent) {
+			state.parentById.delete(child);
+		}
+	}
+	state.childrenById.set(parent, next);
+	for (const child of next) {
+		state.parentById.set(child, parent);
+	}
+	syncNodeChildren(state, parent);
+};
+
 const replaceInChildren = (
 	childrenById: Map<NodeId, NodeId[]>,
 	parent: NodeId,
@@ -173,6 +189,19 @@ const applyMetaPatch = (node: UiNodeDto, patch: Partial<UiNodeMetaDto>): UiNodeD
 		...patch
 	}
 });
+
+const upsertNodeSnapshot = (state: GraphState, node: UiNodeDto): void => {
+	state.nodesById.set(node.node_id, {
+		...node,
+		children: [...node.children]
+	});
+	if (node.data.kind === 'parameter') {
+		state.paramsById.set(node.node_id, node.data.param);
+	} else {
+		state.paramsById.delete(node.node_id);
+	}
+	setNodeChildren(state, node.node_id, node.children);
+};
 
 const shouldIgnoreTransportResync = (payload: unknown): boolean => {
 	if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) {
@@ -249,7 +278,11 @@ const reduceEventInPlace = (
 			break;
 		}
 		case 'childAdded': {
-			addToChildren(state.childrenById, event.kind.parent, event.kind.child);
+			if (Array.isArray(event.kind.parent_children)) {
+				setNodeChildren(state, event.kind.parent, event.kind.parent_children);
+			} else {
+				addToChildren(state.childrenById, event.kind.parent, event.kind.child);
+			}
 			state.parentById.set(event.kind.child, event.kind.parent);
 			requiresRootRecompute = true;
 			if (!state.nodesById.has(event.kind.parent)) {
@@ -295,8 +328,16 @@ const reduceEventInPlace = (
 			break;
 		}
 		case 'childMoved': {
-			removeFromChildren(state.childrenById, event.kind.old_parent, event.kind.child);
-			addToChildren(state.childrenById, event.kind.new_parent, event.kind.child);
+			if (Array.isArray(event.kind.old_parent_children)) {
+				setNodeChildren(state, event.kind.old_parent, event.kind.old_parent_children);
+			} else {
+				removeFromChildren(state.childrenById, event.kind.old_parent, event.kind.child);
+			}
+			if (Array.isArray(event.kind.new_parent_children)) {
+				setNodeChildren(state, event.kind.new_parent, event.kind.new_parent_children);
+			} else {
+				addToChildren(state.childrenById, event.kind.new_parent, event.kind.child);
+			}
 			state.parentById.set(event.kind.child, event.kind.new_parent);
 			requiresRootRecompute = true;
 			if (
@@ -311,11 +352,22 @@ const reduceEventInPlace = (
 			break;
 		}
 		case 'childReordered': {
-			state.requiresResync = true;
+			if (!Array.isArray(event.kind.parent_children)) {
+				state.requiresResync = true;
+				break;
+			}
+			setNodeChildren(state, event.kind.parent, event.kind.parent_children);
+			requiresRootRecompute = true;
+			if (!state.nodesById.has(event.kind.parent)) {
+				state.requiresResync = true;
+			}
 			break;
 		}
 		case 'nodeCreated': {
-			if (!state.nodesById.has(event.kind.node)) {
+			if (event.kind.snapshot) {
+				upsertNodeSnapshot(state, event.kind.snapshot);
+				requiresRootRecompute = true;
+			} else if (!state.nodesById.has(event.kind.node)) {
 				state.requiresResync = true;
 			}
 			break;
