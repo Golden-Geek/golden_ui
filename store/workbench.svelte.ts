@@ -181,6 +181,7 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 		}
 		console.info(`[ui-perf] ${message}`);
 	};
+	const nowMs = (): number => (typeof performance !== 'undefined' ? performance.now() : Date.now());
 
 	let status = $state<WorkbenchConnectionStatus>('connecting');
 	const selection = createWorkbenchSelectionStore(graph);
@@ -299,10 +300,12 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 	};
 
 	const logSnapshotTiming = (context: string, snapshot: UiSnapshot, applyStartedAt: number) => {
-		const applyElapsedMs = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - applyStartedAt;
+		const applyElapsedMs =
+			(typeof performance !== 'undefined' ? performance.now() : Date.now()) - applyStartedAt;
 		const flushStartedAt = typeof performance !== 'undefined' ? performance.now() : Date.now();
 		tick().then(() => {
-			const flushElapsedMs = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - flushStartedAt;
+			const flushElapsedMs =
+				(typeof performance !== 'undefined' ? performance.now() : Date.now()) - flushStartedAt;
 			const t = (snapshot as any).__timings || {};
 			const totalMs = (t.totalMs || 0) + applyElapsedMs + flushElapsedMs;
 			logUiPerf(
@@ -364,8 +367,10 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 	};
 
 	const applyBatch = (batch: UiEventBatch): void => {
+		const applyStartedAt = nowMs();
 		const graphEvents = logger.partitionBatchEvents(batch.events);
 		customEvents.applyBatchEvents(graphEvents);
+		let graphPatchMs = 0;
 
 		if (graphEvents.length > 0) {
 			const warningDataChanged = warnings.batchAffectsWarnings({
@@ -373,11 +378,13 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 				to: batch.to,
 				events: graphEvents
 			});
+			const graphPatchStartedAt = nowMs();
 			graph.applyBatch({
 				from: batch.from,
 				to: graphEvents[graphEvents.length - 1]?.time ?? batch.to,
 				events: graphEvents
 			});
+			graphPatchMs = nowMs() - graphPatchStartedAt;
 			footerHover.prune();
 			if (warningDataChanged) {
 				warnings.invalidate();
@@ -386,6 +393,14 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 			if (graph.state.requiresResync) {
 				void resyncSnapshot();
 			}
+		}
+		const totalMs = nowMs() - applyStartedAt;
+		if (batch.events.length > 0 || totalMs >= 4) {
+			logUiPerf(
+				`[ui] batch events=${batch.events.length} graph_events=${graphEvents.length} graph_patch_ms=${graphPatchMs.toFixed(
+					1
+				)} ws_batch_apply_ms=${totalMs.toFixed(1)}`
+			);
 		}
 	};
 

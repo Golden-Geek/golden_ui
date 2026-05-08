@@ -97,6 +97,32 @@ const toWsUrl = (value?: string): string => {
 
 const includeSelfEventsForIntent = (_intent: UiEditIntent): boolean => true;
 
+const nowMs = (): number => (typeof performance !== 'undefined' ? performance.now() : Date.now());
+
+const shouldLogUiPerf = (): boolean => {
+	if (typeof window === 'undefined') {
+		return false;
+	}
+	try {
+		return window.localStorage.getItem('gc_ui_perf') === '1';
+	} catch {
+		return false;
+	}
+};
+
+const logUiPerf = (message: string): void => {
+	if (!shouldLogUiPerf()) {
+		return;
+	}
+	console.info(`[ui-perf] ${message}`);
+};
+
+interface WsMessageTiming {
+	bytes: number;
+	receivedAtMs: number;
+	parseMs: number;
+}
+
 export const createWebSocketUiClient = (options: WebSocketUiClientOptions = {}): UiClient => {
 	const wsUrl = toWsUrl(
 		options.wsUrl ??
@@ -321,7 +347,7 @@ export const createWebSocketUiClient = (options: WebSocketUiClientOptions = {}):
 		sendSubscribe(subscriptionId, state);
 	};
 
-	const handleServerMessage = (raw: unknown): void => {
+	const handleServerMessage = (raw: unknown, timing?: WsMessageTiming): void => {
 		if (!isRecord(raw) || typeof raw.kind !== 'string') {
 			return;
 		}
@@ -346,11 +372,23 @@ export const createWebSocketUiClient = (options: WebSocketUiClientOptions = {}):
 				if (!state || state.closed) {
 					return;
 				}
+				const convertStartedAt = nowMs();
 				const batch = fromRustEventBatch(message.batch);
+				const convertMs = nowMs() - convertStartedAt;
 				if (batch.to) {
 					state.cursor = batch.to;
 				}
+				const applyStartedAt = nowMs();
 				state.onBatch(batch);
+				const applyMs = nowMs() - applyStartedAt;
+				const totalMs = timing ? nowMs() - timing.receivedAtMs : convertMs + applyMs;
+				logUiPerf(
+					`[ui] ws_batch subscription=${message.subscription_id} events=${batch.events.length} bytes=${
+						timing?.bytes ?? 0
+					} ws_batch_parse_ms=${(timing?.parseMs ?? 0).toFixed(1)} ws_batch_convert_ms=${convertMs.toFixed(
+						1
+					)} ws_batch_apply_ms=${applyMs.toFixed(1)} total_ms=${totalMs.toFixed(1)}`
+				);
 				return;
 			}
 			case 'intentAck': {
@@ -456,14 +494,21 @@ export const createWebSocketUiClient = (options: WebSocketUiClientOptions = {}):
 		};
 
 		currentSocket.onmessage = (event) => {
+			const receivedAtMs = nowMs();
 			const text = typeof event.data === 'string' ? event.data : '';
 			if (text.length === 0) {
 				return;
 			}
 
 			try {
+				const parseStartedAt = nowMs();
 				const parsed = JSON.parse(text) as unknown;
-				handleServerMessage(parsed);
+				const parseMs = nowMs() - parseStartedAt;
+				handleServerMessage(parsed, {
+					bytes: text.length,
+					receivedAtMs,
+					parseMs
+				});
 			} catch (error) {
 				console.error('failed to parse ws message', error);
 			}
