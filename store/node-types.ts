@@ -259,9 +259,9 @@ const getDerivedColorForNode = (node: UiNodeDto): UiColorDto => {
 	let autoColor = node.data.kind === 'parameter';
 	if (!autoColor) {
 		if (node.node_type === 'folder') {
-			return { r: .4, g: .4, b: .4, a: 1 };
+			return { r: 0.4, g: 0.4, b: 0.4, a: 1 };
 		} else if (node.user_item_kind.trim().length > 0) {
-			return { r: .4, g: .4, b: .4, a: 1 };
+			return { r: 0.4, g: 0.4, b: 0.4, a: 1 };
 		}
 	}
 

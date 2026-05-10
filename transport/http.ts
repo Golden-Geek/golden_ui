@@ -1363,11 +1363,13 @@ export const createHttpUiClient = (options: HttpClientOptions = {}): UiClient =>
 				},
 				body: JSON.stringify(request)
 			});
-			const fetchMs = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - fetchStart;
+			const fetchMs =
+				(typeof performance !== 'undefined' ? performance.now() : Date.now()) - fetchStart;
 
 			const readStart = typeof performance !== 'undefined' ? performance.now() : Date.now();
 			const text = await response.text();
-			const readMs = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - readStart;
+			const readMs =
+				(typeof performance !== 'undefined' ? performance.now() : Date.now()) - readStart;
 
 			const parseStart = typeof performance !== 'undefined' ? performance.now() : Date.now();
 			let body: unknown = undefined;
@@ -1385,8 +1387,10 @@ export const createHttpUiClient = (options: HttpClientOptions = {}): UiClient =>
 
 			const snapshot = body as RustUiSnapshot;
 			const parsed = fromRustSnapshot(snapshot);
-			const parseMs = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - parseStart;
-			const totalMs = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - totalStart;
+			const parseMs =
+				(typeof performance !== 'undefined' ? performance.now() : Date.now()) - parseStart;
+			const totalMs =
+				(typeof performance !== 'undefined' ? performance.now() : Date.now()) - totalStart;
 
 			(parsed as any).__timings = { fetchMs, readMs, parseMs, totalMs, bytes: text.length };
 			return parsed;

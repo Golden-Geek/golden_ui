@@ -104,9 +104,7 @@
 	let isNameChangeable = $derived(node?.meta?.user_permissions.can_edit_name ?? false);
 	let iconURL = $derived(getIconURLForNode(node));
 	let warnings = $derived(node ? session?.getNodeVisibleWarnings(node.node_id) : null);
-	let customInspectorEntry = $derived(
-		node && showAsContainer ? resolveNodeInspector(node) : null
-	);
+	let customInspectorEntry = $derived(node && showAsContainer ? resolveNodeInspector(node) : null);
 	let CustomInspectorComponent = $derived(customInspectorEntry?.component ?? null);
 
 	let defaultCollapsed = $derived(

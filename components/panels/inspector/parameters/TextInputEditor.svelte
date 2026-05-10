@@ -155,7 +155,7 @@
 					if (event.key === 'Escape') {
 						resetTargetValue(target);
 					}
-					}}></textarea>
+				}}></textarea>
 		{:else}
 			<input
 				type="text"
@@ -178,50 +178,48 @@
 				}} />
 		{/if}
 	</div>
+{:else if multiline}
+	<textarea
+		class="string-editor multiline"
+		class:widget-layout={layoutMode === 'widget'}
+		value={draftValue}
+		disabled={!enabled}
+		rows="5"
+		class:readonly={readOnly}
+		oninput={updateDraftValue}
+		onblur={(event) => {
+			commitTargetValue(event.target as HTMLTextAreaElement);
+		}}
+		onkeydown={(event) => {
+			const target = event.target as HTMLTextAreaElement;
+			if ((event.key === 'Enter' && (event.ctrlKey || event.metaKey)) || event.key === 'Tab') {
+				commitTargetValue(target);
+			}
+			if (event.key === 'Escape') {
+				resetTargetValue(target);
+			}
+		}}></textarea>
 {:else}
-	{#if multiline}
-		<textarea
-			class="string-editor multiline"
-			class:widget-layout={layoutMode === 'widget'}
-			value={draftValue}
-			disabled={!enabled}
-			rows="5"
-			class:readonly={readOnly}
-			oninput={updateDraftValue}
-			onblur={(event) => {
-				commitTargetValue(event.target as HTMLTextAreaElement);
-			}}
-			onkeydown={(event) => {
-				const target = event.target as HTMLTextAreaElement;
-				if ((event.key === 'Enter' && (event.ctrlKey || event.metaKey)) || event.key === 'Tab') {
-					commitTargetValue(target);
-				}
-				if (event.key === 'Escape') {
-					resetTargetValue(target);
-				}
-			}}></textarea>
-	{:else}
-		<input
-			type="text"
-			class="string-editor"
-			class:widget-layout={layoutMode === 'widget'}
-			value={draftValue}
-			disabled={!enabled}
-			class:readonly={readOnly}
-			onchange={(event) => {
-				commitTargetValue(event.target as HTMLInputElement);
-			}}
-			onkeydown={(event) => {
-				if (event.key === 'Enter') {
-					const target = event.target as HTMLInputElement;
-					commitTargetValue(target);
-					target.blur();
-				}
-				if (event.key === 'Escape') {
-					resetTargetValue(event.target as HTMLInputElement);
-				}
-			}} />
-	{/if}
+	<input
+		type="text"
+		class="string-editor"
+		class:widget-layout={layoutMode === 'widget'}
+		value={draftValue}
+		disabled={!enabled}
+		class:readonly={readOnly}
+		onchange={(event) => {
+			commitTargetValue(event.target as HTMLInputElement);
+		}}
+		onkeydown={(event) => {
+			if (event.key === 'Enter') {
+				const target = event.target as HTMLInputElement;
+				commitTargetValue(target);
+				target.blur();
+			}
+			if (event.key === 'Escape') {
+				resetTargetValue(event.target as HTMLInputElement);
+			}
+		}} />
 {/if}
 
 <style>

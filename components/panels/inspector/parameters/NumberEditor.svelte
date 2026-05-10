@@ -74,7 +74,9 @@
 	let formattedDraftValue = $derived(
 		timeWidget ? formatTimeValue(draftValue) : draftValue.toFixed(fractionDigits)
 	);
-	let formattedValue = $derived(timeWidget ? formatTimeValue(value) : value.toFixed(fractionDigits));
+	let formattedValue = $derived(
+		timeWidget ? formatTimeValue(value) : value.toFixed(fractionDigits)
+	);
 	let displayedSliderValue = $derived.by(() => {
 		if (min !== undefined && draftValue < min) {
 			return min;
@@ -131,7 +133,11 @@
 		}
 
 		const segments = clockPart.split(':');
-		if (segments.length === 0 || segments.length > 3 || segments.some((segment) => !/^\d+$/.test(segment))) {
+		if (
+			segments.length === 0 ||
+			segments.length > 3 ||
+			segments.some((segment) => !/^\d+$/.test(segment))
+		) {
 			return null;
 		}
 
@@ -149,7 +155,7 @@
 			wholeSeconds = Number(segments[0]);
 		}
 
-		if ((segments.length === 3 && minutes >= 60) || segments.length >= 2 && wholeSeconds >= 60) {
+		if ((segments.length === 3 && minutes >= 60) || (segments.length >= 2 && wholeSeconds >= 60)) {
 			return null;
 		}
 
