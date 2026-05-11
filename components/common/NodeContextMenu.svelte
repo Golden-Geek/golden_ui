@@ -656,9 +656,6 @@
 		if (!session || !activeNode || !canDelete) {
 			return;
 		}
-		if (!graphState.nodesById.has(activeNode.node_id)) {
-			return;
-		}
 		void session
 			.sendIntent({
 				kind: 'removeNode',
