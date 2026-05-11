@@ -311,6 +311,16 @@ const reduceEventInPlace = (
 			break;
 		}
 		case 'childReplaced': {
+			if (event.kind.old === event.kind.new) {
+				if (!state.nodesById.has(event.kind.parent) || !state.nodesById.has(event.kind.new)) {
+					state.requiresResync = true;
+				} else {
+					state.parentById.set(event.kind.new, event.kind.parent);
+					syncNodeChildren(state, event.kind.parent);
+				}
+				break;
+			}
+
 			replaceInChildren(state.childrenById, event.kind.parent, event.kind.old, event.kind.new);
 			state.parentById.delete(event.kind.old);
 			state.parentById.set(event.kind.new, event.kind.parent);
