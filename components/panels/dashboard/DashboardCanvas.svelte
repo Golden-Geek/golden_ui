@@ -2802,6 +2802,9 @@
 		if (!canDeleteWidget) {
 			return;
 		}
+		if (!getGraph().state.nodesById.has(liveNode.node_id)) {
+			return;
+		}
 		await sendRemoveNodeIntent(liveNode.node_id);
 	};
 
