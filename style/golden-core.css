@@ -535,26 +535,26 @@ select {
 		align-items: center;
 	}
 
-	.dv-tabs-and-actions-container>.dv-void-container {
+	.dv-tabs-and-actions-container > .dv-void-container {
 		position: absolute;
 		inset: 0;
 		z-index: 0;
 	}
 
-	.dv-tabs-and-actions-container> :not(.dv-void-container) {
+	.dv-tabs-and-actions-container > :not(.dv-void-container) {
 		position: relative;
 		z-index: 1;
 	}
 
-	.dv-tabs-and-actions-container:not(.dv-groupview-header-vertical)>.dv-right-actions-container {
+	.dv-tabs-and-actions-container:not(.dv-groupview-header-vertical) > .dv-right-actions-container {
 		margin-inline-start: auto;
 	}
 
-	.dv-tabs-and-actions-container.dv-groupview-header-vertical>.dv-right-actions-container {
+	.dv-tabs-and-actions-container.dv-groupview-header-vertical > .dv-right-actions-container {
 		margin-block-start: auto;
 	}
 
-	.dv-tabs-and-actions-container .dv-tabs-container>.dv-tab {
+	.dv-tabs-and-actions-container .dv-tabs-container > .dv-tab {
 		transition:
 			background-color 0.2s,
 			color 0.2s;
@@ -573,16 +573,16 @@ select {
 		box-sizing: border-box;
 	}
 
-	.dv-split-view-container>.dv-sash-container>.dv-sash {
+	.dv-split-view-container > .dv-sash-container > .dv-sash {
 		border-radius: 1rem;
 	}
 
-	.dv-split-view-container.dv-vertical>.dv-sash-container>.dv-sash {
+	.dv-split-view-container.dv-vertical > .dv-sash-container > .dv-sash {
 		width: 80%;
 		left: 10% !important;
 	}
 
-	.dv-split-view-container.dv-horizontal>.dv-sash-container>.dv-sash {
+	.dv-split-view-container.dv-horizontal > .dv-sash-container > .dv-sash {
 		height: 80%;
 		top: 10% !important;
 	}
