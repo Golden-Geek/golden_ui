@@ -388,8 +388,12 @@ select {
 	--dv-tabs-and-actions-container-background-color: var(--gc-color-dock-tabbar-background);
 	--dv-activegroup-visiblepanel-tab-background-color: var(--gc-color-dock-tab-active-background);
 	--dv-activegroup-hiddenpanel-tab-background-color: var(--gc-color-dock-tab-hidden-background);
-	--dv-inactivegroup-visiblepanel-tab-background-color: var(--gc-color-dock-tab-inactive-background);
-	--dv-inactivegroup-hiddenpanel-tab-background-color: var(--gc-color-dock-tab-inactive-hidden-background);
+	--dv-inactivegroup-visiblepanel-tab-background-color: var(
+		--gc-color-dock-tab-inactive-background
+	);
+	--dv-inactivegroup-hiddenpanel-tab-background-color: var(
+		--gc-color-dock-tab-inactive-hidden-background
+	);
 	--dv-activegroup-visiblepanel-tab-color: var(--gc-color-dock-tab-active-text);
 	--dv-activegroup-hiddenpanel-tab-color: var(--gc-color-dock-tab-hidden-text);
 	--dv-inactivegroup-visiblepanel-tab-color: var(--gc-color-dock-tab-inactive-text);
