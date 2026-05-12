@@ -10,6 +10,10 @@
 
 	let isWindowMaximized = $state(false);
 	let hasTauriWindowApi = $state(false);
+	let useManualHeaderDrag = $derived(hasTauriWindowApi && platform.isWindows);
+	let useNativeHeaderDrag = $derived(hasTauriWindowApi && !useManualHeaderDrag);
+
+	const DRAG_EXCLUDED_SELECTOR = 'button, input, textarea, select, a, [data-no-drag]';
 
 	const { session } = $props<{
 		session?: WorkbenchSession | null;
@@ -56,11 +60,37 @@
 	};
 
 	const startDrag = async (): Promise<void> => {
-		if (platform.isWindows) return; //handle natively
 		const result = await invokeDesktopCommand('start_drag', undefined, 'window-controls');
 		if (result === undefined) {
 			console.error('[window-controls] Tauri window API unavailable (start drag)');
 		}
+	};
+
+	const isHeaderDragExcludedTarget = (target: EventTarget | null): boolean => {
+		return target instanceof Element && target.closest(DRAG_EXCLUDED_SELECTOR) !== null;
+	};
+
+	const handleHeaderMouseDown = (event: MouseEvent): void => {
+		if (!useManualHeaderDrag || event.button !== 0 || isHeaderDragExcludedTarget(event.target)) {
+			return;
+		}
+
+		event.preventDefault();
+		void startDrag();
+	};
+
+	const bindManualHeaderDrag = (element: HTMLDivElement): { destroy: () => void } => {
+		const onMouseDown = (event: MouseEvent): void => {
+			handleHeaderMouseDown(event);
+		};
+
+		element.addEventListener('mousedown', onMouseDown);
+
+		return {
+			destroy: (): void => {
+				element.removeEventListener('mousedown', onMouseDown);
+			}
+		};
 	};
 
 	const clearUiStorage = (): void => {
@@ -89,7 +119,10 @@
 	});
 </script>
 
-<div class="gc-header {hasTauriWindowApi ? 'tauri' : ''}">
+<div
+	class="gc-header {hasTauriWindowApi ? 'tauri' : ''} {useManualHeaderDrag ? 'manual-drag' : ''}"
+	role="banner"
+	use:bindManualHeaderDrag>
 	<div class="header-start">
 		<FileMenu />
 		<div class="app-title">
@@ -99,7 +132,7 @@
 	</div>
 	<div
 		class="spacer"
-		data-tauri-drag-region
+		data-tauri-drag-region={useNativeHeaderDrag ? '' : undefined}
 		role="button"
 		tabindex="-1"
 		onmousedown={startDrag}
@@ -132,7 +165,7 @@
 	</div>
 	<div
 		class="spacer"
-		data-tauri-drag-region
+		data-tauri-drag-region={useNativeHeaderDrag ? '' : undefined}
 		role="button"
 		tabindex="-1"
 		onmousedown={startDrag}
@@ -305,5 +338,9 @@
 
 	.status-label {
 		line-height: 1;
+	}
+
+	.gc-header.manual-drag {
+		-webkit-app-region: no-drag;
 	}
 </style>
