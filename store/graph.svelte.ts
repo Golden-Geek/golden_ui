@@ -404,6 +404,12 @@ const reduceEventInPlace = (
 				if (op.kind === 'nodeCreated') {
 					upsertNodeSnapshot(state, op.snapshot);
 					requiresRootRecompute = true;
+				} else if (op.kind === 'subtreeInserted') {
+					for (const node of op.nodes) {
+						upsertNodeSnapshot(state, node);
+					}
+					setNodeChildren(state, op.parent, op.parent_children_after);
+					requiresRootRecompute = true;
 				} else if (op.kind === 'subtreeRemoved') {
 					if (state.nodesById.has(op.root)) {
 						removeSubtree(state, op.root);

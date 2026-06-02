@@ -405,6 +405,13 @@ export interface UiChildrenOrderPatch {
 export type UiGraphOp =
 	| { kind: 'nodeCreated'; snapshot: UiNodeDto; parent?: NodeId | null; index?: number | null }
 	| {
+			kind: 'subtreeInserted';
+			root: NodeId;
+			parent: NodeId;
+			nodes: UiNodeDto[];
+			parent_children_after: NodeId[];
+	  }
+	| {
 			kind: 'subtreeRemoved';
 			root: NodeId;
 			removed_ids: NodeId[];

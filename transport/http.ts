@@ -1126,6 +1126,10 @@ const fromRustEvent = (event: RustUiEventDto): UiEventDto => {
 			if (isRecord(op) && op.kind === 'nodeCreated') {
 				return { ...op, snapshot: fromRustEventNodeSnapshot(op.snapshot) };
 			}
+			if (isRecord(op) && op.kind === 'subtreeInserted') {
+				const rawNodes = Array.isArray(op.nodes) ? (op.nodes as unknown[]) : [];
+				return { ...op, nodes: rawNodes.map((n) => fromRustEventNodeSnapshot(n)) };
+			}
 			return op;
 		});
 		return {
