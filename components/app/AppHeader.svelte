@@ -70,8 +70,28 @@
 		return target instanceof Element && target.closest(DRAG_EXCLUDED_SELECTOR) !== null;
 	};
 
+	let lastHeaderClickTime = 0;
+
 	const handleHeaderMouseDown = (event: MouseEvent): void => {
-		if (!useManualHeaderDrag || event.button !== 0 || isHeaderDragExcludedTarget(event.target)) {
+		if (event.button !== 0 || isHeaderDragExcludedTarget(event.target)) {
+			return;
+		}
+
+		const now = Date.now();
+		const isDoubleClick = now - lastHeaderClickTime < 400;
+		lastHeaderClickTime = now;
+
+		if (isDoubleClick) {
+			lastHeaderClickTime = 0;
+			event.preventDefault();
+			void toggleWindowMaximize();
+			return;
+		}
+
+		const target = event.target as Element;
+		const isSpacer = target.classList?.contains('spacer') ?? false;
+
+		if (!useManualHeaderDrag && !isSpacer) {
 			return;
 		}
 
@@ -79,7 +99,7 @@
 		void startDrag();
 	};
 
-	const bindManualHeaderDrag = (element: HTMLDivElement): { destroy: () => void } => {
+	const bindHeaderInteraction = (element: HTMLDivElement): { destroy: () => void } => {
 		const onMouseDown = (event: MouseEvent): void => {
 			handleHeaderMouseDown(event);
 		};
@@ -122,7 +142,7 @@
 <div
 	class="gc-header {hasTauriWindowApi ? 'tauri' : ''} {useManualHeaderDrag ? 'manual-drag' : ''}"
 	role="banner"
-	use:bindManualHeaderDrag>
+	use:bindHeaderInteraction>
 	<div class="header-start">
 		<FileMenu />
 		<div class="app-title">
@@ -135,7 +155,6 @@
 		data-tauri-drag-region={useNativeHeaderDrag ? '' : undefined}
 		role="button"
 		tabindex="-1"
-		onmousedown={startDrag}
 		onkeydown={() => {}}>
 	</div>
 	<div class="controls">
@@ -168,7 +187,6 @@
 		data-tauri-drag-region={useNativeHeaderDrag ? '' : undefined}
 		role="button"
 		tabindex="-1"
-		onmousedown={startDrag}
 		onkeydown={() => {}}>
 	</div>
 	{#if hasTauriWindowApi}
