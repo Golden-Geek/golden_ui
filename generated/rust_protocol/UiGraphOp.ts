@@ -22,7 +22,23 @@ parent?: NodeId | null,
 /**
  * Direct child index under `parent`, if known.
  */
-index?: number | null, } | { "kind": "subtreeRemoved", 
+index?: number | null, } | { "kind": "subtreeInserted", 
+/**
+ * Root of the inserted subtree.
+ */
+root: NodeId, 
+/**
+ * Parent node where `root` was attached.
+ */
+parent: NodeId, 
+/**
+ * Full snapshots for all inserted nodes (root and descendants, depth-first).
+ */
+nodes: Array<UiNodeDto>, 
+/**
+ * Final direct child order for `parent` after insertion.
+ */
+parent_children_after: Array<NodeId>, } | { "kind": "subtreeRemoved", 
 /**
  * Root of the removed subtree.
  */
