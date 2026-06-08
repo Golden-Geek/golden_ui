@@ -20,6 +20,14 @@
 	--gc-color-node-enabled: #54c30f;
 	--gc-color-node-inactive: #e3bc0a;
 
+	/* GRAPH CANVAS */
+	--gc-color-graph-grid-odd: var(--gc-color-background);
+	--gc-color-graph-grid-even: color-mix(
+		in srgb,
+		var(--gc-color-text) 5%,
+		var(--gc-color-background)
+	);
+
 	/* PARAMETERS */
 	--gc-color-readonly: rgb(22, 134, 226);
 
