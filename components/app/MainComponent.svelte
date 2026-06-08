@@ -677,8 +677,13 @@
 				for (const panel of initialPanels?.filter(
 					(request: PanelSpawnRequest) => request.required
 				) ?? []) {
-					if (!resolvePanelFromQuery({ panelId: panel.panelId, panelType: panel.panelType })) {
-						addPanel(panel);
+					if (!resolvePanelFromQuery({ panelType: panel.panelType })) {
+						const referencePanelId = panel.position?.referencePanelId;
+						const request =
+							referencePanelId && !resolvePanelFromQuery({ panelId: referencePanelId })
+								? { ...panel, position: undefined }
+								: panel;
+						addPanel(request);
 					}
 				}
 			}
