@@ -367,6 +367,7 @@
 
 		return {
 			panelType: request.panelType,
+			required: request.required ?? defaults.required,
 			panelId: request.panelId ?? defaults.panelId,
 			title: request.title ?? defaults.title,
 			params: {
@@ -671,6 +672,14 @@
 				const initialPanelRequests = initialPanels ?? createDefaultInitialPanels();
 				for (const panel of initialPanelRequests) {
 					addPanel(panel);
+				}
+			} else {
+				for (const panel of initialPanels?.filter(
+					(request: PanelSpawnRequest) => request.required
+				) ?? []) {
+					if (!resolvePanelFromQuery({ panelId: panel.panelId, panelType: panel.panelType })) {
+						addPanel(panel);
+					}
 				}
 			}
 

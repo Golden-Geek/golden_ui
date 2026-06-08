@@ -56,6 +56,7 @@ export interface PanelSpawnPosition {
 
 export interface PanelSpawnRequest {
 	panelType: string;
+	required?: boolean;
 	panelId?: string;
 	title?: string;
 	params?: PanelParams;
