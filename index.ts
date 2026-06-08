@@ -26,6 +26,17 @@ export { default as DashboardRouteLayout } from './components/routes/DashboardRo
 export { default as DashboardRoute } from './components/routes/DashboardRoute.svelte';
 export { default as DashboardPageRoute } from './components/routes/DashboardPageRoute.svelte';
 export { default as Watcher } from './components/common/Watcher.svelte';
+export { default as ContextMenu } from './components/common/ContextMenu.svelte';
+export { default as NodeAddButton } from './components/common/NodeAddButton.svelte';
+export {
+	normalizeContextMenuItems,
+	type ContextMenuAnchor,
+	type ContextMenuElementAnchor,
+	type ContextMenuItem,
+	type ContextMenuPlacement,
+	type ContextMenuPointAnchor
+} from './components/common/context-menu';
+export { buildCreatableItemMenu } from './components/common/creatable-item-menu';
 export {
 	registerNodeContextMenuContributor,
 	registerNodeContextMenuContributors,

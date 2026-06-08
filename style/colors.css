@@ -24,7 +24,7 @@
 	--gc-color-graph-grid-odd: var(--gc-color-background);
 	--gc-color-graph-grid-even: color-mix(
 		in srgb,
-		var(--gc-color-text) 5%,
+		var(--gc-color-text) 2%,
 		var(--gc-color-background)
 	);
 
