@@ -438,18 +438,24 @@ const reduceEventInPlace = (
 						state.nodesById.set(op.node, applyMetaPatch(node, op.patch));
 					}
 				} else if (op.kind === 'paramPatched') {
-					const param = state.paramsById.get(op.param);
-					if (param) {
-						if (op.patch.value !== undefined) {
-							param.value = op.patch.value;
-						}
-						if (op.patch.control !== undefined) {
-							param.control = op.patch.control;
-						}
-						if (op.patch.constraints !== undefined) {
-							param.constraints = op.patch.constraints;
-						}
+					const node = state.nodesById.get(op.param);
+					if (!node || node.data.kind !== 'parameter') {
+						state.requiresResync = true;
+						continue;
 					}
+					const param = {
+						...node.data.param,
+						...(op.patch.value === undefined ? {} : { value: op.patch.value }),
+						...(op.patch.control === undefined ? {} : { control: op.patch.control }),
+						...(op.patch.constraints === undefined
+							? {}
+							: { constraints: op.patch.constraints })
+					};
+					state.paramsById.set(op.param, param);
+					state.nodesById.set(op.param, {
+						...node,
+						data: { kind: 'parameter', param }
+					});
 				}
 			}
 			break;
