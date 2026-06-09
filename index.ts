@@ -49,6 +49,13 @@ export {
 
 export { default as UnknownPanel } from './components/panels/UnknownPanel.svelte';
 export { default as Outliner } from './components/panels/outliner/OutlinerPanel.svelte';
+export { default as OutlinerItem } from './components/panels/outliner/OutlinerItem.svelte';
+export {
+	canDragOutlinerNode,
+	resolveOutlinerDropTarget,
+	type OutlinerDropTarget,
+	type OutlinerDropZone
+} from './components/panels/outliner/drag-drop';
 export {
 	registerOutlinerRowSupplement,
 	registerOutlinerRowSupplements,

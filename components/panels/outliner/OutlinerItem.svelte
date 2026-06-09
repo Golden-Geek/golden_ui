@@ -234,7 +234,7 @@
 	let isVisible = $derived(subtreeHasVisibleNode(node));
 	let showRow = $derived(node !== null);
 	let rowSelectable = $derived(isSelectable(node));
-	let rowMoveDraggable = $derived(Boolean(node && isOutlinerMode && nodeDraggable(node)));
+	let rowMoveDraggable = $derived(Boolean(node && nodeDraggable(node)));
 	let rowDashboardDraggable = $derived(
 		Boolean(node && isOutlinerMode && mainGraphState?.rootId !== node.node_id)
 	);

@@ -7,7 +7,13 @@
 	import { buildCreatableItemMenu } from './creatable-item-menu';
 	import addIcon from '../../style/icons/node/add.svg';
 
-	let { node }: { node: UiNodeDto } = $props();
+	let {
+		node,
+		onCreateItem
+	}: {
+		node: UiNodeDto;
+		onCreateItem?: (item: UiCreatableUserItem) => void | Promise<void>;
+	} = $props();
 
 	let creatableItems = $derived(node.creatable_user_items ?? []);
 	let canCreateItems = $derived(creatableItems.length > 0);
@@ -52,6 +58,10 @@
 			return;
 		}
 		addMenuOpen = false;
+		if (onCreateItem) {
+			await onCreateItem(item);
+			return;
+		}
 		const result = await sendCreateUserItemIntent(node.node_id, item);
 		if (result.selectWhenCreated && result.createdNodeId !== null) {
 			appState.session?.selectNode(result.createdNodeId, 'REPLACE');
@@ -110,7 +120,10 @@
 		inline-size: 1.45rem;
 		block-size: 1.45rem;
 		padding: 0.15rem;
+		border: 0;
 		border-radius: 0.35rem;
+		background: transparent;
+		color: inherit;
 		cursor: pointer;
 		display: inline-flex;
 		align-items: center;
