@@ -1,5 +1,6 @@
 import type { UiColorDto, UiNodeDto } from '../types';
 import nodeAddIcon from '../style/icons/node/add.svg';
+import nodeDefaultIcon from '../style/icons/node/default.svg';
 import folderIcon from '../style/icons/node/folder.svg';
 import nodeManagerIcon from '../style/icons/node/manager.svg';
 import scriptIcon from '../style/icons/node/script.svg';
@@ -35,7 +36,7 @@ const detectedNodeIcons = Object.entries(detectedNodeIconModules).reduce<Record<
 	{}
 );
 
-const DEFAULT_FALLBACK_ICON = nodeAddIcon;
+const DEFAULT_FALLBACK_ICON = nodeDefaultIcon;
 const DEFAULT_MANAGER_ICON = nodeManagerIcon;
 const DEFAULT_PARAMETER_ICON = parameterTriggerIcon;
 

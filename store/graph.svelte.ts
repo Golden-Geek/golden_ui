@@ -447,9 +447,7 @@ const reduceEventInPlace = (
 						...node.data.param,
 						...(op.patch.value === undefined ? {} : { value: op.patch.value }),
 						...(op.patch.control === undefined ? {} : { control: op.patch.control }),
-						...(op.patch.constraints === undefined
-							? {}
-							: { constraints: op.patch.constraints })
+						...(op.patch.constraints === undefined ? {} : { constraints: op.patch.constraints })
 					};
 					state.paramsById.set(op.param, param);
 					state.nodesById.set(op.param, {

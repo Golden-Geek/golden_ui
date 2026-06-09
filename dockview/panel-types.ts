@@ -37,6 +37,8 @@ export interface PanelDefinition {
 	defaultParams?: PanelParams;
 	renderPolicy?: PanelRenderPolicy;
 	origin?: 'golden' | 'user';
+	/** Optional submenu group for the panel-creation menu (e.g. 'Module Editors'). */
+	category?: string;
 }
 
 export interface UserPanelDefinition {
@@ -45,6 +47,8 @@ export interface UserPanelDefinition {
 	description?: string;
 	defaultParams?: PanelParams;
 	renderPolicy?: PanelRenderPolicy;
+	/** Optional submenu group for the panel-creation menu. */
+	category?: string;
 }
 
 export type UserPanelDefinitionMap = Record<string, UserPanelDefinition | PanelComponent>;

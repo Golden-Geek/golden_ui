@@ -29,14 +29,40 @@
 		};
 	});
 
+	const toMenuItem = (panel: PanelDefinition): ContextMenuItem => ({
+		id: panel.panelType,
+		label: panel.title,
+		hint: panel.description,
+		action: () => {
+			onAddPanel(panel.panelType);
+		}
+	});
+
 	let menuItems = $derived.by((): ContextMenuItem[] => {
-		return availablePanels.map((panel) => ({
-			id: panel.panelType,
-			label: panel.title,
-			action: () => {
-				onAddPanel(panel.panelType);
+		// Uncategorized panels stay at the top level; categorized panels collapse into a
+		// submenu per category so the list stays tidy as module editors are added.
+		const topLevel: ContextMenuItem[] = [];
+		const byCategory = new Map<string, ContextMenuItem[]>();
+
+		for (const panel of availablePanels) {
+			const category = panel.category?.trim();
+			if (category) {
+				const bucket = byCategory.get(category) ?? [];
+				bucket.push(toMenuItem(panel));
+				byCategory.set(category, bucket);
+			} else {
+				topLevel.push(toMenuItem(panel));
 			}
+		}
+
+		const categories = [...byCategory.keys()].sort((a, b) => a.localeCompare(b));
+		const submenus: ContextMenuItem[] = categories.map((category) => ({
+			id: `category:${category}`,
+			label: category,
+			submenu: byCategory.get(category) ?? []
 		}));
+
+		return [...topLevel, ...submenus];
 	});
 
 	export const closeMenu = (): void => {
