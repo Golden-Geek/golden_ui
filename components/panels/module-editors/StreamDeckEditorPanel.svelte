@@ -200,6 +200,8 @@
 		return childByKey(valuesFolder, 'keys');
 	});
 
+	let defaultKeyFolders = $derived(folderChildren(controlKeysFolder));
+
 	type KeyCell = {
 		slot: number;
 		folder: UiNodeDto;
@@ -211,31 +213,38 @@
 		text: string;
 		image: string;
 		pressed: boolean;
+		permanent: boolean;
 	};
 
 	let keys = $derived.by((): KeyCell[] => {
 		if (!activePage) {
 			return [];
 		}
-		const keyFolders = folderChildren(activePage.controlRoot);
+		const activeFolders = folderChildren(activePage.controlRoot);
 		const valueParams = paramChildren(activeValueRoot);
-		return keyFolders.map((folder, slot) => {
-			const fields = paramChildren(folder);
-			const colorNode = fields[0] ?? null;
-			const textNode = fields[1] ?? null;
-			const imageNode = fields[2] ?? null;
+		const isDefaultPage = activePage.id === 'default';
+		return activeFolders.map((activeFolder, slot) => {
+			const defaultFolder = defaultKeyFolders[slot] ?? activeFolder;
+			// `Unpaged` is the 4th field and lives only on the default key.
+			const defaultUnpaged = boolValue(paramChildren(defaultFolder)[3] ?? null);
+			// An un-paged key is permanent: on non-default pages it shows the default appearance
+			// and is edited on the default page (so its per-page version is not exposed here).
+			const permanent = !isDefaultPage && defaultUnpaged;
+			const sourceFolder = permanent ? defaultFolder : activeFolder;
+			const fields = paramChildren(sourceFolder);
 			const valueNode = valueParams[slot] ?? null;
 			return {
 				slot,
-				folder,
-				colorNode,
-				textNode,
-				imageNode,
+				folder: sourceFolder,
+				colorNode: fields[0] ?? null,
+				textNode: fields[1] ?? null,
+				imageNode: fields[2] ?? null,
 				valueNode,
-				color: colorCss(colorNode),
-				text: strValue(textNode),
-				image: fileValue(imageNode),
-				pressed: boolValue(valueNode)
+				color: colorCss(fields[0] ?? null),
+				text: strValue(fields[1] ?? null),
+				image: fileValue(fields[2] ?? null),
+				pressed: boolValue(valueNode),
+				permanent
 			};
 		});
 	});
@@ -315,6 +324,9 @@
 
 	const onDropImage = (cell: KeyCell, event: DragEvent): void => {
 		event.preventDefault();
+		if (cell.permanent) {
+			return; // permanent (un-paged) keys are edited on the default page
+		}
 		const file = event.dataTransfer?.files?.[0];
 		if (!file) {
 			return;
@@ -323,6 +335,43 @@
 		const path = (file as unknown as { path?: string }).path ?? file.name;
 		setParam(cell.imageNode, { kind: 'file', value: path });
 	};
+
+	// The slot of the currently selected key (searched across all pages of this module).
+	let selectedSlot = $derived.by((): number | null => {
+		const selected = session?.selectedNodeId;
+		if (selected === null || selected === undefined) {
+			return null;
+		}
+		for (const page of pages) {
+			const index = folderChildren(page.controlRoot).findIndex((f) => f.node_id === selected);
+			if (index >= 0) {
+				return index;
+			}
+		}
+		return null;
+	});
+
+	// On a page switch, keep the same key slot selected (select this page's version of it).
+	let lastActivePageId = $state('');
+	$effect(() => {
+		const pageId = activePageId;
+		if (pageId === lastActivePageId) {
+			return;
+		}
+		const isFirstRun = lastActivePageId === '';
+		lastActivePageId = pageId;
+		if (isFirstRun) {
+			return;
+		}
+		const slot = selectedSlot;
+		if (slot === null) {
+			return;
+		}
+		const target = keys[slot];
+		if (target && session && session.selectedNodeId !== target.folder.node_id) {
+			session.selectNode(target.folder.node_id, 'REPLACE');
+		}
+	});
 
 	$effect(() => {
 		const next = activeModule ? `Stream Deck: ${activeModule.meta.label}` : 'Stream Deck Editor';
@@ -384,16 +433,18 @@
 						class:selected={session?.selectedNodeId === cell.folder.node_id}
 						class:pressed={cell.pressed}
 						class:sim={simulateMode}
+						class:permanent={cell.permanent}
 						style={`background-color: ${cell.color};`}
 						role="button"
 						tabindex="0"
+						title={cell.permanent ? 'Un-paged key — edit it on the Default page' : undefined}
 						onpointerdown={() => onKeyPointerDown(cell)}
 						onpointerup={() => onKeyPointerUp(cell)}
 						onpointerleave={() => onKeyPointerUp(cell)}
 						ondragover={(e) => e.preventDefault()}
 						ondrop={(e) => onDropImage(cell, e)}
 						ondblclick={() => {
-							if (!simulateMode) editingTextKey = cell.folder.node_id;
+							if (!simulateMode && !cell.permanent) editingTextKey = cell.folder.node_id;
 						}}>
 						{#if cell.image}
 							<img
@@ -402,6 +453,9 @@
 								alt=""
 								draggable="false"
 								onerror={(e) => ((e.currentTarget as HTMLImageElement).style.display = 'none')} />
+						{/if}
+						{#if cell.permanent}
+							<span class="sd-key-lock" title="Un-paged (permanent)">🔒</span>
 						{/if}
 						{#if editingTextKey === cell.folder.node_id}
 							<input
