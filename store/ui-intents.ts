@@ -189,6 +189,7 @@ export const sendCreateUserItemIntent = async (
 interface CreateUserItemOptions {
 	initial_params?: UiCreateUserItemInitialParam[];
 	select_when_created?: boolean;
+	created_node_type?: string;
 }
 
 const waitForCreatedDirectChild = async (
@@ -243,7 +244,11 @@ export const sendCreateUserItemByTypeIntent = async (
 	}
 	return {
 		success: true,
-		createdNodeId: await waitForCreatedDirectChild(parent, knownChildren, node_type),
+		createdNodeId: await waitForCreatedDirectChild(
+			parent,
+			knownChildren,
+			options?.created_node_type ?? node_type
+		),
 		selectWhenCreated: options?.select_when_created ?? true
 	};
 };

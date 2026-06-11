@@ -9,13 +9,15 @@
 
 	let {
 		node,
+		items,
 		onCreateItem
 	}: {
 		node: UiNodeDto;
+		items?: readonly UiCreatableUserItem[];
 		onCreateItem?: (item: UiCreatableUserItem) => void | Promise<void>;
 	} = $props();
 
-	let creatableItems = $derived(node.creatable_user_items ?? []);
+	let creatableItems = $derived(items ?? node.creatable_user_items ?? []);
 	let canCreateItems = $derived(creatableItems.length > 0);
 	let showsContextMenu = $derived(creatableItems.length > 1);
 

@@ -11,7 +11,9 @@ import {
 import type { SelectionMode } from './types';
 
 interface NodeClipboardEntry {
+	sourceId: NodeId;
 	node_type: string;
+	itemKind: string;
 	label: string;
 }
 
@@ -55,12 +57,26 @@ export const createWorkbenchCommandSuite = (
 
 	const isFolderNode = (node: UiNodeDto): boolean => node.node_type === 'folder';
 
+	const isContainerNode = (node: UiNodeDto): boolean =>
+		isFolderNode(node) || node.accepted_user_item_kinds.length > 0;
+
 	const canParentCreateNodeType = (parentId: NodeId, nodeType: string): boolean => {
 		const parent = options.graph.state.nodesById.get(parentId);
 		if (!parent) {
 			return false;
 		}
 		return parent.creatable_user_items.some((item) => item.node_type === nodeType);
+	};
+
+	const canParentAcceptItemKind = (parentId: NodeId, itemKind: string): boolean => {
+		const parent = options.graph.state.nodesById.get(parentId);
+		if (!parent) {
+			return false;
+		}
+		return (
+			parent.accepted_user_item_kinds.includes('*') ||
+			parent.accepted_user_item_kinds.includes(itemKind)
+		);
 	};
 
 	const nextLabelInParent = (parentId: NodeId, baseLabel: string): string => {
@@ -221,7 +237,9 @@ export const createWorkbenchCommandSuite = (
 			return false;
 		}
 		nodeClipboard = selected.map((node) => ({
+			sourceId: node.node_id,
 			node_type: node.node_type,
+			itemKind: node.user_item_kind,
 			label: node.meta.label.trim().length > 0 ? node.meta.label.trim() : node.node_type
 		}));
 		return true;
@@ -265,7 +283,7 @@ export const createWorkbenchCommandSuite = (
 			if (!source.meta.user_permissions.can_remove_and_duplicate) {
 				continue;
 			}
-			if (!canParentCreateNodeType(parentId, source.node_type)) {
+			if (!canParentAcceptItemKind(parentId, source.user_item_kind)) {
 				continue;
 			}
 
@@ -313,7 +331,7 @@ export const createWorkbenchCommandSuite = (
 
 		let targetParentId: NodeId | undefined;
 		let insertAfterNodeId: NodeId | null = null;
-		if (isFolderNode(anchorNode)) {
+		if (isContainerNode(anchorNode)) {
 			targetParentId = anchorNode.node_id;
 		} else {
 			targetParentId = options.graph.state.parentById.get(anchorNode.node_id);
@@ -325,16 +343,31 @@ export const createWorkbenchCommandSuite = (
 
 		const createdNodeIds: NodeId[] = [];
 		for (const entry of nodeClipboard) {
-			if (!canParentCreateNodeType(targetParentId, entry.node_type)) {
-				continue;
-			}
 			const label = nextLabelInParent(targetParentId, entry.label);
-			const createdNodeId = await createNodeUnderParent(
-				targetParentId,
-				entry.node_type,
-				label,
-				insertAfterNodeId
-			);
+			const source = options.graph.state.nodesById.get(entry.sourceId);
+			let createdNodeId: NodeId | null = null;
+			if (source && canParentAcceptItemKind(targetParentId, entry.itemKind)) {
+				const parentBefore = options.graph.state.nodesById.get(targetParentId);
+				if (!parentBefore) {
+					continue;
+				}
+				const knownChildren = new Set(parentBefore.children);
+				await options.sendIntent({
+					kind: 'duplicateNode',
+					source: source.node_id,
+					new_parent: targetParentId,
+					new_prev_sibling: insertAfterNodeId ?? undefined,
+					label
+				});
+				createdNodeId = await waitForCreatedChildLabel(targetParentId, knownChildren, label);
+			} else if (canParentCreateNodeType(targetParentId, entry.node_type)) {
+				createdNodeId = await createNodeUnderParent(
+					targetParentId,
+					entry.node_type,
+					label,
+					insertAfterNodeId
+				);
+			}
 			if (createdNodeId === null) {
 				continue;
 			}
