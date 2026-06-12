@@ -115,7 +115,7 @@ const collectMovedSubtree = (
 	};
 };
 
-const isContainerNode = (node: UiNodeDto | null): boolean => {
+const isContainerNode = (node: UiNodeDto | null): node is UiNodeDto => {
 	if (!node) {
 		return false;
 	}
@@ -138,6 +138,14 @@ const nearestContainerAncestor = (
 		current = graphState?.parentById.get(current);
 	}
 	return null;
+};
+
+const nearestContainerAncestorOfParent = (
+	graphState: GraphState | null,
+	nodeId: NodeId
+): NodeId | null => {
+	const parentId = currentParentIdForNode(graphState, nodeId);
+	return parentId === null ? null : nearestContainerAncestor(graphState, parentId);
 };
 
 const containerAcceptsMovedRoot = (
@@ -163,31 +171,19 @@ const parentAcceptsMovedNode = (
 	sourceNodeId: NodeId,
 	newParentId: NodeId
 ): boolean => {
-	const currentParentId = currentParentIdForNode(graphState, sourceNodeId);
-	if (currentParentId === newParentId) {
-		return true;
-	}
-
 	const movedSubtree = collectMovedSubtree(graphState, sourceNodeId);
 	if (movedSubtree.itemRoots.length === 0) {
-		return true;
-	}
-
-	// Mirror engine move validation: only item roots whose owning container changes
-	// should be revalidated against the destination container.
-	const targetContainerId = nearestContainerAncestor(graphState, newParentId);
-	if (targetContainerId === null) {
 		return false;
 	}
-	const targetContainer = getNode(graphState, targetContainerId);
-	if (!targetContainer) {
+
+	const targetContainer = getNode(graphState, newParentId);
+	if (!isContainerNode(targetContainer)) {
 		return false;
 	}
 
 	return movedSubtree.itemRoots.every((movedRoot) => {
-		const oldContainerId = nearestContainerAncestor(graphState, movedRoot.nodeId);
-		const containerChanges =
-			oldContainerId === null ? true : !movedSubtree.nodeIds.has(oldContainerId);
+		const oldContainerId = nearestContainerAncestorOfParent(graphState, movedRoot.nodeId);
+		const containerChanges = oldContainerId === null || !movedSubtree.nodeIds.has(oldContainerId);
 		if (!containerChanges) {
 			return true;
 		}
@@ -243,7 +239,7 @@ export const canDragOutlinerNode = (
 	if (graphState.rootId === node.node_id) {
 		return false;
 	}
-	return node.meta.user_permissions.can_remove_and_duplicate;
+	return node.user_role === 'itemRoot' && node.meta.user_permissions.can_remove_and_duplicate;
 };
 
 export const resolveOutlinerDropTarget = (
