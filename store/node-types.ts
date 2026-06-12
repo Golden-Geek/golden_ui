@@ -17,6 +17,7 @@ import parameterVec3Icon from '../style/icons/parameter/vec3.svg';
 import parameterReferenceIcon from '../style/icons/parameter/reference.svg';
 import parameterFileIcon from '../style/icons/parameter/file.svg';
 import curveKeyIcon from '../style/icons/node/curve/key.svg';
+import dashboardIcon from '../style/icons/node/dashboard.svg';
 
 const detectedNodeIconModules = import.meta.glob('../../assets/icons/nodes/*.{svg,png}', {
 	eager: true,
@@ -70,7 +71,8 @@ const defaultNodeIcons: ResolvedNodeIconSet = {
 		animation_curve_range: animationControlIcon,
 		animation_curve_key: curveKeyIcon,
 		animation_curve_easing: animationControlIcon,
-		parameter_animation_control: animationControlIcon
+		parameter_animation_control: animationControlIcon,
+		dashboard: dashboardIcon
 	},
 	parameterKinds: {
 		bool: parameterBoolIcon,

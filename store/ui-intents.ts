@@ -7,12 +7,33 @@ import type {
 	ParamValue,
 	UiCreateUserItemInitialParam,
 	UiEditIntent,
+	UiNodeDto,
 	UiNodeMetaDto,
 	UiParamConstraints,
 	UiParameterControlState,
 	UiScriptConfig
 } from '../types';
 import { appState } from './workbench.svelte';
+
+const makeUniqueChildLabel = (
+	parent: NodeId,
+	baseLabel: string,
+	nodesById: ReadonlyMap<NodeId, UiNodeDto>
+): string => {
+	const parentNode = nodesById.get(parent);
+	if (!parentNode) return baseLabel;
+	const siblingLabels = new Set(
+		parentNode.children
+			.map((childId) => nodesById.get(childId)?.meta.label)
+			.filter((label): label is string => label !== undefined)
+	);
+	if (!siblingLabels.has(baseLabel)) return baseLabel;
+	let counter = 2;
+	while (siblingLabels.has(`${baseLabel} ${counter}`)) {
+		counter++;
+	}
+	return `${baseLabel} ${counter}`;
+};
 
 let intentSequence = 0;
 
@@ -227,12 +248,15 @@ export const sendCreateUserItemByTypeIntent = async (
 	options?: CreateUserItemOptions
 ): Promise<CreateUserItemResult> => {
 	const session = appState.session;
+	const nodesById = session?.graph.state.nodesById;
+	const uniqueLabel =
+		label !== undefined && nodesById ? makeUniqueChildLabel(parent, label, nodesById) : label;
 	const knownChildren = new Set(session?.graph.state.nodesById.get(parent)?.children ?? []);
 	const success = await sendUiIntent({
 		kind: 'createUserItem',
 		parent,
 		node_type,
-		label,
+		label: uniqueLabel,
 		initial_params: options?.initial_params
 	});
 	if (!success) {

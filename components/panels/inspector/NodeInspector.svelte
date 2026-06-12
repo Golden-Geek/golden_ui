@@ -112,7 +112,7 @@
 	);
 	let collapsedOverride = $state<boolean | null>(null);
 	let collapsedOverrideNodeId = $state<NodeId | null>(null);
-	let collapsed = $derived(collapsedOverride ?? defaultCollapsed);
+	let collapsed = $derived(isRoot ? false : (collapsedOverride ?? defaultCollapsed));
 
 	let titleTextElem: HTMLSpanElement | null = $state(null as HTMLSpanElement | null);
 	let enableButtonElem: HTMLDivElement | null = $state(null as HTMLDivElement | null);
@@ -178,12 +178,30 @@
 		renamingState.isRenaming = false;
 	};
 
+	const persistCollapsed = (target: UiNodeDto, nextCollapsed: boolean): void => {
+		void sendPatchMetaIntent(target.node_id, {
+			presentation: {
+				...(target.meta.presentation ?? {}),
+				collapsed: nextCollapsed
+			}
+		});
+	};
+
 	const toggleCollapsed = (): void => {
-		collapsedOverride = !collapsed;
+		if (isRoot) {
+			return;
+		}
+		setCollapsed(!collapsed);
 	};
 
 	const setCollapsed = (nextCollapsed: boolean): void => {
+		if (isRoot) {
+			return;
+		}
 		collapsedOverride = nextCollapsed;
+		if (node) {
+			persistCollapsed(node, nextCollapsed);
+		}
 	};
 
 	const handlePointerEnter = (): void => {

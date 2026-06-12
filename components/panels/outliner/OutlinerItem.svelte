@@ -11,6 +11,12 @@
 	import Arrow from '../../common/Arrow.svelte';
 	import type { OutlinerDropTarget } from './drag-drop';
 	import { resolveOutlinerRowSupplement } from './outliner-row-registry';
+	import { sendPatchMetaIntent } from '../../../store/ui-intents';
+
+	const focusOnMount = (el: HTMLInputElement): void => {
+		el.focus();
+		el.select();
+	};
 
 	const EMPTY_AUTO_EXPAND_ANCESTORS: ReadonlySet<NodeId> = new Set<NodeId>();
 
@@ -114,7 +120,7 @@
 	};
 
 	let localIsExpanded = $state(false);
-	let localExpansionNodeId = $state<NodeId | null>(null);
+	let localExpansionKey = $state<string | null>(null);
 
 	$effect.pre(() => {
 		if (opennessByNodeId !== null) {
@@ -123,17 +129,27 @@
 		const nodeId = node?.node_id ?? null;
 		if (nodeId === null) {
 			localIsExpanded = false;
-			localExpansionNodeId = null;
+			localExpansionKey = null;
 			return;
 		}
-		if (localExpansionNodeId === nodeId) {
+		const key = `${nodeId}:${node?.meta.presentation?.collapsed === true ? 'collapsed' : 'open'}:${level}:${initiallyExpandedDepth}`;
+		if (localExpansionKey === key) {
 			return;
 		}
 		localIsExpanded = defaultExpandedForNode(node);
-		localExpansionNodeId = nodeId;
+		localExpansionKey = key;
 	});
 
-	const setExpanded = (nextExpanded: boolean): void => {
+	const persistNodeCollapsed = (target: UiNodeDto, nextCollapsed: boolean): void => {
+		void sendPatchMetaIntent(target.node_id, {
+			presentation: {
+				...(target.meta.presentation ?? {}),
+				collapsed: nextCollapsed
+			}
+		});
+	};
+
+	const setExpanded = (nextExpanded: boolean, persist = true): void => {
 		if (node === null) {
 			return;
 		}
@@ -145,6 +161,9 @@
 			return;
 		}
 		localIsExpanded = nextExpanded;
+		if (persist) {
+			persistNodeCollapsed(node, !nextExpanded);
+		}
 	};
 
 	let isExpanded = $derived.by(() => {
@@ -172,7 +191,7 @@
 		if (localIsExpanded) {
 			return;
 		}
-		setExpanded(true);
+		setExpanded(true, false);
 	});
 
 	let isSelected = $derived(session?.isNodeSelected(node?.node_id ?? -1) ?? false);
@@ -260,6 +279,28 @@
 		rowHovered = false;
 	};
 
+	let isRenamingLabel = $state(false);
+	let pendingRenameLabel = $state('');
+
+	const startRename = (): void => {
+		if (!node?.meta.user_permissions.can_edit_name) return;
+		pendingRenameLabel = node.meta.label;
+		isRenamingLabel = true;
+	};
+
+	const commitRename = async (): Promise<void> => {
+		if (!isRenamingLabel || !node) return;
+		isRenamingLabel = false;
+		const trimmed = pendingRenameLabel.trim();
+		if (trimmed.length > 0 && trimmed !== node.meta.label) {
+			await sendPatchMetaIntent(node.node_id, { label: trimmed });
+		}
+	};
+
+	const cancelRename = (): void => {
+		isRenamingLabel = false;
+	};
+
 	$effect(() => {
 		if (!rowHovered || !node) {
 			untrack(() => {
@@ -311,29 +352,50 @@
 				{/if}
 				<img class="outliner-item-icon" src={iconURL} alt="" aria-hidden="true" />
 
-				<button
-					class="outliner-item-label"
-					class:draggable={rowDraggable}
-					class:non-selectable={!rowSelectable}
-					draggable={rowDraggable}
-					type="button"
-					disabled={!rowSelectable}
-					ondragstart={(event) => {
-						if (node.data.kind === 'parameter') {
-							beginDashboardParameterDrag(event, node);
-						} else {
-							beginDashboardNodeDrag(event, node);
-						}
-						if (rowMoveDraggable) {
-							onNodeDragStart?.(node, event);
-						}
-					}}
-					ondragend={(event) => {
-						if (rowMoveDraggable) {
-							onNodeDragEnd?.(node, event);
-						}
-					}}
-					onclick={(event) => selectNode(node, event)}>{meta?.label ?? ''}</button>
+				{#if isRenamingLabel}
+					<input
+						class="outliner-item-rename-input"
+						type="text"
+						bind:value={pendingRenameLabel}
+						use:focusOnMount
+						onblur={() => void commitRename()}
+						onkeydown={(event) => {
+							if (event.key === 'Enter') {
+								event.preventDefault();
+								void commitRename();
+							}
+							if (event.key === 'Escape') {
+								event.preventDefault();
+								cancelRename();
+							}
+						}}
+						onclick={(event) => event.stopPropagation()} />
+				{:else}
+					<button
+						class="outliner-item-label"
+						class:draggable={rowDraggable}
+						class:non-selectable={!rowSelectable}
+						draggable={rowDraggable}
+						type="button"
+						disabled={!rowSelectable}
+						ondragstart={(event) => {
+							if (node.data.kind === 'parameter') {
+								beginDashboardParameterDrag(event, node);
+							} else {
+								beginDashboardNodeDrag(event, node);
+							}
+							if (rowMoveDraggable) {
+								onNodeDragStart?.(node, event);
+							}
+						}}
+						ondragend={(event) => {
+							if (rowMoveDraggable) {
+								onNodeDragEnd?.(node, event);
+							}
+						}}
+						onclick={(event) => selectNode(node, event)}
+						ondblclick={() => startRename()}>{meta?.label ?? ''}</button>
+				{/if}
 				<NodeWarningBadge {warnings} />
 
 				{#if ResolvedRowSupplementComponent}
@@ -500,5 +562,17 @@
 	.outliner-children {
 		padding-left: 0.7rem;
 		border-left: 0.025rem dashed var(--node-accent-color);
+	}
+
+	.outliner-item-rename-input {
+		flex: 1 1 auto;
+		min-width: 0;
+		font: inherit;
+		color: var(--gc-color-text);
+		background: var(--gc-color-bg-elevated, rgba(255, 255, 255, 0.08));
+		border: solid 1px rgba(from var(--gc-color-selection) r g b / 0.6);
+		border-radius: 0.3rem;
+		padding: 0.1rem 0.2rem;
+		outline: none;
 	}
 </style>

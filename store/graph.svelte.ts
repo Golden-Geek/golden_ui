@@ -464,6 +464,17 @@ const reduceEventInPlace = (
 					break;
 				}
 				state.requiresResync = true;
+			} else if (
+				event.kind.topic === 'state_processor_manager_items_changed' &&
+				event.kind.origin !== undefined
+			) {
+				const managerNode = state.nodesById.get(event.kind.origin);
+				if (managerNode && Array.isArray(event.kind.payload)) {
+					state.nodesById.set(event.kind.origin, {
+						...managerNode,
+						creatable_user_items: event.kind.payload as import('../types').UiCreatableUserItem[]
+					});
+				}
 			}
 			break;
 		}
