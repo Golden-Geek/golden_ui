@@ -178,20 +178,26 @@
 	});
 
 	$effect(() => {
-		if (node === null || !autoExpandAncestorNodeIds.has(node.node_id)) {
+		if (node === null) {
 			return;
 		}
-		if (opennessByNodeId !== null) {
-			if (explicitExpandedForNode(node) === true) {
+		const shouldAutoExpand = autoExpandAncestorNodeIds.has(node.node_id);
+		if (!shouldAutoExpand) {
+			return;
+		}
+		untrack(() => {
+			if (opennessByNodeId !== null) {
+				if (explicitExpandedForNode(node) === true) {
+					return;
+				}
+				setExpanded(true);
 				return;
 			}
-			setExpanded(true);
-			return;
-		}
-		if (localIsExpanded) {
-			return;
-		}
-		setExpanded(true, false);
+			if (localIsExpanded) {
+				return;
+			}
+			setExpanded(true, false);
+		});
 	});
 
 	let isSelected = $derived(session?.isNodeSelected(node?.node_id ?? -1) ?? false);
