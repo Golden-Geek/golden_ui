@@ -56,11 +56,19 @@
 	let menuTreeDiv: HTMLDivElement | null = $state(null);
 	let colorSubMenuDiv: HTMLDivElement | null = $state(null);
 	let colorAnchorElement: HTMLElement | null = $state(null);
+	let rangeSubMenuDiv: HTMLDivElement | null = $state(null);
+	let rangeAnchorElement: HTMLElement | null = $state(null);
+	let optionsSubMenuDiv: HTMLDivElement | null = $state(null);
+	let optionsAnchorElement: HTMLElement | null = $state(null);
 
-	let colorSubMenu = $state({
-		open: false
-	});
+	let colorSubMenu = $state({ open: false });
 	let isColorEditing = $state(false);
+	let rangeSubMenu = $state({ open: false });
+	let rangeDraft = $state({ min: '', max: '' });
+	let rangeTargetNodeId: NodeId | null = $state(null);
+	let optionsSubMenu = $state({ open: false });
+	let optionsDraft = $state('');
+	let optionsTargetNodeId: NodeId | null = $state(null);
 
 	const closeColorSubMenu = (): void => {
 		colorSubMenu.open = false;
@@ -68,8 +76,22 @@
 		isColorEditing = false;
 	};
 
+	const closeRangeSubMenu = (): void => {
+		rangeSubMenu.open = false;
+		rangeAnchorElement = null;
+		rangeTargetNodeId = null;
+	};
+
+	const closeOptionsSubMenu = (): void => {
+		optionsSubMenu.open = false;
+		optionsAnchorElement = null;
+		optionsTargetNodeId = null;
+	};
+
 	const closeMenu = (): void => {
 		closeColorSubMenu();
+		closeRangeSubMenu();
+		closeOptionsSubMenu();
 		closeNodeContextMenu();
 	};
 
@@ -143,6 +165,95 @@
 				}
 			};
 		};
+	};
+
+	const positionSubPanel = (
+		panelDiv: HTMLDivElement | null,
+		anchorEl: HTMLElement | null
+	): void => {
+		if (!panelDiv || !anchorEl) return;
+		const anchorRect = anchorEl.getBoundingClientRect();
+		const desiredLeft = anchorRect.right + remToPx(0.35);
+		const desiredTop = anchorRect.top;
+		applyPanelPosition(panelDiv, desiredLeft, desiredTop);
+	};
+
+	const captureSubPanelContainer = (
+		setter: (div: HTMLDivElement | null) => void,
+		anchorGetter: () => HTMLElement | null
+	) => {
+		return (node: HTMLDivElement) => {
+			setter(node);
+			const raf = requestAnimationFrame(() => positionSubPanel(node, anchorGetter()));
+			return () => {
+				cancelAnimationFrame(raf);
+				setter(null);
+			};
+		};
+	};
+
+	const openRangeSubMenu = (event: MouseEvent, nodeId: NodeId, constraints: UiParamConstraints): void => {
+		rangeTargetNodeId = nodeId;
+		if (constraints.range?.kind === 'uniform') {
+			rangeDraft.min = constraints.range.min !== undefined ? String(constraints.range.min) : '';
+			rangeDraft.max = constraints.range.max !== undefined ? String(constraints.range.max) : '';
+		} else {
+			rangeDraft.min = '';
+			rangeDraft.max = '';
+		}
+		rangeAnchorElement = event.currentTarget as HTMLElement;
+		rangeSubMenu.open = true;
+		queueMicrotask(() => positionSubPanel(rangeSubMenuDiv, rangeAnchorElement));
+	};
+
+	const applyRange = (): void => {
+		if (rangeTargetNodeId === null) return;
+		const minRaw = rangeDraft.min.trim();
+		const maxRaw = rangeDraft.max.trim();
+		const min = minRaw !== '' ? Number(minRaw) : undefined;
+		const max = maxRaw !== '' ? Number(maxRaw) : undefined;
+		if (min !== undefined && !Number.isFinite(min)) return;
+		if (max !== undefined && !Number.isFinite(max)) return;
+		updateNodeConstraints(rangeTargetNodeId, (draft) => {
+			draft.range = min !== undefined || max !== undefined ? { kind: 'uniform', min, max } : undefined;
+		});
+		closeMenu();
+	};
+
+	const parseEnumOptions = (text: string): import('../../types').ParamEnumOption[] => {
+		const lines = text.split('\n').map((l) => l.trim()).filter((l) => l.length > 0);
+		if (lines.length === 0) {
+			return [{ variant_id: 'option', value: { kind: 'enum', value: 'option' }, label: 'Option', tags: [] }];
+		}
+		return lines.map((line) => {
+			const eqIdx = line.indexOf('=');
+			if (eqIdx !== -1) {
+				const label = line.slice(0, eqIdx).trim();
+				const valueId = line.slice(eqIdx + 1).trim() || label;
+				return { variant_id: valueId, value: { kind: 'enum' as const, value: valueId }, label, tags: [] };
+			}
+			return { variant_id: line, value: { kind: 'enum' as const, value: line }, label: line, tags: [] };
+		});
+	};
+
+	const openOptionsSubMenu = (event: MouseEvent, nodeId: NodeId, constraints: UiParamConstraints): void => {
+		optionsTargetNodeId = nodeId;
+		const opts = constraints.enum_options ?? [];
+		optionsDraft = opts
+			.map((opt) => (opt.variant_id !== opt.label ? `${opt.label}=${opt.variant_id}` : opt.label))
+			.join('\n');
+		optionsAnchorElement = event.currentTarget as HTMLElement;
+		optionsSubMenu.open = true;
+		queueMicrotask(() => positionSubPanel(optionsSubMenuDiv, optionsAnchorElement));
+	};
+
+	const applyOptions = (): void => {
+		if (optionsTargetNodeId === null) return;
+		const options = parseEnumOptions(optionsDraft);
+		updateNodeConstraints(optionsTargetNodeId, (draft) => {
+			draft.enum_options = options;
+		});
+		closeMenu();
 	};
 
 	const captureMenuTree = (node: HTMLDivElement | null): void => {
@@ -403,8 +514,24 @@
 		const paramKind = node.data.param.value.kind;
 		const constraints = node.data.param.constraints;
 		const supportsNumericConstraints = isNumericConstraintKind(paramKind);
+		const isEnumKind = paramKind === 'enum';
 		const stepPresets = paramKind === 'int' ? integerStepPresets : fractionalStepPresets;
 		const items: ContextMenuItem[] = [];
+
+		if (isEnumKind) {
+			items.push({
+				id: 'constraint-enum-options',
+				label: 'Set Options...',
+				className: optionsSubMenu.open ? 'gc-node-context-item-open' : '',
+				action: (event) => {
+					if (optionsSubMenu.open) {
+						closeOptionsSubMenu();
+					} else {
+						openOptionsSubMenu(event, node.node_id, constraints);
+					}
+				}
+			});
+		}
 
 		if (supportsNumericConstraints) {
 			items.push({
@@ -427,6 +554,19 @@
 							});
 						}
 					})),
+					{ separator: true },
+					{
+						id: 'constraint-range-custom',
+						label: 'Custom Range...',
+						className: rangeSubMenu.open ? 'gc-node-context-item-open' : '',
+						action: (event) => {
+							if (rangeSubMenu.open) {
+								closeRangeSubMenu();
+							} else {
+								openRangeSubMenu(event, node.node_id, constraints);
+							}
+						}
+					},
 					{ separator: true },
 					{
 						id: 'constraint-range-clear',
@@ -887,6 +1027,8 @@
 	let showColorSubMenu = $derived(
 		showMenu && colorSubMenu.open && canSetColor && colorAnchorElement !== null
 	);
+	let showRangeSubMenu = $derived(showMenu && rangeSubMenu.open && rangeAnchorElement !== null);
+	let showOptionsSubMenu = $derived(showMenu && optionsSubMenu.open && optionsAnchorElement !== null);
 
 	$effect(() => {
 		if (contextNodeId === null) {
@@ -913,6 +1055,20 @@
 	});
 
 	$effect(() => {
+		if (showMenu || !rangeSubMenu.open) {
+			return;
+		}
+		closeRangeSubMenu();
+	});
+
+	$effect(() => {
+		if (showMenu || !optionsSubMenu.open) {
+			return;
+		}
+		closeOptionsSubMenu();
+	});
+
+	$effect(() => {
 		if (!showColorSubMenu) {
 			return;
 		}
@@ -926,7 +1082,7 @@
 	open={showMenu}
 	items={menuItems}
 	anchor={menuAnchor}
-	insideElements={[menuTreeDiv, colorSubMenuDiv]}
+	insideElements={[menuTreeDiv, colorSubMenuDiv, rangeSubMenuDiv, optionsSubMenuDiv]}
 	closeOnContextMenuOutside={false}
 	closeOnSelect={false}
 	minWidthRem={12}
@@ -955,6 +1111,53 @@
 	</div>
 {/if}
 
+{#if showRangeSubMenu}
+	<div
+		class="gc-node-context-side-panel"
+		{@attach captureSubPanelContainer((d) => { rangeSubMenuDiv = d; }, () => rangeAnchorElement)}
+		transition:slide={{ axis: 'x', duration: 150 }}>
+		<div class="gc-constraint-editor">
+			<div class="gc-constraint-editor-title">Custom Range</div>
+			<label class="gc-constraint-editor-field">
+				<span>Min</span>
+				<input
+					type="number"
+					placeholder="none"
+					bind:value={rangeDraft.min}
+					onkeydown={(e) => { if (e.key === 'Enter') applyRange(); }} />
+			</label>
+			<label class="gc-constraint-editor-field">
+				<span>Max</span>
+				<input
+					type="number"
+					placeholder="none"
+					bind:value={rangeDraft.max}
+					onkeydown={(e) => { if (e.key === 'Enter') applyRange(); }} />
+			</label>
+			<button class="gc-constraint-editor-apply" onclick={applyRange}>Apply</button>
+		</div>
+	</div>
+{/if}
+
+{#if showOptionsSubMenu}
+	<div
+		class="gc-node-context-side-panel"
+		{@attach captureSubPanelContainer((d) => { optionsSubMenuDiv = d; }, () => optionsAnchorElement)}
+		transition:slide={{ axis: 'x', duration: 150 }}>
+		<div class="gc-constraint-editor">
+			<div class="gc-constraint-editor-title">Enum Options</div>
+			<div class="gc-constraint-editor-hint">One option per line. Use Label=value for a custom id.</div>
+			<textarea
+				class="gc-constraint-editor-textarea"
+				rows={6}
+				placeholder={'Option 1\nOption 2=value2'}
+				bind:value={optionsDraft}
+				onkeydown={(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) applyOptions(); }}></textarea>
+			<button class="gc-constraint-editor-apply" onclick={applyOptions}>Apply</button>
+		</div>
+	</div>
+{/if}
+
 <style>
 	:global(.gc-node-context-menu) {
 		min-inline-size: 12rem;
@@ -973,5 +1176,104 @@
 		min-inline-size: 16rem;
 		max-inline-size: min(24rem, 42vw);
 		z-index: 1301;
+	}
+
+	.gc-node-context-side-panel {
+		position: fixed;
+		z-index: 1301;
+		background: var(--gc-color-surface-2, #1e1e1e);
+		border: 1px solid var(--gc-color-border, #444);
+		border-radius: 0.4rem;
+		box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+		overflow: hidden;
+	}
+
+	.gc-constraint-editor {
+		display: flex;
+		flex-direction: column;
+		gap: 0.5rem;
+		padding: 0.65rem 0.75rem;
+		min-inline-size: 13rem;
+	}
+
+	.gc-constraint-editor-title {
+		font-size: 0.72rem;
+		font-weight: 600;
+		color: var(--gc-color-text-secondary, #aaa);
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+		margin-block-end: 0.1rem;
+	}
+
+	.gc-constraint-editor-hint {
+		font-size: 0.68rem;
+		color: var(--gc-color-text-secondary, #888);
+		line-height: 1.3;
+	}
+
+	.gc-constraint-editor-field {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		font-size: 0.75rem;
+
+		span {
+			flex: 0 0 2.5rem;
+			color: var(--gc-color-text-secondary, #aaa);
+		}
+
+		input {
+			flex: 1;
+			background: var(--gc-color-surface-1, #141414);
+			border: 1px solid var(--gc-color-border, #444);
+			border-radius: 0.25rem;
+			color: var(--gc-color-text, #eee);
+			font: inherit;
+			font-size: 0.75rem;
+			padding: 0.22rem 0.4rem;
+			outline: none;
+			min-inline-size: 0;
+
+			&:focus {
+				border-color: var(--gc-color-accent, #6c8ebf);
+			}
+		}
+	}
+
+	.gc-constraint-editor-textarea {
+		resize: vertical;
+		background: var(--gc-color-surface-1, #141414);
+		border: 1px solid var(--gc-color-border, #444);
+		border-radius: 0.25rem;
+		color: var(--gc-color-text, #eee);
+		font: inherit;
+		font-size: 0.75rem;
+		padding: 0.3rem 0.4rem;
+		outline: none;
+		min-inline-size: 0;
+		width: 100%;
+		box-sizing: border-box;
+		font-family: monospace;
+
+		&:focus {
+			border-color: var(--gc-color-accent, #6c8ebf);
+		}
+	}
+
+	.gc-constraint-editor-apply {
+		align-self: flex-end;
+		background: var(--gc-color-accent, #6c8ebf);
+		border: none;
+		border-radius: 0.25rem;
+		color: white;
+		cursor: pointer;
+		font: inherit;
+		font-size: 0.72rem;
+		font-weight: 600;
+		padding: 0.25rem 0.75rem;
+
+		&:hover {
+			filter: brightness(1.15);
+		}
 	}
 </style>
