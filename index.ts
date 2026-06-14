@@ -27,6 +27,7 @@ export { default as DashboardRoute } from './components/routes/DashboardRoute.sv
 export { default as DashboardPageRoute } from './components/routes/DashboardPageRoute.svelte';
 export { default as Watcher } from './components/common/Watcher.svelte';
 export { default as ContextMenu } from './components/common/ContextMenu.svelte';
+export { default as EnableButton } from './components/common/EnableButton.svelte';
 export { default as NodeAddButton } from './components/common/NodeAddButton.svelte';
 export {
 	normalizeContextMenuItems,
@@ -66,6 +67,8 @@ export {
 	type OutlinerRowSupplementRegistry
 } from './components/panels/outliner/outliner-row-registry';
 export { default as Inspector } from './components/panels/inspector/InspectorPanel.svelte';
+export { resolveParameterEditor } from './components/panels/inspector/inspector.svelte';
+export { default as DropdownEditor } from './components/panels/inspector/parameters/DropdownEditor.svelte';
 export { default as LoggerPanel } from './components/panels/logger/LoggerPanel.svelte';
 export { default as WarningsPanel } from './components/panels/warnings/WarningsPanel.svelte';
 export { default as DashboardPanel } from './components/panels/dashboard/DashboardPanel.svelte';
