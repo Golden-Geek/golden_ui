@@ -125,7 +125,7 @@
 		}
 
 		return managerNode.children
-			.map((childNodeId) => graphState.nodesById.get(childNodeId) ?? null)
+			.map((childNodeId: NodeId) => graphState.nodesById.get(childNodeId) ?? null)
 			.filter(isTreeNode);
 	});
 	let isRootDropActive = $derived(
