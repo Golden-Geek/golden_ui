@@ -329,6 +329,8 @@ export interface UiCreatableUserItem {
 	item_kind: string;
 	label: string;
 	menu_path: string[];
+	menu_path_colors?: string[];
+	color?: string;
 	select_when_created: boolean;
 }
 

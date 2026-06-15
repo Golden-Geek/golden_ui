@@ -373,12 +373,27 @@
 		block-size: 100%;
 		height: 100%;
 		align-items: stretch;
-		gap: 0.4rem;
+		gap: 0.2rem;
 	}
 
 	.number-property-container.widget-layout .slider-wrapper {
 		flex: 1 1 auto;
 		height: 100%;
+	}
+
+	/* Infinite (rangeless) numbers: keep the drag handle right next to the field
+	   instead of letting the slider wrapper grow and push them apart. Applies in
+	   the inspector (default layout) too. */
+	.number-property-container.infinite {
+		gap: 0.2rem;
+	}
+
+	.number-property-container.infinite .slider-wrapper {
+		flex: 0 0 auto;
+	}
+
+	.number-property-container.infinite .number-field {
+		margin-left: 0;
 	}
 
 	.number-property-container.field-only .number-field {
@@ -411,9 +426,9 @@
 		display: flex;
 		flex: 1 1 auto;
 		align-items: center;
-		gap: 0.45rem;
+		gap: 0.25rem;
 		min-inline-size: 0;
-		padding: 0 0.7rem;
+		padding: 0 0.45rem;
 		border-radius: 0.7rem;
 		background: rgb(from var(--gc-color-background) r g b / 0.48);
 		border: solid 0.06rem rgb(from var(--gc-color-panel-outline) r g b / 0.48);

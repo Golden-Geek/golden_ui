@@ -38,6 +38,7 @@
 		activeDragNodeId = null,
 		dropTarget = null,
 		onNodeOpennessChange = null,
+		showSessionSelection = null,
 		onSelectNode = null,
 		onNodeDragStart = null,
 		onNodeDragOver = null,
@@ -61,6 +62,7 @@
 		activeDragNodeId?: NodeId | null;
 		dropTarget?: OutlinerDropTarget | null;
 		onNodeOpennessChange?: ((nodeId: NodeId, expanded: boolean) => void) | null;
+		showSessionSelection?: boolean | null;
 		onSelectNode?: ((next: UiNodeDto, event: MouseEvent) => void) | null;
 		onNodeDragStart?: ((node: UiNodeDto, event: DragEvent) => void) | null;
 		onNodeDragOver?: ((node: UiNodeDto, event: DragEvent) => void) | null;
@@ -201,6 +203,7 @@
 	});
 
 	let isSelected = $derived(session?.isNodeSelected(node?.node_id ?? -1) ?? false);
+	let selectionHighlightEnabled = $derived(showSessionSelection ?? onSelectNode === null);
 	let hasChildren = $derived(Boolean(node?.children && node.children.length > 0));
 	let canRenderChildren = $derived(
 		hasChildren &&
@@ -331,7 +334,7 @@
 			<div
 				class="outliner-item-content"
 				role="group"
-				class:selected={!onSelectNode && isSelected}
+				class:selected={selectionHighlightEnabled && isSelected}
 				class:has-arrow={hasArrow}
 				class:current-reference={isCurrentReference}
 				class:drag-source={isDragSource}
@@ -437,6 +440,7 @@
 						{activeDragNodeId}
 						{dropTarget}
 						{onNodeOpennessChange}
+						{showSessionSelection}
 						{onSelectNode}
 						{onNodeDragStart}
 						{onNodeDragOver}

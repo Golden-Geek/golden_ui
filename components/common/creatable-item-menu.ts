@@ -10,6 +10,7 @@ interface MenuBranchEntry {
 	kind: 'branch';
 	label: string;
 	path: string[];
+	color?: string;
 	children: MenuEntry[];
 }
 
@@ -25,12 +26,14 @@ const normalizeMenuPath = (path: readonly string[] | undefined): string[] => {
 const findOrCreateBranch = (
 	entries: MenuEntry[],
 	label: string,
-	parentPath: readonly string[]
+	parentPath: readonly string[],
+	color?: string
 ): MenuBranchEntry => {
 	const existing = entries.find(
 		(entry): entry is MenuBranchEntry => entry.kind === 'branch' && entry.label === label
 	);
 	if (existing) {
+		existing.color ??= color;
 		return existing;
 	}
 
@@ -38,6 +41,7 @@ const findOrCreateBranch = (
 		kind: 'branch',
 		label,
 		path: [...parentPath, label],
+		color,
 		children: []
 	} satisfies MenuBranchEntry;
 	entries.push(branch);
@@ -51,6 +55,7 @@ const createLeafItem = (
 	id: `create:${[...normalizeMenuPath(item.menu_path), item.node_type, item.item_kind].join('/')}`,
 	label: item.label,
 	icon: getIconURLForNodeType(item.node_type, item.item_kind) ?? undefined,
+	color: item.color,
 	action: () => {
 		void onCreateItem(item);
 	}
@@ -63,6 +68,7 @@ const createBranchItem = (
 	id: `create-path:${branch.path.join('/')}`,
 	label: branch.label,
 	icon: getIconURLForCategory(branch.label) ?? undefined,
+	color: branch.color,
 	submenu: finalizeEntries(branch.children, onCreateItem)
 });
 
@@ -89,11 +95,12 @@ export const buildCreatableItemMenu = (
 
 	for (const item of items) {
 		const path = normalizeMenuPath(item.menu_path);
+		const pathColors = item.menu_path_colors ?? [];
 		let entries = rootEntries;
 		const parentPath: string[] = [];
 
-		for (const segment of path) {
-			const branch = findOrCreateBranch(entries, segment, parentPath);
+		for (const [index, segment] of path.entries()) {
+			const branch = findOrCreateBranch(entries, segment, parentPath, pathColors[index]);
 			entries = branch.children;
 			parentPath.push(segment);
 		}
