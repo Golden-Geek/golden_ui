@@ -7,6 +7,8 @@
 
 	interface NumberEditorPresentation {
 		show_value_field?: boolean;
+		show_slider?: boolean;
+		compact?: boolean;
 		max_decimals?: number;
 		inside_label?: string;
 	}
@@ -50,12 +52,14 @@
 	let isEditing = $state(false);
 	let editSession = createUiEditSession('Edit number', 'param-number');
 	const NUMERIC_EPSILON = 1e-9;
+	let forceSlider = $derived(presentation.show_slider === true && !timeWidget);
 	let fieldOnlyWidget = $derived(
-		timeWidget ||
-			widgetHint === 'text' ||
-			widgetHint === 'input' ||
-			widgetHint === 'field' ||
-			widgetHint === 'number_field'
+		!forceSlider &&
+			(timeWidget ||
+				widgetHint === 'text' ||
+				widgetHint === 'input' ||
+				widgetHint === 'field' ||
+				widgetHint === 'number_field')
 	);
 	let showSlider = $derived(!fieldOnlyWidget);
 	let showValueField = $derived(fieldOnlyWidget || presentation.show_value_field !== false);
@@ -278,6 +282,7 @@
 	class="number-property-container"
 	class:infinite={!hasRange}
 	class:field-only={!showSlider}
+	class:compact={presentation.compact === true}
 	class:widget-layout={layoutMode === 'widget'}>
 	{#if showSlider}
 		<div class="slider-wrapper">
@@ -376,6 +381,10 @@
 		gap: 0.2rem;
 	}
 
+	.number-property-container.widget-layout.compact {
+		gap: 0.18rem;
+	}
+
 	.number-property-container.widget-layout .slider-wrapper {
 		flex: 1 1 auto;
 		height: 100%;
@@ -451,6 +460,11 @@
 		margin-left: 0;
 	}
 
+	.number-property-container.widget-layout.compact .number-field {
+		inline-size: clamp(3.2rem, 38%, 4.1rem);
+		min-inline-size: 3.2rem;
+	}
+
 	.number-property-container.widget-layout .number-field.time-field {
 		inline-size: clamp(7rem, 26%, 10rem);
 		min-inline-size: 7rem;
@@ -461,10 +475,21 @@
 		justify-content: center;
 	}
 
+	.number-property-container.widget-layout.compact.infinite .slider-wrapper {
+		flex: 1 1 auto;
+		justify-content: stretch;
+	}
+
 	.number-property-container.widget-layout.infinite .number-field {
 		flex: 1 1 auto;
 		inline-size: auto;
 		min-inline-size: 4rem;
+	}
+
+	.number-property-container.widget-layout.compact.infinite .number-field {
+		flex: 0 0 auto;
+		inline-size: clamp(3.2rem, 38%, 4.1rem);
+		min-inline-size: 3.2rem;
 	}
 
 	.number-property-container.widget-layout .number-field-shell {
