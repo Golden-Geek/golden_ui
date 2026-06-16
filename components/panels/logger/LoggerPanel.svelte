@@ -122,10 +122,6 @@
 
 	const sourceLabelCache = new Map<NodeId, string>();
 	const recordDecorationsCache = new Map<number, CachedRecordDecorations>();
-	const superCollapseTotalRepeatBySignature = new Map<string, number>();
-	const superCollapseObservedRepeatByRecordId = new Map<number, number>();
-	const superCollapseObservedSignatureByRecordId = new Map<number, string>();
-	let superCollapseStatsVersion = $state(0);
 	let lastSessionRef: typeof session = null;
 
 	let copyButtonText = $state<string | null>(null);
@@ -241,26 +237,11 @@
 		return selectionRoot instanceof Node && loggerList.contains(selectionRoot);
 	};
 
-	const resetSuperCollapseStats = (): void => {
-		if (
-			superCollapseTotalRepeatBySignature.size === 0 &&
-			superCollapseObservedRepeatByRecordId.size === 0 &&
-			superCollapseObservedSignatureByRecordId.size === 0
-		) {
-			return;
-		}
-		superCollapseTotalRepeatBySignature.clear();
-		superCollapseObservedRepeatByRecordId.clear();
-		superCollapseObservedSignatureByRecordId.clear();
-		superCollapseStatsVersion += 1;
-	};
-
 	$effect(() => {
 		if (session !== lastSessionRef) {
 			lastSessionRef = session;
 			sourceLabelCache.clear();
 			recordDecorationsCache.clear();
-			resetSuperCollapseStats();
 		}
 	});
 
@@ -279,89 +260,21 @@
 		}
 	});
 
-	$effect(() => {
-		if (records.length === 0) {
-			resetSuperCollapseStats();
-			return;
-		}
-
-		let hasKnownRetainedRecord = false;
-		for (const record of records) {
-			if (superCollapseObservedRepeatByRecordId.has(record.id)) {
-				hasKnownRetainedRecord = true;
-				break;
-			}
-		}
-
-		if (!hasKnownRetainedRecord && superCollapseObservedRepeatByRecordId.size > 0) {
-			resetSuperCollapseStats();
-		}
-
-		let didUpdateStats = false;
-		const retainedSignatures = new Set<string>();
-
-		for (const record of records) {
-			const signature = collapseSignatureForRecord(record);
-			retainedSignatures.add(signature);
-
-			const repeatCount = repeatCountForRecord(record);
-			const previousRepeat = superCollapseObservedRepeatByRecordId.get(record.id);
-			const previousSignature = superCollapseObservedSignatureByRecordId.get(record.id);
-
-			if (previousRepeat === undefined || previousSignature === undefined) {
-				const currentTotal = superCollapseTotalRepeatBySignature.get(signature) ?? 0;
-				superCollapseTotalRepeatBySignature.set(signature, currentTotal + repeatCount);
-				didUpdateStats = true;
-			} else if (previousSignature === signature && repeatCount > previousRepeat) {
-				const increment = repeatCount - previousRepeat;
-				const currentTotal = superCollapseTotalRepeatBySignature.get(signature) ?? 0;
-				superCollapseTotalRepeatBySignature.set(signature, currentTotal + increment);
-				didUpdateStats = true;
-			}
-
-			superCollapseObservedRepeatByRecordId.set(record.id, repeatCount);
-			superCollapseObservedSignatureByRecordId.set(record.id, signature);
-		}
-
-		const retainedIds = new Set(records.map((record) => record.id));
-		for (const observedId of [...superCollapseObservedRepeatByRecordId.keys()]) {
-			if (retainedIds.has(observedId)) {
-				continue;
-			}
-			superCollapseObservedRepeatByRecordId.delete(observedId);
-			superCollapseObservedSignatureByRecordId.delete(observedId);
-		}
-
-		for (const signature of superCollapseTotalRepeatBySignature.keys()) {
-			if (retainedSignatures.has(signature)) {
-				continue;
-			}
-			superCollapseTotalRepeatBySignature.delete(signature);
-			didUpdateStats = true;
-		}
-
-		if (didUpdateStats) {
-			superCollapseStatsVersion += 1;
-		}
-	});
-
 	let displayedEntriesResult = $derived.by<DisplayedEntriesResult>(() => {
 		const renderLimit = effectiveRenderLimit;
 		if (collapseDuplicates) {
 			if (collapseAllDuplicates) {
-				void superCollapseStatsVersion;
 				const groupsBySignature = new Map<string, CollapsedGroup>();
 
 				for (let recordIndex = 0; recordIndex < records.length; recordIndex += 1) {
 					const record = records[recordIndex];
 					const signature = collapseSignatureForRecord(record);
-					const repeatCount =
-						superCollapseTotalRepeatBySignature.get(signature) ?? repeatCountForRecord(record);
+					const repeatCount = repeatCountForRecord(record);
 					const existing = groupsBySignature.get(signature);
 					if (existing) {
 						existing.record = record;
 						existing.latestRecordIndex = recordIndex;
-						existing.repeatCount = repeatCount;
+						existing.repeatCount += repeatCount;
 					} else {
 						groupsBySignature.set(signature, {
 							signature,

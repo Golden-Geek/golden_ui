@@ -2,6 +2,7 @@ import type { Snippet } from 'svelte';
 import type { UiNodeDto } from '../../../types';
 import ScriptNodeInspector from './nodes/ScriptNodeInspector.svelte';
 import AnimationCurveNodeInspector from './nodes/AnimationCurveNodeInspector.svelte';
+import GradientNodeInspector from './nodes/GradientNodeInspector.svelte';
 
 export type NodeInspectorOrder = 'first' | 'last' | 'solo' | '';
 
@@ -34,7 +35,8 @@ export type NodeInspectorRegistry = Record<string, NodeInspectorEntry>;
 
 const builtinNodeInspectorRegistry: NodeInspectorRegistry = {
 	script: { component: ScriptNodeInspector },
-	animation_curve: { component: AnimationCurveNodeInspector }
+	animation_curve: { component: AnimationCurveNodeInspector },
+	gradient: { component: GradientNodeInspector }
 };
 
 const customNodeInspectorRegistry = new Map<string, NodeInspectorEntry>();

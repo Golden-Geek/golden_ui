@@ -470,9 +470,9 @@
 
 				{#if headerExtra}
 					{@render headerExtra()}
-				{:else}
-					<div class="spacer"></div>
+				<!-- {:else} -->
 				{/if}
+					<div class="spacer"></div>
 
 				<!-- <div
 					class="node-id-badge"

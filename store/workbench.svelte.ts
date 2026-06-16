@@ -80,6 +80,7 @@ export interface WorkbenchSession {
 	getFirstSelectedNode(): UiNodeDto | null;
 	getNodeDescription(node: UiNodeDto | null | undefined): string | null;
 	getCustomEventSequence(topic: string, origin?: NodeId | null): number;
+	getCustomEventPayload<T = unknown>(topic: string, origin?: NodeId | null): T | null;
 	getFooterHoverInfo(): FooterHoverInfo | null;
 	getNodeVisibleWarnings(nodeId: NodeId): NodeWarningRecord[];
 	getActiveWarnings(): NodeWarningRecord[];
@@ -210,6 +211,9 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 
 	const getCustomEventSequence = (topic: string, origin?: NodeId | null): number =>
 		customEvents.getCustomEventSequence(topic, origin);
+
+	const getCustomEventPayload = <T = unknown>(topic: string, origin?: NodeId | null): T | null =>
+		customEvents.getCustomEventPayload<T>(topic, origin);
 
 	const clearFooterHover = (token: symbol): void => {
 		footerHover.clearFooterHover(token);
@@ -796,6 +800,7 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 		getFirstSelectedNode: () => selection.getFirstSelectedNode(),
 		getNodeDescription,
 		getCustomEventSequence,
+		getCustomEventPayload,
 		getFooterHoverInfo,
 		getNodeVisibleWarnings: (nodeId) => warnings.getNodeVisibleWarnings(nodeId),
 		getActiveWarnings: () => warnings.getActiveWarnings(),
