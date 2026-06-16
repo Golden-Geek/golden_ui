@@ -11,4 +11,8 @@ display_name: string,
 /**
  * Preferred filename extension without a leading dot.
  */
-extension: string, };
+extension: string, 
+/**
+ * Resolved host path for the currently open project document, when any.
+ */
+current_path?: string | null, };

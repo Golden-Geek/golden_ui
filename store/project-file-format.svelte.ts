@@ -2,7 +2,8 @@ import type { UiProjectFileSpec } from '../types';
 
 const DEFAULT_PROJECT_FILE_SPEC: UiProjectFileSpec = {
 	display_name: 'Project',
-	extension: 'json'
+	extension: 'json',
+	current_path: null
 };
 
 const normalizeExtension = (value: string | null | undefined): string => {

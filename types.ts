@@ -386,6 +386,7 @@ export interface UiLoggerState {
 export interface UiProjectFileSpec {
 	display_name: string;
 	extension: string;
+	current_path: string | null;
 }
 
 export interface UiSnapshot {

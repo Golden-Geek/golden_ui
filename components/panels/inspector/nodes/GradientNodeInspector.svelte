@@ -3,9 +3,11 @@
 	import { appState } from '../../../../store/workbench.svelte';
 	import {
 		sendCreateUserItemByTypeIntent,
+		sendRemoveNodeIntent,
 		sendSetParamIntent,
 		createUiEditSession
 	} from '../../../../store/ui-intents';
+	import { registerCommandHandler } from '../../../../store/commands.svelte';
 	import type { NodeId, ParamValue, UiNodeDto } from '../../../../types';
 	import type { NodeInspectorComponentProps } from '../node-inspector-registry';
 	import NodeInspector from '../NodeInspector.svelte';
@@ -24,6 +26,7 @@
 	const INTERPOLATIONS = ['none', 'linear', 'smooth'] as const;
 	const SMOOTH_STEPS = 8;
 	const DRAG_THRESHOLD_PX = 2;
+	const REMOVE_DRAG_PX = 26;
 
 	type Rgba = [number, number, number, number];
 	type StopData = {
@@ -44,12 +47,17 @@
 	let color_editor_stop_id = $state<NodeId | null>(null);
 	let picker_color = $state<Color>({ r: 0, g: 0, b: 0, a: 1 });
 
+	let editorEl: HTMLDivElement | null = $state(null);
+	let is_editor_focused = $state(false);
 	let trackEl: HTMLDivElement | null = $state(null);
 	let dragStopId: NodeId | null = null;
 	let dragPointerId: number | null = null;
 	let dragStartX = 0;
+	let dragStartY = 0;
 	let dragMoved = false;
 	let dragSession: ReturnType<typeof createUiEditSession> | null = null;
+	let remove_armed_stop_id = $state<NodeId | null>(null);
+	let color_session: ReturnType<typeof createUiEditSession> | null = null;
 
 	const clamp01 = (value: number): number => Math.min(1, Math.max(0, value));
 
@@ -239,18 +247,58 @@
 		color_editor_stop_id = stop.id;
 	};
 
-	const applyPickerColor = (): void => {
+	const applyStopColor = (color: Color): void => {
 		const stop = stops.find((entry) => entry.id === color_editor_stop_id);
 		if (!stop?.colorParamId) {
 			return;
 		}
-		const array = ColorUtil.toArray(picker_color);
+		const array = ColorUtil.toArray(color);
 		const value: ParamValue = {
 			kind: 'color',
 			value: [array[0] ?? 0, array[1] ?? 0, array[2] ?? 0, array[3] ?? 1]
 		};
 		void sendSetParamIntent(stop.colorParamId, value, 'Coalesce');
 	};
+
+	// Controlled ColorPicker: it only emits via onchange (it does not write back the bound value
+	// when an onchange is provided), so we feed the new color back in and push it to the param.
+	const onPickerChange = (color: Color): void => {
+		picker_color = color;
+		applyStopColor(color);
+	};
+
+	const onColorStartEdit = (): void => {
+		color_session = createUiEditSession('Edit gradient stop color');
+		void color_session.begin();
+	};
+
+	const onColorEndEdit = (): void => {
+		if (color_session) {
+			void color_session.end();
+			color_session = null;
+		}
+	};
+
+	const closeColorEditor = (): void => {
+		onColorEndEdit();
+		color_editor_stop_id = null;
+	};
+
+	// Esc closes the color popup.
+	$effect(() => {
+		if (color_editor_stop_id === null) {
+			return;
+		}
+		const onKeyDown = (event: KeyboardEvent): void => {
+			if (event.key === 'Escape') {
+				event.stopPropagation();
+				event.preventDefault();
+				closeColorEditor();
+			}
+		};
+		window.addEventListener('keydown', onKeyDown, true);
+		return () => window.removeEventListener('keydown', onKeyDown, true);
+	});
 
 	const addStopAt = async (position: number): Promise<void> => {
 		const color = sampleColorAt(position);
@@ -265,9 +313,63 @@
 		});
 	};
 
+	const onDragMove = (event: PointerEvent): void => {
+		if (dragStopId === null || dragPointerId !== event.pointerId) {
+			return;
+		}
+		const stop = stops.find((entry) => entry.id === dragStopId);
+		if (!stop) {
+			return;
+		}
+		if (!dragMoved) {
+			const distance = Math.hypot(event.clientX - dragStartX, event.clientY - dragStartY);
+			if (distance < DRAG_THRESHOLD_PX) {
+				return;
+			}
+			dragMoved = true;
+			dragSession = createUiEditSession('Move gradient stop');
+			void dragSession.begin();
+		}
+		// Dragged far enough below the ribbon arms removal (committed on release while still armed).
+		const rect = trackEl?.getBoundingClientRect();
+		if (rect && event.clientY > rect.bottom + REMOVE_DRAG_PX) {
+			remove_armed_stop_id = stop.id;
+			return;
+		}
+		remove_armed_stop_id = null;
+		setStopPosition(stop, positionFromClientX(event.clientX));
+	};
+
+	const endDrag = (): void => {
+		window.removeEventListener('pointermove', onDragMove);
+		window.removeEventListener('pointerup', onDragEnd);
+		window.removeEventListener('pointercancel', onDragEnd);
+	};
+
+	const onDragEnd = (event: PointerEvent): void => {
+		if (dragPointerId !== null && event.pointerId !== dragPointerId) {
+			return;
+		}
+		const stopId = dragStopId;
+		const removeOnRelease = stopId !== null && remove_armed_stop_id === stopId;
+		if (dragMoved && dragSession) {
+			void dragSession.end();
+		}
+		dragSession = null;
+		dragStopId = null;
+		dragPointerId = null;
+		dragMoved = false;
+		remove_armed_stop_id = null;
+		endDrag();
+		if (removeOnRelease && stopId !== null) {
+			void sendRemoveNodeIntent(stopId);
+		}
+	};
+
 	const onHandlePointerDown = (event: PointerEvent, stop: StopData): void => {
 		event.stopPropagation();
 		event.preventDefault();
+		(event.currentTarget as HTMLElement).focus();
 		selected_stop_id = stop.id;
 		if (event.altKey) {
 			cycleInterpolation(stop);
@@ -276,41 +378,19 @@
 		dragStopId = stop.id;
 		dragPointerId = event.pointerId;
 		dragStartX = event.clientX;
+		dragStartY = event.clientY;
 		dragMoved = false;
-		(event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
+		// Window-level listeners keep the drag alive even when the handle's DOM node is reordered
+		// or recreated by stop re-sorting, and when the pointer moves faster than the element.
+		window.addEventListener('pointermove', onDragMove);
+		window.addEventListener('pointerup', onDragEnd);
+		window.addEventListener('pointercancel', onDragEnd);
 	};
 
-	const onHandlePointerMove = (event: PointerEvent, stop: StopData): void => {
-		if (dragStopId !== stop.id || dragPointerId !== event.pointerId) {
-			return;
-		}
-		if (!dragMoved && Math.abs(event.clientX - dragStartX) < DRAG_THRESHOLD_PX) {
-			return;
-		}
-		if (!dragMoved) {
-			dragMoved = true;
-			dragSession = createUiEditSession('Move gradient stop');
-			void dragSession.begin();
-		}
-		setStopPosition(stop, positionFromClientX(event.clientX));
-	};
-
-	const onHandlePointerUp = (event: PointerEvent, stop: StopData): void => {
-		if (dragStopId !== stop.id || dragPointerId !== event.pointerId) {
-			return;
-		}
-		const element = event.currentTarget as HTMLElement;
-		if (element.hasPointerCapture(event.pointerId)) {
-			element.releasePointerCapture(event.pointerId);
-		}
-		if (dragMoved && dragSession) {
-			void dragSession.end();
-		}
-		dragSession = null;
-		dragStopId = null;
-		dragPointerId = null;
-		dragMoved = false;
-	};
+	// Drop any lingering drag listeners if the editor unmounts mid-drag.
+	$effect(() => {
+		return () => endDrag();
+	});
 
 	const onTrackDoubleClick = (event: MouseEvent): void => {
 		if (event.target !== trackEl) {
@@ -318,6 +398,37 @@
 		}
 		void addStopAt(positionFromClientX(event.clientX));
 	};
+
+	const onEditorFocusOut = (event: FocusEvent): void => {
+		if (!editorEl?.contains(event.relatedTarget as Node | null)) {
+			is_editor_focused = false;
+		}
+	};
+
+	const removeSelectedStop = async (): Promise<boolean> => {
+		if (selected_stop_id === null) {
+			return false;
+		}
+		return sendRemoveNodeIntent(selected_stop_id);
+	};
+
+	// Delete the selected stop only while this editor holds focus, mirroring curve-key deletion —
+	// local selection never changes the app node selection, so the inspector stays put.
+	$effect(() => {
+		const unregister = registerCommandHandler(
+			'edit.deleteSelection',
+			() => {
+				if (!is_editor_focused || selected_stop_id === null) {
+					return false;
+				}
+				return removeSelectedStop().then(() => true);
+			},
+			{ priority: 200 }
+		);
+		return () => {
+			unregister();
+		};
+	});
 </script>
 
 {#snippet gradientHeaderExtra()}
@@ -331,7 +442,12 @@
 	{@render defaultHeader?.(gradientHeaderExtra)}
 
 	{#if !collapsed}
-		<div class="node-inspector-content gradient-node-inspector" transition:slide={{ duration: 200 }}>
+		<div
+			class="node-inspector-content gradient-node-inspector"
+			bind:this={editorEl}
+			onfocusin={() => (is_editor_focused = true)}
+			onfocusout={onEditorFocusOut}
+			transition:slide={{ duration: 200 }}>
 			<div class="gradient-preview">
 				<!-- svelte-ignore a11y_no_static_element_interactions -->
 				<div
@@ -345,15 +461,17 @@
 							type="button"
 							class="gradient-stop-handle"
 							class:selected={stop.id === selected_stop_id}
+							class:removing={stop.id === remove_armed_stop_id}
 							style:left={`${(clamp01(stop.position) * 100).toFixed(2)}%`}
 							style:--stop-color={cssColor(stop.color)}
 							title={`${Math.round(clamp01(stop.position) * 100)}% · ${stop.interpolation} (drag to move, double-click for color, alt-click for interpolation)`}
 							aria-label={`Gradient stop at ${Math.round(clamp01(stop.position) * 100)} percent`}
 							onpointerdown={(event) => onHandlePointerDown(event, stop)}
-							onpointermove={(event) => onHandlePointerMove(event, stop)}
-							onpointerup={(event) => onHandlePointerUp(event, stop)}
 							ondblclick={(event) => {
 								event.stopPropagation();
+								if (event.altKey) {
+									return;
+								}
 								openColorEditor(stop);
 							}}></button>
 					{/each}
@@ -361,14 +479,19 @@
 			</div>
 
 			{#if color_editor_stop_id !== null}
-				<div class="gradient-color-editor">
-					<div class="gradient-color-editor-header">
+				<!-- svelte-ignore a11y_no_static_element_interactions -->
+				<div class="gradient-color-popup-backdrop" onpointerdown={closeColorEditor}></div>
+				<div class="gradient-color-popup" role="dialog" aria-label="Stop color">
+					<div class="gradient-color-popup-header">
 						<span>Stop color</span>
-						<button type="button" class="gradient-color-editor-close" onclick={() => (color_editor_stop_id = null)}>
-							×
-						</button>
+						<button type="button" class="gradient-color-popup-close" onclick={closeColorEditor}>×</button>
 					</div>
-					<ColorPicker bind:color={picker_color} forceExpanded onchange={applyPickerColor} />
+					<ColorPicker
+						color={picker_color}
+						forceExpanded
+						onchange={onPickerChange}
+						onStartEdit={onColorStartEdit}
+						onEndEdit={onColorEndEdit} />
 				</div>
 			{/if}
 
@@ -385,6 +508,7 @@
 
 <style>
 	.gradient-node-inspector {
+		position: relative;
 		display: flex;
 		flex-direction: column;
 		gap: 0.6rem;
@@ -397,7 +521,7 @@
 	.gradient-preview {
 		/* breathing room so the ribbon does not touch the panel edges and edge stops stay in bounds */
 		padding-inline: 0.55rem;
-		padding-block: 0.15rem;
+		padding-block: 0.15rem 0.55rem;
 		box-sizing: border-box;
 	}
 
@@ -406,7 +530,9 @@
 		inline-size: 100%;
 		block-size: 2rem;
 		border-radius: 0.3rem;
-		border: solid 0.06rem rgba(255, 255, 255, 0.18);
+		/* Outset ring (not a border) so the gradient reaches the very edges with no white seam on the left. */
+		border: none;
+		box-shadow: 0 0 0 0.06rem rgba(0, 0, 0, 0.35);
 		background-color: #000;
 		background-size: cover;
 		box-sizing: border-box;
@@ -416,12 +542,12 @@
 
 	.gradient-stop-handle {
 		position: absolute;
-		bottom: -0.18rem;
-		inline-size: 0.6rem;
-		block-size: 0.6rem;
+		top: 100%;
+		inline-size: 0.5rem;
+		block-size: 0.5rem;
 		padding: 0;
-		transform: translateX(-50%);
-		border-radius: 0.16rem;
+		transform: translate(-50%, -50%) rotate(45deg);
+		border-radius: 0.13rem;
 		background: var(--stop-color, #fff);
 		border: solid 0.07rem rgba(0, 0, 0, 0.65);
 		box-shadow: 0 0 0 0.06rem rgba(255, 255, 255, 0.6);
@@ -438,25 +564,45 @@
 			0 0 0.28rem rgba(255, 224, 106, 0.7);
 	}
 
-	.gradient-color-editor {
-		display: flex;
-		flex-direction: column;
-		gap: 0.3rem;
-		padding: 0.4rem;
-		border-radius: 0.3rem;
-		background: rgba(255, 255, 255, 0.04);
-		border: solid 0.06rem rgba(255, 255, 255, 0.1);
+	.gradient-stop-handle.removing {
+		opacity: 0.35;
+		border-color: rgba(255, 90, 90, 0.95);
+		box-shadow: 0 0 0 0.07rem rgba(255, 90, 90, 0.9);
+		cursor: grabbing;
 	}
 
-	.gradient-color-editor-header {
+	.gradient-color-popup-backdrop {
+		position: fixed;
+		inset: 0;
+		z-index: 60;
+	}
+
+	.gradient-color-popup {
+		position: absolute;
+		z-index: 61;
+		top: 2.7rem;
+		left: 50%;
+		transform: translateX(-50%);
+		display: flex;
+		flex-direction: column;
+		gap: 0.35rem;
+		padding: 0.45rem;
+		border-radius: 0.35rem;
+		background: var(--gc-color-surface, #232323);
+		border: solid 0.06rem rgba(255, 255, 255, 0.16);
+		box-shadow: 0 0.4rem 1.2rem rgba(0, 0, 0, 0.5);
+	}
+
+	.gradient-color-popup-header {
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
+		gap: 0.8rem;
 		font-size: 0.62rem;
 		opacity: 0.8;
 	}
 
-	.gradient-color-editor-close {
+	.gradient-color-popup-close {
 		border: none;
 		background: transparent;
 		color: inherit;

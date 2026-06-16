@@ -141,6 +141,11 @@
 		height: 1.2rem;
 		box-sizing: border-box;
 		filter: brightness(100%);
+		transition:
+			filter 0.42s ease,
+			background-color 0.42s ease,
+			border-color 0.42s ease,
+			opacity 0.42s ease;
 	}
 
 	.trigger:hover {
@@ -172,10 +177,10 @@
 	.trigger.active {
 		filter: brightness(122%);
 		transition:
-			filter 0.1s,
-			background-color 0.1s,
-			border-color 0.1s,
-			opacity 0.1s;
+			filter 0.06s ease-out,
+			background-color 0.06s ease-out,
+			border-color 0.06s ease-out,
+			opacity 0.06s ease-out;
 	}
 
 	.trigger.active-manual {

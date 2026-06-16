@@ -22,6 +22,7 @@ import type {
 import { wholeGraphScope } from '../types';
 import { handleCommandShortcut } from './commands.svelte';
 import { resetProjectFileFormat, setProjectFileFormat } from './project-file-format.svelte';
+import { syncProjectFilePathFromSnapshot } from './project-files.svelte';
 import { createWorkbenchDescriptionStore } from './session/descriptions.svelte';
 import { createWorkbenchCustomEventStore } from './session/custom-events.svelte';
 import { createWorkbenchFooterHoverStore } from './session/footer-hover.svelte';
@@ -292,6 +293,7 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 	const applySnapshotToState = (snapshot: UiSnapshot): void => {
 		graph.loadSnapshot(snapshot);
 		setProjectFileFormat(snapshot.project_file);
+		syncProjectFilePathFromSnapshot(snapshot.project_file.current_path);
 		descriptions.applySnapshotSchema(snapshot.schema);
 		footerHover.prune();
 		hasLoadedSnapshot = true;

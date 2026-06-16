@@ -61,6 +61,14 @@ const rememberLastOpenedPath = (path: string | null): void => {
 	savePersistedLastProjectPath(normalized);
 };
 
+export const syncProjectFilePathFromSnapshot = (path: string | null | undefined): void => {
+	const normalized = normalizeProjectPath(path);
+	setCurrentProjectPath(normalized);
+	if (normalized) {
+		rememberLastOpenedPath(normalized);
+	}
+};
+
 const chooseOpenPath = async (): Promise<string | null> => {
 	return openDesktopFileDialog({
 		allowedExtensions: projectFileDialogExtensions(),

@@ -376,7 +376,8 @@ const fromRustProjectFileSpec = (projectFile: unknown): UiProjectFileSpec => {
 	if (!isRecord(projectFile)) {
 		return {
 			display_name: 'Project',
-			extension: 'json'
+			extension: 'json',
+			current_path: null
 		};
 	}
 
@@ -388,10 +389,15 @@ const fromRustProjectFileSpec = (projectFile: unknown): UiProjectFileSpec => {
 		typeof projectFile.extension === 'string' && projectFile.extension.trim().length > 0
 			? projectFile.extension.trim().replace(/^\.+/, '').toLowerCase()
 			: 'json';
+	const currentPath =
+		typeof projectFile.current_path === 'string' && projectFile.current_path.trim().length > 0
+			? projectFile.current_path.trim()
+			: null;
 
 	return {
 		display_name: displayName,
-		extension: extension.length > 0 ? extension : 'json'
+		extension: extension.length > 0 ? extension : 'json',
+		current_path: currentPath
 	};
 };
 
