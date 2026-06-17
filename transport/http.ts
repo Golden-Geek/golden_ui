@@ -1301,6 +1301,15 @@ export const toRustIntent = (intent: UiEditIntent): RustUiEditIntent => {
 			}))
 		} as RustUiEditIntent;
 	}
+	if (intent.kind === 'duplicateNode' && intent.initial_params) {
+		return {
+			...intent,
+			initial_params: intent.initial_params.map((entry) => ({
+				...entry,
+				value: toRustParamValue(entry.value)
+			}))
+		} as RustUiEditIntent;
+	}
 	if (intent.kind === 'setParamControlState') {
 		return {
 			...intent,

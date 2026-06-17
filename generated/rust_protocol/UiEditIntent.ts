@@ -84,7 +84,7 @@ node_type: string,
 /**
  * Optional explicit label for the new item.
  */
-label?: string | null, 
+label?: string | null,
 /**
  * Optional direct parameter values applied before the intent completes.
  */
@@ -100,11 +100,15 @@ new_parent: NodeId,
 /**
  * Optional sibling after which insertion occurs.
  */
-new_prev_sibling?: NodeId | null, 
+new_prev_sibling?: NodeId | null,
 /**
  * Optional explicit label for the duplicated root.
  */
-label?: string | null, } | { "kind": "fitAnimationCurvePath", 
+label?: string | null,
+/**
+ * Optional direct parameter values applied to the duplicated root before the intent completes.
+ */
+initial_params?: Array<UiCreateUserItemInitialParam>, } | { "kind": "fitAnimationCurvePath",
 /**
  * Target animation-curve node id.
  */

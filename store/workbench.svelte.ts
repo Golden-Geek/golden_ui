@@ -100,6 +100,7 @@ export interface WorkbenchSession {
 		origin?: NodeId
 	): void;
 	sendIntent(intent: UiEditIntent): Promise<void>;
+	sendIntents(intents: UiEditIntent[]): Promise<void>;
 	setLogUiUpdateHz(hz: number): void;
 	dismissToast(toastId: number): void;
 	undo(): Promise<void>;
@@ -614,6 +615,10 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 		});
 	};
 
+	const sendIntents = async (intents: UiEditIntent[]): Promise<void> => {
+		await runIntentBatch(intents);
+	};
+
 	const undo = (): Promise<void> => {
 		return history.undo(() => sendIntent({ kind: 'undo' }));
 	};
@@ -816,6 +821,7 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 		clearSelection: () => selection.clearSelection(),
 		appendUiLogRecord,
 		sendIntent,
+		sendIntents,
 		setLogUiUpdateHz,
 		dismissToast,
 		undo,

@@ -59,7 +59,19 @@ export interface CreateUserItemResult {
 	readonly selectWhenCreated: boolean;
 }
 
-const sendUiIntent = async (intent: UiEditIntent): Promise<boolean> => {
+interface SendUiIntentOptions {
+	readonly ignoreError?: (error: unknown) => boolean;
+}
+
+const isStaleEndEditSessionError = (error: unknown, clientEditId: string): boolean => {
+	const message = error instanceof Error ? error.message : String(error);
+	return message.includes(clientEditId) && message.includes('no session is active');
+};
+
+const sendUiIntent = async (
+	intent: UiEditIntent,
+	options?: SendUiIntentOptions
+): Promise<boolean> => {
 	const session = appState.session;
 	if (!session) {
 		return false;
@@ -69,7 +81,9 @@ const sendUiIntent = async (intent: UiEditIntent): Promise<boolean> => {
 		await session.sendIntent(intent);
 		return true;
 	} catch (error) {
-		console.error('failed to send ui intent', intent, error);
+		if (!options?.ignoreError?.(error)) {
+			console.error('failed to send ui intent', intent, error);
+		}
 		return false;
 	}
 };
@@ -84,11 +98,10 @@ export const sendUiIntentBatch = async (intents: UiEditIntent[]): Promise<UiInte
 	}
 
 	try {
-		const acks = await session.client.sendIntents(intents);
-		const appliedCount = acks.filter((ack) => ack.success).length;
+		await session.sendIntents(intents);
 		return {
-			success: appliedCount === intents.length,
-			appliedCount
+			success: true,
+			appliedCount: intents.length
 		};
 	} catch (error) {
 		console.error('failed to send ui intent batch', intents, error);
@@ -187,14 +200,16 @@ export const sendDuplicateNodeIntent = async (
 	source: NodeId,
 	new_parent: NodeId,
 	new_prev_sibling?: NodeId,
-	label?: string
+	label?: string,
+	initial_params?: UiCreateUserItemInitialParam[]
 ): Promise<boolean> => {
 	return sendUiIntent({
 		kind: 'duplicateNode',
 		source,
 		new_parent,
 		new_prev_sibling,
-		label
+		label,
+		initial_params
 	});
 };
 
@@ -370,10 +385,15 @@ export const createUiEditSession = (label?: string, prefix = 'ui-edit'): UiEditS
 			}
 			active = false;
 			activationEpoch = null;
-			await sendUiIntent({
-				kind: 'endEdit',
-				client_edit_id: clientEditId
-			});
+			await sendUiIntent(
+				{
+					kind: 'endEdit',
+					client_edit_id: clientEditId
+				},
+				{
+					ignoreError: (error) => isStaleEndEditSessionError(error, clientEditId)
+				}
+			);
 		}
 	};
 };

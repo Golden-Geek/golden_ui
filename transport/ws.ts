@@ -591,6 +591,7 @@ export const createWebSocketUiClient = (options: WebSocketUiClientOptions = {}):
 		},
 
 		async sendIntent(intent: UiEditIntent): Promise<UiAck> {
+			let sent = false;
 			try {
 				const requestId = nextId('intent');
 				const includeSelfEvents = includeSelfEventsForIntent(intent);
@@ -608,6 +609,7 @@ export const createWebSocketUiClient = (options: WebSocketUiClientOptions = {}):
 							intent: toRustIntent(intent),
 							include_self_events: includeSelfEvents
 						});
+						sent = true;
 					} catch (error) {
 						clearTimeout(timer);
 						pendingIntents.delete(requestId);
@@ -615,7 +617,10 @@ export const createWebSocketUiClient = (options: WebSocketUiClientOptions = {}):
 					}
 				});
 				return ack;
-			} catch {
+			} catch (error) {
+				if (sent) {
+					throw error;
+				}
 				return httpClient.sendIntent(intent);
 			}
 		},
@@ -627,6 +632,7 @@ export const createWebSocketUiClient = (options: WebSocketUiClientOptions = {}):
 			if (intents.length === 1) {
 				return [await client.sendIntent(intents[0])];
 			}
+			let sent = false;
 			try {
 				const requestId = nextId('intent-batch');
 				const includeSelfEvents = true;
@@ -644,6 +650,7 @@ export const createWebSocketUiClient = (options: WebSocketUiClientOptions = {}):
 							intents: intents.map((intent) => toRustIntent(intent)),
 							include_self_events: includeSelfEvents
 						});
+						sent = true;
 					} catch (error) {
 						clearTimeout(timer);
 						pendingIntentBatches.delete(requestId);
@@ -651,7 +658,10 @@ export const createWebSocketUiClient = (options: WebSocketUiClientOptions = {}):
 					}
 				});
 				return acks;
-			} catch {
+			} catch (error) {
+				if (sent) {
+					throw error;
+				}
 				return httpClient.sendIntents(intents);
 			}
 		},

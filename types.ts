@@ -537,6 +537,7 @@ export type UiEditIntent =
 			new_parent: NodeId;
 			new_prev_sibling?: NodeId;
 			label?: string;
+			initial_params?: UiCreateUserItemInitialParam[];
 	  }
 	| {
 			kind: 'fitAnimationCurvePath';
