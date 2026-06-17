@@ -6,6 +6,8 @@ import type {
 	UiAck,
 	UiClient,
 	UiCreatableUserItem,
+	UiCreateUserItemInitialParam,
+	UiDuplicateDependentUserItemInitialParam,
 	UiEditIntent,
 	UiEventBatch,
 	UiEventDto,
@@ -1285,6 +1287,25 @@ const fromRustAck = (ack: RustUiAck): UiAck => ({
 	history: ack.history
 });
 
+const toRustInitialParams = (
+	initialParams: UiCreateUserItemInitialParam[] | undefined
+) =>
+	initialParams?.map((entry) => ({
+		...entry,
+		value: toRustParamValue(entry.value)
+	}));
+
+const toRustDuplicateDependentInitialParams = (
+	initialParams: UiDuplicateDependentUserItemInitialParam[] | undefined
+) =>
+	initialParams?.map((entry) => ({
+		...entry,
+		value:
+			entry.value.kind === 'literal'
+				? { ...entry.value, value: toRustParamValue(entry.value.value) }
+				: entry.value
+	}));
+
 export const toRustIntent = (intent: UiEditIntent): RustUiEditIntent => {
 	if (intent.kind === 'setParam') {
 		return {
@@ -1295,18 +1316,29 @@ export const toRustIntent = (intent: UiEditIntent): RustUiEditIntent => {
 	if (intent.kind === 'createUserItem' && intent.initial_params) {
 		return {
 			...intent,
-			initial_params: intent.initial_params.map((entry) => ({
-				...entry,
-				value: toRustParamValue(entry.value)
-			}))
+			initial_params: toRustInitialParams(intent.initial_params)
 		} as RustUiEditIntent;
 	}
 	if (intent.kind === 'duplicateNode' && intent.initial_params) {
 		return {
 			...intent,
-			initial_params: intent.initial_params.map((entry) => ({
+			initial_params: toRustInitialParams(intent.initial_params)
+		} as RustUiEditIntent;
+	}
+	if (intent.kind === 'duplicateNodes') {
+		return {
+			...intent,
+			nodes: intent.nodes?.map((entry) => ({
 				...entry,
-				value: toRustParamValue(entry.value)
+				initial_params: toRustInitialParams(entry.initial_params)
+			})),
+			created_items: intent.created_items?.map((entry) => ({
+				...entry,
+				initial_params: toRustInitialParams(entry.initial_params)
+			})),
+			dependent_items: intent.dependent_items?.map((entry) => ({
+				...entry,
+				initial_params: toRustDuplicateDependentInitialParams(entry.initial_params)
 			}))
 		} as RustUiEditIntent;
 	}

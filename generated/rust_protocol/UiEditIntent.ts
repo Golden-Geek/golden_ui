@@ -7,6 +7,9 @@ import type { ParamValue } from "./ParamValue";
 import type { ParameterConstraints } from "./ParameterConstraints";
 import type { ParameterEventBehaviour } from "./ParameterEventBehaviour";
 import type { UiCreateUserItemInitialParam } from "./UiCreateUserItemInitialParam";
+import type { UiDuplicateCreateUserItemSpec } from "./UiDuplicateCreateUserItemSpec";
+import type { UiDuplicateDependentUserItem } from "./UiDuplicateDependentUserItem";
+import type { UiDuplicateNodeSpec } from "./UiDuplicateNodeSpec";
 import type { UiParameterControlStateDto } from "./UiParameterControlStateDto";
 
 /**
@@ -84,7 +87,7 @@ node_type: string,
 /**
  * Optional explicit label for the new item.
  */
-label?: string | null,
+label?: string | null, 
 /**
  * Optional direct parameter values applied before the intent completes.
  */
@@ -100,15 +103,27 @@ new_parent: NodeId,
 /**
  * Optional sibling after which insertion occurs.
  */
-new_prev_sibling?: NodeId | null,
+new_prev_sibling?: NodeId | null, 
 /**
  * Optional explicit label for the duplicated root.
  */
-label?: string | null,
+label?: string | null, 
 /**
  * Optional direct parameter values applied to the duplicated root before the intent completes.
  */
-initial_params?: Array<UiCreateUserItemInitialParam>, } | { "kind": "fitAnimationCurvePath",
+initial_params?: Array<UiCreateUserItemInitialParam>, } | { "kind": "duplicateNodes", 
+/**
+ * Existing subtree roots to clone.
+ */
+nodes?: Array<UiDuplicateNodeSpec>, 
+/**
+ * Fresh user items to create and expose to dependent references.
+ */
+created_items?: Array<UiDuplicateCreateUserItemSpec>, 
+/**
+ * Items whose initial parameters can reference roots created earlier in the batch.
+ */
+dependent_items?: Array<UiDuplicateDependentUserItem>, } | { "kind": "fitAnimationCurvePath", 
 /**
  * Target animation-curve node id.
  */

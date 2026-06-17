@@ -515,6 +515,38 @@ export interface UiCreateUserItemInitialParam {
 	value: ParamValue;
 }
 
+export interface UiDuplicateNodeSpec {
+	source: NodeId;
+	new_parent: NodeId;
+	new_prev_sibling?: NodeId;
+	label?: string;
+	initial_params?: UiCreateUserItemInitialParam[];
+}
+
+export interface UiDuplicateCreateUserItemSpec {
+	source: NodeId;
+	parent: NodeId;
+	node_type: string;
+	label?: string;
+	initial_params?: UiCreateUserItemInitialParam[];
+}
+
+export type UiDuplicateDependentInitialParamValue =
+	| { kind: 'literal'; value: ParamValue }
+	| { kind: 'duplicatedNodeReference'; source: NodeId };
+
+export interface UiDuplicateDependentUserItemInitialParam {
+	decl_id: string;
+	value: UiDuplicateDependentInitialParamValue;
+}
+
+export interface UiDuplicateDependentUserItem {
+	parent: NodeId;
+	node_type: string;
+	label?: string;
+	initial_params?: UiDuplicateDependentUserItemInitialParam[];
+}
+
 export type UiEditIntent =
 	| { kind: 'beginEdit'; client_edit_id: string; label?: string }
 	| { kind: 'endEdit'; client_edit_id: string }
@@ -538,6 +570,12 @@ export type UiEditIntent =
 			new_prev_sibling?: NodeId;
 			label?: string;
 			initial_params?: UiCreateUserItemInitialParam[];
+	  }
+	| {
+			kind: 'duplicateNodes';
+			nodes?: UiDuplicateNodeSpec[];
+			created_items?: UiDuplicateCreateUserItemSpec[];
+			dependent_items?: UiDuplicateDependentUserItem[];
 	  }
 	| {
 			kind: 'fitAnimationCurvePath';
