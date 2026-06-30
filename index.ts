@@ -68,6 +68,7 @@ export {
 	type OutlinerRowSupplementRegistry
 } from './components/panels/outliner/outliner-row-registry';
 export { default as Inspector } from './components/panels/inspector/InspectorPanel.svelte';
+export { default as NodeInspector } from './components/panels/inspector/NodeInspector.svelte';
 export { resolveParameterEditor } from './components/panels/inspector/inspector.svelte';
 export { default as DropdownEditor } from './components/panels/inspector/parameters/DropdownEditor.svelte';
 export { default as LoggerPanel } from './components/panels/logger/LoggerPanel.svelte';

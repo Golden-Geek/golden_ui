@@ -7,7 +7,8 @@
 	import SelectNodeButton from '../../../common/SelectNodeButton.svelte';
 	import CodeEditor from '../../../common/CodeEditor.svelte';
 
-	let { node, defaultHeader, defaultChildren, level }: NodeInspectorComponentProps = $props();
+	let { node, defaultHeader, defaultContent, defaultChildren, level }: NodeInspectorComponentProps =
+		$props();
 
 	let session = $derived(appState.session);
 	let liveNode: UiNodeDto = $derived(session?.graph.state.nodesById.get(node.node_id) ?? node);
@@ -275,10 +276,8 @@
 	{/if}
 {/snippet}
 
-{#if liveNode.node_type === 'script'}
-	{@render defaultHeader?.(scriptHeaderExtra)}
-
-	<div class="node-inspector-content script-node-inspector">
+{#snippet scriptContent()}
+	<div class="script-node-inspector-body">
 		<div class="toolbar">
 			<button
 				type="button"
@@ -389,10 +388,15 @@
 	</div>
 
 	{@render defaultChildren?.()}
+{/snippet}
+
+{#if liveNode.node_type === 'script'}
+	{@render defaultHeader?.(scriptHeaderExtra)}
+	{@render defaultContent?.(scriptContent, 'script-node-inspector')}
 {/if}
 
 <style>
-	.script-node-inspector {
+	:global(.script-node-inspector) {
 		display: flex;
 		flex-direction: column;
 		gap: 0.4rem;

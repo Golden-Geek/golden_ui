@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { slide } from 'svelte/transition';
 	import { appState } from '../../../../store/workbench.svelte';
 	import {
 		sendCreateUserItemByTypeIntent,
@@ -15,7 +14,7 @@
 	import ColorPicker from '../../../common/ColorPicker.svelte';
 	import { ColorUtil, type Color } from '../../../common/Color.svelte';
 
-	let { node, level, defaultHeader, collapsed }: NodeInspectorComponentProps = $props();
+	let { node, level, defaultHeader, defaultContent }: NodeInspectorComponentProps = $props();
 
 	const GRADIENT_NODE_TYPE = 'gradient';
 	const STOP_NODE_TYPE = 'gradient_stop';
@@ -87,14 +86,16 @@
 			const positionNode = childParam(child, DECL_POSITION);
 			const colorNode = childParam(child, DECL_COLOR);
 			const interpolationNode = childParam(child, DECL_INTERPOLATION);
-			const positionValue = positionNode?.data.kind === 'parameter' ? positionNode.data.param.value : null;
+			const positionValue =
+				positionNode?.data.kind === 'parameter' ? positionNode.data.param.value : null;
 			const colorValue = colorNode?.data.kind === 'parameter' ? colorNode.data.param.value : null;
 			const interpolationValue =
 				interpolationNode?.data.kind === 'parameter' ? interpolationNode.data.param.value : null;
 			const position =
 				positionValue?.kind === 'float' || positionValue?.kind === 'int' ? positionValue.value : 0;
 			const color = (colorValue?.kind === 'color' ? colorValue.value : [0, 0, 0, 1]) as Rgba;
-			const interpolation = interpolationValue?.kind === 'enum' ? interpolationValue.value : 'linear';
+			const interpolation =
+				interpolationValue?.kind === 'enum' ? interpolationValue.value : 'linear';
 			result.push({
 				id: child.node_id,
 				position,
@@ -125,7 +126,8 @@
 		return `rgb(${r} ${g} ${b} / ${clamp01(color[3])})`;
 	};
 
-	const lerp = (start: number, end: number, amount: number): number => start + (end - start) * amount;
+	const lerp = (start: number, end: number, amount: number): number =>
+		start + (end - start) * amount;
 	const lerpColor = (start: Rgba, end: Rgba, amount: number): Rgba => [
 		lerp(start[0], end[0], amount),
 		lerp(start[1], end[1], amount),
@@ -235,7 +237,9 @@
 		if (!stop.interpolationParamId) {
 			return;
 		}
-		const currentIndex = INTERPOLATIONS.indexOf(stop.interpolation as (typeof INTERPOLATIONS)[number]);
+		const currentIndex = INTERPOLATIONS.indexOf(
+			stop.interpolation as (typeof INTERPOLATIONS)[number]
+		);
 		const next = INTERPOLATIONS[(currentIndex + 1 + INTERPOLATIONS.length) % INTERPOLATIONS.length];
 		const value: ParamValue = { kind: 'enum', value: next };
 		void sendSetParamIntent(stop.interpolationParamId, value, 'Coalesce');
@@ -438,72 +442,73 @@
 	{/if}
 {/snippet}
 
-{#if liveNode.node_type === GRADIENT_NODE_TYPE}
-	{@render defaultHeader?.(gradientHeaderExtra)}
-
-	{#if !collapsed}
-		<div
-			class="node-inspector-content gradient-node-inspector"
-			bind:this={editorEl}
-			onfocusin={() => (is_editor_focused = true)}
-			onfocusout={onEditorFocusOut}
-			transition:slide={{ duration: 200 }}>
-			<div class="gradient-preview">
-				<!-- svelte-ignore a11y_no_static_element_interactions -->
-				<div
-					class="gradient-track"
-					bind:this={trackEl}
-					style:background-image={gradientCss}
-					ondblclick={onTrackDoubleClick}
-					title="Double-click to add a stop">
-					{#each stops as stop (stop.id)}
-						<button
-							type="button"
-							class="gradient-stop-handle"
-							class:selected={stop.id === selected_stop_id}
-							class:removing={stop.id === remove_armed_stop_id}
-							style:left={`${(clamp01(stop.position) * 100).toFixed(2)}%`}
-							style:--stop-color={cssColor(stop.color)}
-							title={`${Math.round(clamp01(stop.position) * 100)}% · ${stop.interpolation} (drag to move, double-click for color, alt-click for interpolation)`}
-							aria-label={`Gradient stop at ${Math.round(clamp01(stop.position) * 100)} percent`}
-							onpointerdown={(event) => onHandlePointerDown(event, stop)}
-							ondblclick={(event) => {
-								event.stopPropagation();
-								if (event.altKey) {
-									return;
-								}
-								openColorEditor(stop);
-							}}></button>
-					{/each}
-				</div>
-			</div>
-
-			{#if color_editor_stop_id !== null}
-				<!-- svelte-ignore a11y_no_static_element_interactions -->
-				<div class="gradient-color-popup-backdrop" onpointerdown={closeColorEditor}></div>
-				<div class="gradient-color-popup" role="dialog" aria-label="Stop color">
-					<div class="gradient-color-popup-header">
-						<span>Stop color</span>
-						<button type="button" class="gradient-color-popup-close" onclick={closeColorEditor}>×</button>
-					</div>
-					<ColorPicker
-						color={picker_color}
-						forceExpanded
-						onchange={onPickerChange}
-						onStartEdit={onColorStartEdit}
-						onEndEdit={onColorEndEdit} />
-				</div>
-			{/if}
-
-			<div class="gradient-stop-editor">
-				{#if selected_stop_node}
-					<NodeInspector nodes={[selected_stop_node]} level={level + 1} order="solo" />
-				{:else}
-					<div class="empty-state">Double-click the ribbon to add a stop.</div>
-				{/if}
+{#snippet gradientContent()}
+	<div
+		class="gradient-node-inspector"
+		bind:this={editorEl}
+		onfocusin={() => (is_editor_focused = true)}
+		onfocusout={onEditorFocusOut}>
+		<div class="gradient-preview">
+			<!-- svelte-ignore a11y_no_static_element_interactions -->
+			<div
+				class="gradient-track"
+				bind:this={trackEl}
+				style:background-image={gradientCss}
+				ondblclick={onTrackDoubleClick}
+				title="Double-click to add a stop">
+				{#each stops as stop (stop.id)}
+					<button
+						type="button"
+						class="gradient-stop-handle"
+						class:selected={stop.id === selected_stop_id}
+						class:removing={stop.id === remove_armed_stop_id}
+						style:left={`${(clamp01(stop.position) * 100).toFixed(2)}%`}
+						style:--stop-color={cssColor(stop.color)}
+						title={`${Math.round(clamp01(stop.position) * 100)}% · ${stop.interpolation} (drag to move, double-click for color, alt-click for interpolation)`}
+						aria-label={`Gradient stop at ${Math.round(clamp01(stop.position) * 100)} percent`}
+						onpointerdown={(event) => onHandlePointerDown(event, stop)}
+						ondblclick={(event) => {
+							event.stopPropagation();
+							if (event.altKey) {
+								return;
+							}
+							openColorEditor(stop);
+						}}></button>
+				{/each}
 			</div>
 		</div>
-	{/if}
+
+		{#if color_editor_stop_id !== null}
+			<!-- svelte-ignore a11y_no_static_element_interactions -->
+			<div class="gradient-color-popup-backdrop" onpointerdown={closeColorEditor}></div>
+			<div class="gradient-color-popup" role="dialog" aria-label="Stop color">
+				<div class="gradient-color-popup-header">
+					<span>Stop color</span>
+					<button type="button" class="gradient-color-popup-close" onclick={closeColorEditor}
+						>×</button>
+				</div>
+				<ColorPicker
+					color={picker_color}
+					forceExpanded
+					onchange={onPickerChange}
+					onStartEdit={onColorStartEdit}
+					onEndEdit={onColorEndEdit} />
+			</div>
+		{/if}
+
+		<div class="gradient-stop-editor">
+			{#if selected_stop_node}
+				<NodeInspector nodes={[selected_stop_node]} level={level + 1} order="solo" />
+			{:else}
+				<div class="empty-state">Double-click the ribbon to add a stop.</div>
+			{/if}
+		</div>
+	</div>
+{/snippet}
+
+{#if liveNode.node_type === GRADIENT_NODE_TYPE}
+	{@render defaultHeader?.(gradientHeaderExtra)}
+	{@render defaultContent?.(gradientContent)}
 {/if}
 
 <style>

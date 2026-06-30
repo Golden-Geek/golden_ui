@@ -218,6 +218,7 @@ export const sendCreateUserItemIntent = async (
 	item: UiCreatableUserItem
 ): Promise<CreateUserItemResult> => {
 	return sendCreateUserItemByTypeIntent(parent, item.node_type, item.label, {
+		initial_params: item.initial_params,
 		select_when_created: item.select_when_created
 	});
 };

@@ -945,6 +945,12 @@ const fromRustCreatableUserItem = (item: RustCreatableUserItem): UiCreatableUser
 				.map((segment) => (typeof segment === 'string' ? segment.trim() : ''))
 				.filter((segment) => segment.length > 0)
 		: [],
+	initial_params: Array.isArray(item.initial_params)
+		? item.initial_params.map((entry) => ({
+				decl_id: entry.decl_id,
+				value: fromRustParamValue(entry.value)
+			}))
+		: [],
 	select_when_created: Boolean(item.select_when_created)
 });
 

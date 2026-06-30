@@ -21,7 +21,9 @@
 		controlNodeType = '',
 		layoutMode = 'default',
 		includeChildren = true,
-		maxChildLevel = null
+		maxChildLevel = null,
+		labelOverride = null,
+		density = 'default'
 	} = $props<{
 		nodes: UiNodeDto[];
 		level: number;
@@ -30,6 +32,8 @@
 		layoutMode?: 'default' | 'dashboard';
 		includeChildren?: boolean;
 		maxChildLevel?: number | null;
+		labelOverride?: string | null;
+		density?: 'default' | 'compact';
 	}>();
 
 	let session = $derived(appState.session);
@@ -348,33 +352,63 @@
 			{/if}
 		{/snippet}
 
+		{#snippet builtInChildItems(controlNodeType: String = '')}
+			{#each childNodes as child, index (child.node_id)}
+				<Self
+					nodes={[child]}
+					level={level + 1}
+					order={childNodes.length === 1
+						? 'solo'
+						: index === 0
+							? 'first'
+							: index === childNodes.length - 1
+								? 'last'
+								: ''}
+					{layoutMode}
+					{includeChildren}
+					{maxChildLevel}
+					{density}
+					{controlNodeType} />
+			{/each}
+		{/snippet}
+
 		{#snippet builtInChildren(controlNodeType: String = '')}
 			<div class="node-inspector-children">
 				{#if !collapsed}
 					<div class="node-inspector-children-wrapper" transition:slide={{ duration: 200 }}>
-						{#each childNodes as child, index (child.node_id)}
-							<Self
-								nodes={[child]}
-								level={level + 1}
-								order={childNodes.length === 1
-									? 'solo'
-									: index === 0
-										? 'first'
-										: index === childNodes.length - 1
-											? 'last'
-											: ''}
-								{layoutMode}
-								{includeChildren}
-								{maxChildLevel}
-								{controlNodeType} />
-						{/each}
+						{@render builtInChildItems(controlNodeType)}
+					</div>
+				{/if}
+			</div>
+		{/snippet}
+
+		{#snippet builtInChildrenStatic(controlNodeType: String = '')}
+			<div class="node-inspector-children">
+				<div class="node-inspector-children-wrapper">
+					{@render builtInChildItems(controlNodeType)}
+				</div>
+			</div>
+		{/snippet}
+
+		{#snippet builtInContent(content?: Snippet, extraClass: String = '')}
+			<div class="node-inspector-content {extraClass} {showAddButton ? 'with-add-button' : ''}">
+				{#if !collapsed}
+					<div class="node-inspector-custom-content-wrapper" transition:slide={{ duration: 200 }}>
+						{@render content?.()}
 					</div>
 				{/if}
 			</div>
 		{/snippet}
 
 		{#if isParameter}
-			<ParameterInspector {node} {level} {order} {controlNodeType} {layoutMode}>
+			<ParameterInspector
+				{node}
+				{level}
+				{order}
+				{controlNodeType}
+				{layoutMode}
+				{labelOverride}
+				{density}>
 				{#snippet defaultChildren(extraClass: String = '')}
 					{@render builtInChildren(extraClass)}
 				{/snippet}
@@ -394,8 +428,11 @@
 				{#snippet defaultHeader(headerExtra?: Snippet)}
 					{@render builtInHeader(headerExtra)}
 				{/snippet}
+				{#snippet defaultContent(content?: Snippet, extraClass: String = '')}
+					{@render builtInContent(content, extraClass)}
+				{/snippet}
 				{#snippet defaultChildren(extraClass: String = '')}
-					{@render builtInChildren(extraClass)}
+					{@render builtInChildrenStatic(extraClass)}
 				{/snippet}
 			</CustomInspectorComponent>
 		{:else}
@@ -458,6 +495,7 @@
 	.node-inspector.layout-dashboard .title-text,
 	.node-inspector.layout-dashboard .node-inspector-children,
 	.node-inspector.layout-dashboard .node-inspector-children-wrapper,
+	.node-inspector.layout-dashboard .node-inspector-custom-content-wrapper,
 	.node-inspector.layout-dashboard :global(.node-inspector-content) {
 		min-inline-size: 0;
 	}
@@ -531,7 +569,7 @@
 
 		.node-title .title-text {
 			padding: 0 0.15rem;
-			line-height: 0.5rem;
+			/* line-height: 0.5rem; */
 			vertical-align: text-top;
 		}
 

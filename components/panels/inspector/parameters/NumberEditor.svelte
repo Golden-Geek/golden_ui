@@ -32,7 +32,8 @@
 	let readOnly = $derived(Boolean(param?.read_only));
 	let enabled = $derived(liveNode.meta.enabled);
 	let widgetHint = $derived((param?.ui_hints.widget ?? '').trim().toLowerCase());
-	let timeWidget = $derived(widgetHint === 'time');
+	let timeSliderWidget = $derived(widgetHint === 'time_slider');
+	let timeWidget = $derived(widgetHint === 'time' || timeSliderWidget);
 
 	let kind = $derived(param?.value.kind ?? 'float');
 	let isInteger = $derived(kind === 'int');
@@ -52,7 +53,7 @@
 	let isEditing = $state(false);
 	let editSession = createUiEditSession('Edit number', 'param-number');
 	const NUMERIC_EPSILON = 1e-9;
-	let forceSlider = $derived(presentation.show_slider === true && !timeWidget);
+	let forceSlider = $derived(presentation.show_slider === true || timeSliderWidget);
 	let fieldOnlyWidget = $derived(
 		!forceSlider &&
 			(timeWidget ||
@@ -395,6 +396,10 @@
 	   the inspector (default layout) too. */
 	.number-property-container.infinite {
 		gap: 0.2rem;
+		flex: 0 0 auto;
+		inline-size: auto;
+		width: auto;
+		justify-content: flex-start;
 	}
 
 	.number-property-container.infinite .slider-wrapper {
@@ -402,7 +407,49 @@
 	}
 
 	.number-property-container.infinite .number-field {
+		flex: 0 0 5rem;
+		inline-size: 5rem;
 		margin-left: 0;
+	}
+
+	:global(.parameter-inspector.density-compact) .number-property-container {
+		justify-content: flex-end;
+		min-inline-size: 0;
+	}
+
+	:global(.parameter-inspector.density-compact)
+		.number-property-container.infinite
+		.slider-wrapper {
+		flex: 0 0 auto;
+		justify-content: center;
+	}
+
+	:global(.parameter-inspector.density-compact) .number-property-container.infinite {
+		flex: 0 0 auto;
+		inline-size: auto;
+		justify-content: flex-start;
+		width: auto;
+	}
+
+	:global(.parameter-inspector.density-compact) .number-property-container .number-field {
+		flex: 0 0 auto;
+		inline-size: clamp(4rem, 34%, 5.5rem);
+		min-inline-size: 4rem;
+		max-width: none;
+		margin-left: 0;
+	}
+
+	:global(.parameter-inspector.density-compact)
+		.number-property-container
+		.number-field.time-field {
+		inline-size: clamp(7rem, 42%, 9rem);
+		min-inline-size: 7rem;
+	}
+
+	:global(.parameter-inspector.density-compact) .number-property-container.infinite .number-field {
+		flex: 0 0 4.6rem;
+		inline-size: 4.6rem;
+		min-inline-size: 4.6rem;
 	}
 
 	.number-property-container.field-only .number-field {
@@ -428,6 +475,9 @@
 
 	.number-field.time-field {
 		font-variant-numeric: tabular-nums;
+		flex: 0 0 7.2rem;
+		inline-size: 7.2rem;
+		min-inline-size: 7.2rem;
 		max-width: 9rem;
 	}
 

@@ -78,8 +78,14 @@ const finalizeEntries = (
 ): ContextMenuItem[] => {
 	const branches = entries.filter((entry): entry is MenuBranchEntry => entry.kind === 'branch');
 	const leaves = entries.filter((entry): entry is MenuLeafEntry => entry.kind === 'leaf');
+	const regularBranches = branches.filter((branch) => branch.label !== 'Generic');
+	const genericBranches = branches.filter((branch) => branch.label === 'Generic');
 
-	const items = branches.map((branch) => createBranchItem(branch, onCreateItem));
+	const items = regularBranches.map((branch) => createBranchItem(branch, onCreateItem));
+	if (regularBranches.length > 0 && genericBranches.length > 0) {
+		items.push({ separator: true });
+	}
+	items.push(...genericBranches.map((branch) => createBranchItem(branch, onCreateItem)));
 	if (branches.length > 0 && leaves.length > 0) {
 		items.push({ separator: true });
 	}

@@ -43,7 +43,9 @@
 		order,
 		defaultChildren,
 		controlNodeType = '',
-		layoutMode = 'default'
+		layoutMode = 'default',
+		labelOverride = null,
+		density = 'default'
 	} = $props<{
 		node: UiNodeDto;
 		level: number;
@@ -51,6 +53,8 @@
 		controlNodeType?: String;
 		layoutMode?: 'default' | 'dashboard';
 		defaultChildren?: Snippet<[String?]>;
+		labelOverride?: string | null;
+		density?: 'default' | 'compact';
 	}>();
 
 	let session = $derived(appState.session);
@@ -64,6 +68,7 @@
 		liveNode.data.kind === 'parameter' ? liveNode.data.param : null
 	);
 	let meta: UiNodeMetaDto = $derived(liveNode.meta);
+	let displayLabel = $derived(labelOverride ?? liveNode.meta.label);
 	let type: string = $derived(param?.value.kind ?? '');
 	let canDisable = $derived(meta.can_be_disabled ?? false);
 	let showsEnableButton = $derived(canDisable && !(layoutMode === 'dashboard' && level === 0));
@@ -545,7 +550,7 @@
 
 {#if visible}
 	<div
-		class="parameter-inspector {order} {'level-' + level} {controlNodeType}
+		class="parameter-inspector {order} {'level-' + level} {controlNodeType} density-{density}
 		{readOnly ? 'readonly' : ''} {currentControlMode !== 'manual' ? 'controlled' : ''}"
 		class:control-menu-open={controlMenuOpen}
 		class:layout-dashboard={layoutMode === 'dashboard'}
@@ -588,7 +593,7 @@
 										renamingState.isRenaming = true;
 									}}
 									title="Double-click to rename">
-									{liveNode.meta.label}
+									{displayLabel}
 								</span>
 							{/if}
 						{:else}
@@ -598,7 +603,7 @@
 								role="button"
 								tabindex="-1"
 								ondragstart={startParameterLabelDrag}>
-								{liveNode.meta.label}
+								{displayLabel}
 							</span>
 						{/if}
 						<NodeWarningBadge {warnings} />
@@ -800,7 +805,7 @@
 			{/if}
 			{@render defaultChildren?.(currentControlMode)}
 		{:else}
-			{liveNode.meta.label} has no parameter data.
+			{displayLabel} has no parameter data.
 		{/if}
 	</div>
 {/if}
@@ -845,8 +850,9 @@
 		width: 100%;
 		display: flex;
 		align-items: center;
-		justify-content: space-between;
+		justify-content: flex-start;
 		gap: 0.25rem;
+		min-inline-size: 0;
 	}
 
 	.parameter-controls {
@@ -854,16 +860,29 @@
 		align-items: center;
 		justify-content: flex-end;
 		gap: 0.25rem;
-		flex: 1;
+		flex: 0 1 min(15rem, 66%);
+		margin-left: auto;
+		min-inline-size: min(10rem, 100%);
 	}
 
 	.parameter-wrapper {
 		display: flex;
 		align-items: center;
 		justify-content: right;
-		flex: 1;
+		flex: 1 1 auto;
 		min-width: 0;
 		max-width: 15rem;
+	}
+
+	:global(
+		.parameter-inspector:not(.density-compact)
+			.parameter-controls:has(.number-property-container.infinite)
+	),
+	:global(
+		.parameter-inspector:not(.density-compact)
+			.parameter-wrapper:has(.number-property-container.infinite)
+	) {
+		flex: 0 0 auto;
 	}
 
 	.custom-prop-name-text,
@@ -895,8 +914,95 @@
 	.parameter-info {
 		display: flex;
 		align-items: center;
-		min-width: max-content;
+		flex: 0 1 auto;
+		min-width: 0;
+		max-inline-size: min(45%, 14rem);
 		gap: 0.25rem;
+	}
+
+	.parameter-label,
+	.custom-prop-name-text {
+		display: inline-block;
+		min-inline-size: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.parameter-inspector.density-compact {
+		padding-left: 0;
+		padding-bottom: 0;
+	}
+
+	.parameter-inspector.density-compact.controlled {
+		padding-left: 0.18rem;
+	}
+
+	.parameter-inspector.density-compact .firstline {
+		flex-wrap: nowrap;
+		justify-content: flex-start;
+		gap: 0.25rem;
+		min-inline-size: 0;
+	}
+
+	.parameter-inspector.density-compact .parameter-info {
+		flex: 0 1 auto;
+		min-inline-size: 0;
+		max-inline-size: 36%;
+		gap: 0.18rem;
+	}
+
+	.parameter-inspector.density-compact .parameter-label,
+	.parameter-inspector.density-compact .custom-prop-name-text {
+		display: inline-block;
+		min-inline-size: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.parameter-inspector.density-compact .parameter-controls {
+		flex: 0 1 auto;
+		justify-content: flex-end;
+		margin-left: auto;
+		min-inline-size: 0;
+	}
+
+	.parameter-inspector.density-compact .parameter-wrapper {
+		flex: 0 1 auto;
+		justify-content: flex-end;
+		max-width: none;
+		min-inline-size: 0;
+	}
+
+	:global(
+		.parameter-inspector.density-compact
+			.parameter-wrapper:has(.number-property-container:not(.infinite))
+	),
+	:global(.parameter-inspector.density-compact .parameter-wrapper:has(.string-editor)) {
+		flex: 1 1 auto;
+	}
+
+	.parameter-inspector.density-compact .control-mode-menu,
+	.parameter-inspector.density-compact .control-mode-placeholder {
+		flex: 0 0 auto;
+	}
+
+	:global(
+		.parameter-inspector.density-compact
+			.parameter-controls:has(.number-property-container.infinite)
+	) {
+		flex: 0 0 auto;
+	}
+
+	@media (max-width: 34rem) {
+		.parameter-inspector.density-compact .firstline {
+			flex-wrap: wrap;
+		}
+
+		.parameter-inspector.density-compact .parameter-info {
+			max-inline-size: 100%;
+		}
 	}
 
 	.parameter-inspector.layout-dashboard {
