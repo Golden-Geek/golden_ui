@@ -1211,6 +1211,7 @@ export const fromRustSnapshot = (snapshot: RustUiSnapshot): UiSnapshot => {
 export const fromRustEventBatch = (batch: RustUiEventBatch): UiEventBatch => ({
 	from: batch.from ?? undefined,
 	to: batch.to ?? undefined,
+	runtime: batch.runtime ?? undefined,
 	events: batch.events.map(fromRustEvent)
 });
 
@@ -1473,7 +1474,7 @@ export const createHttpUiClient = (options: HttpClientOptions = {}): UiClient =>
 					if (!active) {
 						return;
 					}
-					if (batch.events.length > 0) {
+					if (batch.events.length > 0 || batch.runtime) {
 						onBatch(batch);
 					}
 					if (batch.to) {

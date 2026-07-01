@@ -25,6 +25,23 @@
 			? `${fileName}*`
 			: fileName;
 	});
+	let engineRateClass = $derived.by((): string => {
+		const hz = session.engineHz;
+		if (hz === null) {
+			return 'unknown';
+		}
+		if (hz < 30) {
+			return 'low';
+		}
+		if (hz <= 60) {
+			return 'mid';
+		}
+		return 'high';
+	});
+	let engineRateLabel = $derived.by((): string => {
+		const hz = session.engineHz;
+		return hz === null ? '-- Hz' : `${Math.round(hz)} Hz`;
+	});
 
 	const refreshMaximizeState = async (): Promise<void> => {
 		const maximized = await invokeDesktopCommand(
@@ -148,6 +165,10 @@
 		<div class="app-title">
 			<span class="project-title">{projectTitle}</span>
 			<span class="app-title-app">Chataigne 2.0.0</span>
+			<span class="engine-rate {engineRateClass}" title="Engine framerate">
+				<span class="engine-rate-dot" aria-hidden="true"></span>
+				<span>{engineRateLabel}</span>
+			</span>
 		</div>
 	</div>
 	<div
@@ -246,6 +267,45 @@
 		letter-spacing: 0.08em;
 		text-transform: uppercase;
 		color: rgb(from var(--gc-color-text) r g b / 58%);
+	}
+
+	.engine-rate {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.35rem;
+		min-width: 3.8rem;
+		padding: 0.15rem 0.42rem;
+		border: 0.05rem solid currentColor;
+		border-radius: 0.35rem;
+		font-size: 0.68rem;
+		font-weight: 700;
+		line-height: 1;
+		color: rgb(from var(--gc-color-text) r g b / 45%);
+		background-color: rgb(from var(--gc-color-text) r g b / 7%);
+		-webkit-app-region: no-drag;
+	}
+
+	.engine-rate.low {
+		color: var(--gc-color-error);
+		background-color: rgb(from var(--gc-color-error) r g b / 12%);
+	}
+
+	.engine-rate.mid {
+		color: var(--gc-color-warning);
+		background-color: rgb(from var(--gc-color-warning) r g b / 12%);
+	}
+
+	.engine-rate.high {
+		color: var(--gc-color-success);
+		background-color: rgb(from var(--gc-color-success) r g b / 12%);
+	}
+
+	.engine-rate-dot {
+		width: 0.45rem;
+		height: 0.45rem;
+		border-radius: 50%;
+		background-color: currentColor;
+		box-shadow: 0 0 0.35rem currentColor;
 	}
 
 	.controls {

@@ -499,7 +499,12 @@ export interface UiEventDto {
 export interface UiEventBatch {
 	from?: EventTime;
 	to?: EventTime;
+	runtime?: UiRuntimeStats;
 	events: UiEventDto[];
+}
+
+export interface UiRuntimeStats {
+	engine_hz: number;
 }
 
 export interface UiAnimationCurveFitPoint {

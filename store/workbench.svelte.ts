@@ -70,6 +70,7 @@ export interface WorkbenchSession {
 	readonly logRecords: UiLogRecord[];
 	readonly logMaxEntries: number;
 	readonly logUiUpdateHz: number;
+	readonly engineHz: number | null;
 	readonly selectedNodesIds: NodeId[];
 	readonly selectedNodeId: NodeId | null;
 	readonly status: WorkbenchConnectionStatus;
@@ -219,6 +220,7 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 	let snapshotRequestInFlight: Promise<UiSnapshot> | null = null;
 	let hasLoadedSnapshot = false;
 	let connectionState: UiTransportConnectionState = 'connecting';
+	let engineHz = $state<number | null>(null);
 	const pendingIntentQueue: QueuedIntent[] = [];
 	let intentQueueProcessing = false;
 	// Keep batch payloads bounded while still reducing setParam fan-out.
@@ -403,6 +405,9 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 
 	const applyBatch = (batch: UiEventBatch): void => {
 		const applyStartedAt = nowMs();
+		if (batch.runtime) {
+			engineHz = batch.runtime.engine_hz;
+		}
 		const graphEvents = logger.partitionBatchEvents(batch.events);
 		customEvents.applyBatchEvents(graphEvents);
 		let graphPatchMs = 0;
@@ -777,6 +782,7 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 			resetProjectFileFormat();
 			hasLoadedSnapshot = false;
 			connectionState = 'connecting';
+			engineHz = null;
 			syncConnectionStatus();
 			mountedCleanup = null;
 		};
@@ -799,6 +805,9 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 		},
 		get logUiUpdateHz(): number {
 			return logger.logUiUpdateHz;
+		},
+		get engineHz(): number | null {
+			return engineHz;
 		},
 		get selectedNodesIds(): NodeId[] {
 			return selection.selectedNodeIds;
