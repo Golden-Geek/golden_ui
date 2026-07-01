@@ -333,6 +333,7 @@ export interface UiCreatableUserItem {
 	menu_path_colors?: string[];
 	color?: string;
 	select_when_created: boolean;
+	separator_before?: boolean;
 }
 
 export interface UiNodeTypeDescriptor {

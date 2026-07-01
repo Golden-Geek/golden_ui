@@ -951,7 +951,8 @@ const fromRustCreatableUserItem = (item: RustCreatableUserItem): UiCreatableUser
 				value: fromRustParamValue(entry.value)
 			}))
 		: [],
-	select_when_created: Boolean(item.select_when_created)
+	select_when_created: Boolean(item.select_when_created),
+	separator_before: Boolean(item.separator_before)
 });
 
 const fromRustNode = (node: RustUiNodeDto, enumOptionsById: EnumOptionsById): UiNodeDto => ({

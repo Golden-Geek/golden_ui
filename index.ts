@@ -1,6 +1,14 @@
 export { createGraphStore } from './store/graph.svelte';
 export type { GraphState, GraphStore } from './store/graph.svelte';
 export { createWorkbenchSession } from './store/workbench.svelte';
+export {
+	clearPerformanceSamples,
+	performanceProfilerState,
+	recordPerformanceSample,
+	setPerformanceProfilerEnabled,
+	type PerformanceSample,
+	type PerformanceSampleLevel
+} from './store/performance-profiler.svelte';
 export type {
 	WorkbenchSession,
 	WorkbenchSessionOptions,
@@ -71,6 +79,7 @@ export { default as Inspector } from './components/panels/inspector/InspectorPan
 export { default as NodeInspector } from './components/panels/inspector/NodeInspector.svelte';
 export { resolveParameterEditor } from './components/panels/inspector/inspector.svelte';
 export { default as DropdownEditor } from './components/panels/inspector/parameters/DropdownEditor.svelte';
+export { default as ReferenceEditor } from './components/panels/inspector/parameters/ReferenceEditor.svelte';
 export { default as LoggerPanel } from './components/panels/logger/LoggerPanel.svelte';
 export { default as WarningsPanel } from './components/panels/warnings/WarningsPanel.svelte';
 export { default as DashboardPanel } from './components/panels/dashboard/DashboardPanel.svelte';

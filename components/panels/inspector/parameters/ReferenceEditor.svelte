@@ -272,7 +272,15 @@
 				return byId;
 			}
 		}
-		return getNodeByUuid(value.uuid);
+		const byUuid = getNodeByUuid(value.uuid);
+		if (byUuid) {
+			return byUuid;
+		}
+		if (rootNodeId !== null && (value.relative_path_from_root?.length ?? 0) > 0) {
+			const byPath = resolveDeclPath(rootNodeId, value.relative_path_from_root ?? []);
+			return byPath !== null ? (graph.nodesById.get(byPath) ?? null) : null;
+		}
+		return null;
 	});
 
 	let triggerElement = $state<HTMLButtonElement | null>(null);

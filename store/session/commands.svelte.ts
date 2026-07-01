@@ -8,6 +8,7 @@ import {
 	saveProjectFile,
 	saveProjectFileAs
 } from '../project-files.svelte';
+import { copyTextToClipboard } from '../../utils/clipboard';
 import type { SelectionMode } from './types';
 
 interface NodeClipboardEntry {
@@ -15,6 +16,12 @@ interface NodeClipboardEntry {
 	node_type: string;
 	itemKind: string;
 	label: string;
+}
+
+interface NodeClipboardPayload {
+	kind: 'golden-ui.nodes';
+	version: 1;
+	nodes: NodeClipboardEntry[];
 }
 
 interface WorkbenchCommandSuiteOptions {
@@ -232,7 +239,7 @@ export const createWorkbenchCommandSuite = (
 	};
 
 	const copySelectedNodesCommand = (): boolean => {
-		const selected = options.getSelectedNodes();
+		const selected = options.getSelectedNodes().filter(isNodeRemovable);
 		if (selected.length === 0) {
 			return false;
 		}
@@ -242,6 +249,12 @@ export const createWorkbenchCommandSuite = (
 			itemKind: node.user_item_kind,
 			label: node.meta.label.trim().length > 0 ? node.meta.label.trim() : node.node_type
 		}));
+		const payload: NodeClipboardPayload = {
+			kind: 'golden-ui.nodes',
+			version: 1,
+			nodes: nodeClipboard
+		};
+		void copyTextToClipboard(JSON.stringify(payload, null, 2));
 		return true;
 	};
 

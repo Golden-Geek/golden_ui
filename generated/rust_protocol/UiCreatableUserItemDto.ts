@@ -28,4 +28,8 @@ initial_params?: Array<UiCreateUserItemInitialParam>,
 /**
  * Whether UI creation flows should auto-select the created item.
  */
-select_when_created: boolean, };
+select_when_created: boolean,
+/**
+ * Whether the Add menu should render a divider immediately above this item.
+ */
+separator_before?: boolean, };

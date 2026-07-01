@@ -8,10 +8,13 @@ import {
 	projectFileDialogTitle,
 	projectFileFilterLabel
 } from './project-file-format.svelte';
+import { recordPerformanceSample } from './performance-profiler.svelte';
 
 export const BROWSER_PROJECT_DIRECTORY_LABEL = '~/Documents/Chataigne';
 export const UNTITLED_PROJECT_LABEL = 'Untitled';
 const PROJECT_FILE_LOG_TAG = 'project-file';
+
+const nowMs = (): number => (typeof performance !== 'undefined' ? performance.now() : Date.now());
 
 export interface ProjectFileActionResult {
 	ok: boolean;
@@ -117,7 +120,7 @@ const toProjectFileErrorMessage = (fallback: string, error: unknown): string => 
 
 const appendProjectFileLog = (
 	session: WorkbenchSession | null,
-	level: 'warning' | 'error',
+	level: 'info' | 'warning' | 'error',
 	message: string
 ): void => {
 	session?.appendUiLogRecord(level, PROJECT_FILE_LOG_TAG, message);
@@ -174,11 +177,21 @@ const saveProjectAtPath = async (
 	path: string
 ): Promise<ProjectFileActionResult> => {
 	const normalizedPath = normalizeProjectFilePath(path);
+	const startedAt = nowMs();
 	try {
 		await session.client.projectSave(normalizedPath);
 		setCurrentProjectPath(normalizedPath);
 		rememberLastOpenedPath(normalizedPath);
 		markProjectStateClean(session.currentHistoryStateId);
+		recordPerformanceSample('info', 'project.save', `Saved project: ${normalizedPath}`, {
+			path: normalizedPath,
+			totalMs: nowMs() - startedAt
+		});
+		appendProjectFileLog(
+			session,
+			'info',
+			`Saved project: ${normalizedPath}`
+		);
 		return projectFileActionSucceeded();
 	} catch (error) {
 		return projectFileActionFailed(
@@ -191,12 +204,31 @@ const saveProjectAtPath = async (
 };
 
 const loadProjectAtPath = async (session: WorkbenchSession, path: string): Promise<boolean> => {
+	const startedAt = nowMs();
 	try {
+		const loadStartedAt = nowMs();
 		await session.client.projectLoad(path);
-		await session.refreshSnapshot();
+		const loadMs = nowMs() - loadStartedAt;
+		const refreshStartedAt = nowMs();
+		const refreshed = await session.refreshSnapshot();
+		const refreshMs = nowMs() - refreshStartedAt;
+		if (!refreshed) {
+			return false;
+		}
 		setCurrentProjectPath(path);
 		rememberLastOpenedPath(path);
 		markProjectStateClean(0);
+		recordPerformanceSample('info', 'project.open', `Opened project: ${path}`, {
+			path,
+			loadMs,
+			refreshMs,
+			totalMs: nowMs() - startedAt
+		});
+		appendProjectFileLog(
+			session,
+			'info',
+			`Opened project: ${path}`
+		);
 		return true;
 	} catch (error) {
 		const message = toProjectFileErrorMessage(`Failed to open project "${path}"`, error);

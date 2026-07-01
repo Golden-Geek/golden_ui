@@ -89,7 +89,13 @@ const finalizeEntries = (
 	if (branches.length > 0 && leaves.length > 0) {
 		items.push({ separator: true });
 	}
-	items.push(...leaves.map((leaf) => createLeafItem(leaf.item, onCreateItem)));
+	for (const leaf of leaves) {
+		const previous = items[items.length - 1];
+		if (leaf.item.separator_before && previous && !previous.separator) {
+			items.push({ separator: true });
+		}
+		items.push(createLeafItem(leaf.item, onCreateItem));
+	}
 	return items;
 };
 

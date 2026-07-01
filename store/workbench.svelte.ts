@@ -23,6 +23,10 @@ import { wholeGraphScope } from '../types';
 import { handleCommandShortcut } from './commands.svelte';
 import { resetProjectFileFormat, setProjectFileFormat } from './project-file-format.svelte';
 import { syncProjectFilePathFromSnapshot } from './project-files.svelte';
+import {
+	recordPerformanceSample,
+	setPerformanceProfilerEnabled
+} from './performance-profiler.svelte';
 import { createWorkbenchDescriptionStore } from './session/descriptions.svelte';
 import { createWorkbenchCustomEventStore } from './session/custom-events.svelte';
 import { createWorkbenchFooterHoverStore } from './session/footer-hover.svelte';
@@ -122,6 +126,7 @@ interface QueuedIntent {
 const DEFAULT_RETRY_MS = 1000;
 const UI_LOG_TAG_INTENT = 'intent';
 const UI_LOG_TAG_TRANSPORT = 'transport';
+const UI_PERF_SLOW_SNAPSHOT_MS = 100;
 
 const defaultEventTime: EventTime = { tick: 0, micro: 0, seq: 0 };
 
@@ -178,6 +183,17 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 			return false;
 		}
 	})();
+	const performanceProfilerEnabled = (() => {
+		if (typeof window === 'undefined') {
+			return false;
+		}
+		try {
+			return window.localStorage.getItem('gc_perf_profiler') === '1';
+		} catch {
+			return false;
+		}
+	})();
+	setPerformanceProfilerEnabled(performanceProfilerEnabled);
 	const logUiPerf = (message: string): void => {
 		if (!shouldLogUiPerf) {
 			return;
@@ -315,9 +331,21 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 				(typeof performance !== 'undefined' ? performance.now() : Date.now()) - flushStartedAt;
 			const t = (snapshot as any).__timings || {};
 			const totalMs = (t.totalMs || 0) + applyElapsedMs + flushElapsedMs;
-			logUiPerf(
-				`[ui] snapshot ${context} nodes=${snapshot.nodes.length} bytes=${t.bytes || 0} fetch_ms=${(t.fetchMs || 0).toFixed(0)} read_ms=${(t.readMs || 0).toFixed(0)} parse_ms=${(t.parseMs || 0).toFixed(0)} apply_graph_ms=${applyElapsedMs.toFixed(0)} flush_ms=${flushElapsedMs.toFixed(0)} total_ms=${totalMs.toFixed(0)}`
-			);
+			const message = `[ui] snapshot ${context} nodes=${snapshot.nodes.length} bytes=${t.bytes || 0} fetch_ms=${(t.fetchMs || 0).toFixed(0)} read_ms=${(t.readMs || 0).toFixed(0)} parse_ms=${(t.parseMs || 0).toFixed(0)} apply_graph_ms=${applyElapsedMs.toFixed(0)} flush_ms=${flushElapsedMs.toFixed(0)} total_ms=${totalMs.toFixed(0)}`;
+			logUiPerf(message);
+			if (totalMs >= UI_PERF_SLOW_SNAPSHOT_MS) {
+				recordPerformanceSample('warning', 'ui.snapshot', message, {
+					context,
+					nodes: snapshot.nodes.length,
+					bytes: t.bytes || 0,
+					fetchMs: t.fetchMs || 0,
+					readMs: t.readMs || 0,
+					parseMs: t.parseMs || 0,
+					applyGraphMs: applyElapsedMs,
+					flushMs: flushElapsedMs,
+					totalMs
+				});
+			}
 		});
 	};
 

@@ -9,6 +9,7 @@
 		sendPatchMetaIntent,
 		sendSetParamConstraintsIntent
 	} from '../../store/ui-intents';
+	import { executeCommand } from '../../store/commands.svelte';
 	import type { ContextMenuAnchor, ContextMenuItem } from './context-menu';
 	import {
 		closeNodeContextMenu,
@@ -345,6 +346,9 @@
 
 	let isRoot = $derived(Boolean(activeNode && graphState?.rootId === activeNode.node_id));
 	let canDelete = $derived(
+		Boolean(activeNode && activeNode.meta.user_permissions.can_remove_and_duplicate && !isRoot)
+	);
+	let canCopy = $derived(
 		Boolean(activeNode && activeNode.meta.user_permissions.can_remove_and_duplicate && !isRoot)
 	);
 	let canDuplicate = $derived.by((): boolean => {
@@ -745,6 +749,31 @@
 		void copyTextToClipboard(value);
 	};
 
+	const activeNodeClipboardJson = (): string | null => {
+		if (!activeNode) {
+			return null;
+		}
+		return JSON.stringify(
+			{
+				kind: 'golden-ui.nodes',
+				version: 1,
+				nodes: [
+					{
+						sourceId: activeNode.node_id,
+						node_type: activeNode.node_type,
+						itemKind: activeNode.user_item_kind,
+						label:
+							activeNode.meta.label.trim().length > 0
+								? activeNode.meta.label.trim()
+								: activeNode.node_type
+					}
+				]
+			},
+			null,
+			2
+		);
+	};
+
 	const nextDuplicateLabel = (): string => {
 		const baseLabel =
 			activeNode && activeNode.meta.label.trim().length > 0
@@ -855,6 +884,23 @@
 		closeMenu();
 	};
 
+	const selectCopyNode = (_event: MouseEvent): void => {
+		if (!activeNode) {
+			return;
+		}
+		session?.selectNode(activeNode.node_id, 'REPLACE');
+		void executeCommand('edit.copy', { source: 'menu' });
+		closeMenu();
+	};
+
+	const selectCopyNodeAsJson = (_event: MouseEvent): void => {
+		const json = activeNodeClipboardJson();
+		if (json) {
+			void copyTextToClipboard(json);
+		}
+		closeMenu();
+	};
+
 	const createUserItem = (item: UiCreatableUserItem): void => {
 		if (!activeNode) {
 			return;
@@ -960,8 +1006,23 @@
 			items.push(...customNodeContextMenuItems);
 		}
 
-		if (canDuplicate || canDelete) {
+		if (canCopy || canDuplicate || canDelete) {
 			items.push({ separator: true });
+		}
+		if (canCopy) {
+			items.push({
+				id: 'copy',
+				label: 'Copy',
+				commandId: 'edit.copy',
+				icon: copyPathIcon,
+				action: selectCopyNode
+			});
+			items.push({
+				id: 'copy-json',
+				label: 'Copy as JSON',
+				icon: copyPathIcon,
+				action: selectCopyNodeAsJson
+			});
 		}
 		if (canDuplicate) {
 			items.push({
