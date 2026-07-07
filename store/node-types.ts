@@ -145,6 +145,10 @@ export const getIconURLForNode = (node: UiNodeDto | null): string => {
 		return activeNodeIcons.fallback;
 	}
 
+	if (node.meta.presentation?.icon) {
+		return node.meta.presentation.icon;
+	}
+
 	const isManager = (node.creatable_user_items?.length ?? 0) > 0;
 
 	if (node.data.kind === 'parameter') {

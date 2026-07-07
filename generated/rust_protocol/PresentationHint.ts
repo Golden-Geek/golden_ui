@@ -11,6 +11,10 @@ export type PresentationHint = {
  */
 color?: Color | null, 
 /**
+ * Preferred UI icon, as a data URI (e.g. `data:image/svg+xml;base64,...`).
+ */
+icon?: string | null, 
+/**
  * Whether UI tree/inspector containers should start collapsed until a user chooses otherwise.
  */
 collapsed?: boolean, 

@@ -990,6 +990,7 @@ const fromRustNode = (node: RustUiNodeDto, enumOptionsById: EnumOptionsById): Ui
 								a: node.meta.presentation.color.a
 							}
 						: undefined,
+					icon: node.meta.presentation.icon ?? undefined,
 					collapsed: node.meta.presentation.collapsed ?? undefined,
 					warnings: Array.isArray(node.meta.presentation.warnings)
 						? node.meta.presentation.warnings.map((warning) => ({
