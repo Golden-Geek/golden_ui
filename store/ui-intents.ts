@@ -200,7 +200,6 @@ export const sendDuplicateNodeIntent = async (
 	source: NodeId,
 	new_parent: NodeId,
 	new_prev_sibling?: NodeId,
-	label?: string,
 	initial_params?: UiCreateUserItemInitialParam[]
 ): Promise<boolean> => {
 	return sendUiIntent({
@@ -208,7 +207,6 @@ export const sendDuplicateNodeIntent = async (
 		source,
 		new_parent,
 		new_prev_sibling,
-		label,
 		initial_params
 	});
 };

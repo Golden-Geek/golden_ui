@@ -34,7 +34,6 @@
 		getDashboardGenericWidgetCreationDefaults,
 		getDashboardNodeWidgetCreationDefaults,
 		getDashboardWidgetOrderingState,
-		getNextAvailableChildLabel,
 		moveDashboardWidgetByDelta,
 		moveDashboardWidgetToBack,
 		moveDashboardWidgetToFront,
@@ -2789,13 +2788,7 @@
 		if (!canDuplicateWidget || !parentNode) {
 			return;
 		}
-		const baseLabel =
-			widgetLabelText.length > 0 ? `${widgetLabelText} Copy` : `${liveNode.node_type} Copy`;
-		await duplicateDashboardWidget(
-			getGraph,
-			liveNode.node_id,
-			getNextAvailableChildLabel(graph, parentNode.node_id, baseLabel)
-		);
+		await duplicateDashboardWidget(getGraph, liveNode.node_id);
 	};
 
 	const deleteWidgetFromContextMenu = async (): Promise<void> => {

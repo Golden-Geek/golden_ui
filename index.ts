@@ -10,6 +10,16 @@ export {
 	type PerformanceSampleLevel
 } from './store/performance-profiler.svelte';
 export type {
+	WorkbenchLoadingState,
+	WorkbenchLoadingStateOptions,
+	WorkbenchLoadingStateRequest,
+	WorkbenchLoadingOperation,
+	WorkbenchLoadingFinishRequest,
+	WorkbenchLoadingStep,
+	WorkbenchLoadingStepDefinition,
+	WorkbenchLoadingStepId,
+	WorkbenchLoadingStepStatus,
+	WorkbenchLoadingTone,
 	WorkbenchSession,
 	WorkbenchSessionOptions,
 	NodeWarningRecord
@@ -29,6 +39,7 @@ export { default as MainWindow } from './components/app/MainWindow.svelte';
 export { default as MainComponent } from './components/app/MainComponent.svelte';
 export { default as AppHeader } from './components/app/AppHeader.svelte';
 export { default as WorkbenchSessionRoot } from './components/app/WorkbenchSessionRoot.svelte';
+export { default as WorkbenchLoadingOverlay } from './components/app/WorkbenchLoadingOverlay.svelte';
 export { default as WorkbenchOverlayHost } from './components/app/WorkbenchOverlayHost.svelte';
 export { default as DashboardRouteLayout } from './components/routes/DashboardRouteLayout.svelte';
 export { default as DashboardRoute } from './components/routes/DashboardRoute.svelte';

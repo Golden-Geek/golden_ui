@@ -1,5 +1,9 @@
 import { appState } from './workbench.svelte';
-import type { WorkbenchSession } from './workbench.svelte';
+import type {
+	WorkbenchLoadingOperation,
+	WorkbenchLoadingStepDefinition,
+	WorkbenchSession
+} from './workbench.svelte';
 import { hasDesktopHost, openDesktopFileDialog, saveDesktopFileDialog } from '../host/desktop';
 import { loadPersistedLastProjectPath, savePersistedLastProjectPath } from './ui-persistence';
 import {
@@ -13,6 +17,21 @@ import { recordPerformanceSample } from './performance-profiler.svelte';
 export const BROWSER_PROJECT_DIRECTORY_LABEL = '~/Documents/Chataigne';
 export const UNTITLED_PROJECT_LABEL = 'Untitled';
 const PROJECT_FILE_LOG_TAG = 'project-file';
+
+const PROJECT_LOAD_STEP_DEFINITIONS: readonly WorkbenchLoadingStepDefinition[] = [
+	{ id: 'file', label: 'Read project' },
+	{ id: 'runtime', label: 'Load runtime' },
+	{ id: 'snapshot', label: 'Refresh graph' },
+	{ id: 'workspace', label: 'Rebuild workspace' },
+	{ id: 'ready', label: 'Ready' }
+] as const;
+
+const NEW_PROJECT_STEP_DEFINITIONS: readonly WorkbenchLoadingStepDefinition[] = [
+	{ id: 'runtime', label: 'Reset runtime' },
+	{ id: 'snapshot', label: 'Refresh graph' },
+	{ id: 'workspace', label: 'Rebuild workspace' },
+	{ id: 'ready', label: 'Ready' }
+] as const;
 
 const nowMs = (): number => (typeof performance !== 'undefined' ? performance.now() : Date.now());
 
@@ -172,6 +191,22 @@ const finishProjectFileOperation = (): void => {
 	projectFileState.busy = false;
 };
 
+const startProjectLoading = (
+	session: WorkbenchSession,
+	title: string,
+	message: string,
+	detail: string | null,
+	progress = 0.12
+): WorkbenchLoadingOperation =>
+	session.startLoadingOperation({
+		stepDefinitions: PROJECT_LOAD_STEP_DEFINITIONS,
+		activeStep: 'file',
+		title,
+		message,
+		detail,
+		progress
+	});
+
 const saveProjectAtPath = async (
 	session: WorkbenchSession,
 	path: string
@@ -187,11 +222,7 @@ const saveProjectAtPath = async (
 			path: normalizedPath,
 			totalMs: nowMs() - startedAt
 		});
-		appendProjectFileLog(
-			session,
-			'info',
-			`Saved project: ${normalizedPath}`
-		);
+		appendProjectFileLog(session, 'info', `Saved project: ${normalizedPath}`);
 		return projectFileActionSucceeded();
 	} catch (error) {
 		return projectFileActionFailed(
@@ -205,16 +236,46 @@ const saveProjectAtPath = async (
 
 const loadProjectAtPath = async (session: WorkbenchSession, path: string): Promise<boolean> => {
 	const startedAt = nowMs();
+	const displayName = projectFileDisplayName(path);
+	const loading = startProjectLoading(session, 'Opening project', `Loading ${displayName}`, path);
 	try {
+		loading.update({
+			activeStep: 'runtime',
+			title: 'Opening project',
+			message: 'Loading project into the runtime',
+			detail: displayName,
+			progress: 0.34
+		});
 		const loadStartedAt = nowMs();
 		await session.client.projectLoad(path);
 		const loadMs = nowMs() - loadStartedAt;
+		loading.update({
+			activeStep: 'snapshot',
+			title: 'Refreshing workspace',
+			message: 'Requesting the updated graph',
+			detail: displayName,
+			progress: 0.62
+		});
 		const refreshStartedAt = nowMs();
 		const refreshed = await session.refreshSnapshot();
 		const refreshMs = nowMs() - refreshStartedAt;
 		if (!refreshed) {
+			loading.fail({
+				activeStep: 'snapshot',
+				title: 'Project load failed',
+				message: 'Could not refresh the workspace graph',
+				detail: displayName,
+				progress: 0.62
+			});
 			return false;
 		}
+		loading.update({
+			activeStep: 'workspace',
+			title: 'Rebuilding workspace',
+			message: 'Restoring panels and selections',
+			detail: displayName,
+			progress: 0.86
+		});
 		setCurrentProjectPath(path);
 		rememberLastOpenedPath(path);
 		markProjectStateClean(0);
@@ -224,16 +285,24 @@ const loadProjectAtPath = async (session: WorkbenchSession, path: string): Promi
 			refreshMs,
 			totalMs: nowMs() - startedAt
 		});
-		appendProjectFileLog(
-			session,
-			'info',
-			`Opened project: ${path}`
-		);
+		appendProjectFileLog(session, 'info', `Opened project: ${path}`);
+		loading.finish({
+			title: 'Project loaded',
+			message: displayName,
+			detail: path
+		});
 		return true;
 	} catch (error) {
 		const message = toProjectFileErrorMessage(`Failed to open project "${path}"`, error);
 		console.error('[project-files]', message, { path }, error);
 		appendProjectFileLog(session, 'error', message);
+		loading.fail({
+			activeStep: 'runtime',
+			title: 'Project load failed',
+			message,
+			detail: displayName,
+			progress: 0.34
+		});
 		return false;
 	}
 };
@@ -244,17 +313,62 @@ export const createNewProjectFile = async (): Promise<boolean> => {
 		return false;
 	}
 
+	let loading: WorkbenchLoadingOperation | null = null;
 	try {
 		const { session } = operation;
+		loading = session.startLoadingOperation({
+			stepDefinitions: NEW_PROJECT_STEP_DEFINITIONS,
+			activeStep: 'runtime',
+			title: 'Creating new project',
+			message: 'Resetting the runtime workspace',
+			detail: null,
+			progress: 0.28
+		});
 		await session.client.projectNew();
-		await session.refreshSnapshot();
+		loading.update({
+			activeStep: 'snapshot',
+			title: 'Refreshing workspace',
+			message: 'Requesting the empty project graph',
+			detail: null,
+			progress: 0.62
+		});
+		const refreshed = await session.refreshSnapshot();
+		if (!refreshed) {
+			loading.fail({
+				activeStep: 'snapshot',
+				title: 'New project failed',
+				message: 'Could not refresh the workspace graph',
+				detail: null,
+				progress: 0.62
+			});
+			return false;
+		}
+		loading.update({
+			activeStep: 'workspace',
+			title: 'Rebuilding workspace',
+			message: 'Preparing the new project interface',
+			detail: null,
+			progress: 0.86
+		});
 		setCurrentProjectPath(null);
 		markProjectStateClean(0);
+		loading.finish({
+			title: 'New project ready',
+			message: UNTITLED_PROJECT_LABEL,
+			detail: null
+		});
 		return true;
 	} catch (error) {
 		const message = toProjectFileErrorMessage('Failed to create a new project', error);
 		console.error('[project-files]', message, error);
 		appendProjectFileLog(operation.session, 'error', message);
+		loading?.fail({
+			activeStep: 'runtime',
+			title: 'New project failed',
+			message,
+			detail: null,
+			progress: 0.28
+		});
 		return false;
 	} finally {
 		finishProjectFileOperation();
@@ -378,14 +492,60 @@ export const uploadProjectFileAndLoad = async (file: File): Promise<boolean> => 
 		return false;
 	}
 
+	const fileSize =
+		file.size > 1024 * 1024
+			? `${(file.size / (1024 * 1024)).toFixed(1)} MB`
+			: `${Math.max(1, Math.round(file.size / 1024))} KB`;
+	const loading = startProjectLoading(
+		operation.session,
+		'Opening uploaded project',
+		`Reading ${file.name}`,
+		fileSize
+	);
 	try {
 		const { session } = operation;
 		const contents = await file.text();
+		loading.update({
+			activeStep: 'runtime',
+			title: 'Opening uploaded project',
+			message: 'Sending project to the runtime',
+			detail: file.name,
+			progress: 0.38
+		});
 		const path = await session.client.projectUploadLoad(file.name, contents);
-		await session.refreshSnapshot();
+		loading.update({
+			activeStep: 'snapshot',
+			title: 'Refreshing workspace',
+			message: 'Requesting the updated graph',
+			detail: projectFileDisplayName(path),
+			progress: 0.64
+		});
+		const refreshed = await session.refreshSnapshot();
+		if (!refreshed) {
+			loading.fail({
+				activeStep: 'snapshot',
+				title: 'Project load failed',
+				message: 'Could not refresh the workspace graph',
+				detail: file.name,
+				progress: 0.64
+			});
+			return false;
+		}
+		loading.update({
+			activeStep: 'workspace',
+			title: 'Rebuilding workspace',
+			message: 'Restoring panels and selections',
+			detail: projectFileDisplayName(path),
+			progress: 0.86
+		});
 		setCurrentProjectPath(path);
 		rememberLastOpenedPath(path);
 		markProjectStateClean(0);
+		loading.finish({
+			title: 'Project loaded',
+			message: projectFileDisplayName(path),
+			detail: path
+		});
 		return true;
 	} catch (error) {
 		const message = toProjectFileErrorMessage(
@@ -394,6 +554,13 @@ export const uploadProjectFileAndLoad = async (file: File): Promise<boolean> => 
 		);
 		console.error('[project-files]', message, { fileName: file.name }, error);
 		appendProjectFileLog(operation.session, 'error', message);
+		loading.fail({
+			activeStep: 'runtime',
+			title: 'Project load failed',
+			message,
+			detail: file.name,
+			progress: 0.38
+		});
 		return false;
 	} finally {
 		finishProjectFileOperation();

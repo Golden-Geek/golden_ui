@@ -1240,8 +1240,7 @@ export const moveDashboardWidgetToBack = async (
 
 export const duplicateDashboardWidget = async (
 	getGraph: GraphGetter,
-	widgetNodeId: NodeId,
-	label?: string
+	widgetNodeId: NodeId
 ): Promise<boolean> => {
 	const graph = getGraph();
 	const parentId = graph?.parentById.get(widgetNodeId);
@@ -1249,7 +1248,7 @@ export const duplicateDashboardWidget = async (
 		return false;
 	}
 
-	return sendDuplicateNodeIntent(widgetNodeId, parentId, widgetNodeId, label);
+	return sendDuplicateNodeIntent(widgetNodeId, parentId, widgetNodeId);
 };
 
 export const wrapDashboardWidgetInContainer = async (

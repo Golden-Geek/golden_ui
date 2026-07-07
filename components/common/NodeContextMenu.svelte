@@ -193,7 +193,11 @@
 		};
 	};
 
-	const openRangeSubMenu = (event: MouseEvent, nodeId: NodeId, constraints: UiParamConstraints): void => {
+	const openRangeSubMenu = (
+		event: MouseEvent,
+		nodeId: NodeId,
+		constraints: UiParamConstraints
+	): void => {
 		rangeTargetNodeId = nodeId;
 		if (constraints.range?.kind === 'uniform') {
 			rangeDraft.min = constraints.range.min !== undefined ? String(constraints.range.min) : '';
@@ -216,28 +220,53 @@
 		if (min !== undefined && !Number.isFinite(min)) return;
 		if (max !== undefined && !Number.isFinite(max)) return;
 		updateNodeConstraints(rangeTargetNodeId, (draft) => {
-			draft.range = min !== undefined || max !== undefined ? { kind: 'uniform', min, max } : undefined;
+			draft.range =
+				min !== undefined || max !== undefined ? { kind: 'uniform', min, max } : undefined;
 		});
 		closeMenu();
 	};
 
 	const parseEnumOptions = (text: string): import('../../types').ParamEnumOption[] => {
-		const lines = text.split('\n').map((l) => l.trim()).filter((l) => l.length > 0);
+		const lines = text
+			.split('\n')
+			.map((l) => l.trim())
+			.filter((l) => l.length > 0);
 		if (lines.length === 0) {
-			return [{ variant_id: 'option', value: { kind: 'enum', value: 'option' }, label: 'Option', tags: [] }];
+			return [
+				{
+					variant_id: 'option',
+					value: { kind: 'enum', value: 'option' },
+					label: 'Option',
+					tags: []
+				}
+			];
 		}
 		return lines.map((line) => {
 			const eqIdx = line.indexOf('=');
 			if (eqIdx !== -1) {
 				const label = line.slice(0, eqIdx).trim();
 				const valueId = line.slice(eqIdx + 1).trim() || label;
-				return { variant_id: valueId, value: { kind: 'enum' as const, value: valueId }, label, tags: [] };
+				return {
+					variant_id: valueId,
+					value: { kind: 'enum' as const, value: valueId },
+					label,
+					tags: []
+				};
 			}
-			return { variant_id: line, value: { kind: 'enum' as const, value: line }, label: line, tags: [] };
+			return {
+				variant_id: line,
+				value: { kind: 'enum' as const, value: line },
+				label: line,
+				tags: []
+			};
 		});
 	};
 
-	const openOptionsSubMenu = (event: MouseEvent, nodeId: NodeId, constraints: UiParamConstraints): void => {
+	const openOptionsSubMenu = (
+		event: MouseEvent,
+		nodeId: NodeId,
+		constraints: UiParamConstraints
+	): void => {
 		optionsTargetNodeId = nodeId;
 		const opts = constraints.enum_options ?? [];
 		optionsDraft = opts
@@ -774,39 +803,6 @@
 		);
 	};
 
-	const nextDuplicateLabel = (): string => {
-		const baseLabel =
-			activeNode && activeNode.meta.label.trim().length > 0
-				? activeNode.meta.label.trim()
-				: (activeNode?.node_type ?? 'Node');
-		const firstCandidate = `${baseLabel} Copy`;
-		if (!graphState || !parentNode) {
-			return firstCandidate;
-		}
-
-		const usedLabels = new Set<string>();
-		for (const childId of parentNode.children) {
-			const sibling = graphState.nodesById.get(childId);
-			if (!sibling) {
-				continue;
-			}
-			const label = sibling.meta.label.trim();
-			if (label.length > 0) {
-				usedLabels.add(label);
-			}
-		}
-
-		if (!usedLabels.has(firstCandidate)) {
-			return firstCandidate;
-		}
-
-		let suffix = 2;
-		while (usedLabels.has(`${firstCandidate} ${suffix}`)) {
-			suffix += 1;
-		}
-		return `${firstCandidate} ${suffix}`;
-	};
-
 	const duplicateNode = (): void => {
 		if (!session || !activeNode || !canDuplicate || !parentNode) {
 			return;
@@ -815,8 +811,7 @@
 			.sendIntent({
 				kind: 'duplicateNode',
 				source: activeNode.node_id,
-				new_parent: parentNode.node_id,
-				label: nextDuplicateLabel()
+				new_parent: parentNode.node_id
 			})
 			.catch(() => {});
 	};
@@ -1089,7 +1084,9 @@
 		showMenu && colorSubMenu.open && canSetColor && colorAnchorElement !== null
 	);
 	let showRangeSubMenu = $derived(showMenu && rangeSubMenu.open && rangeAnchorElement !== null);
-	let showOptionsSubMenu = $derived(showMenu && optionsSubMenu.open && optionsAnchorElement !== null);
+	let showOptionsSubMenu = $derived(
+		showMenu && optionsSubMenu.open && optionsAnchorElement !== null
+	);
 
 	$effect(() => {
 		if (contextNodeId === null) {
@@ -1175,7 +1172,12 @@
 {#if showRangeSubMenu}
 	<div
 		class="gc-node-context-side-panel"
-		{@attach captureSubPanelContainer((d) => { rangeSubMenuDiv = d; }, () => rangeAnchorElement)}
+		{@attach captureSubPanelContainer(
+			(d) => {
+				rangeSubMenuDiv = d;
+			},
+			() => rangeAnchorElement
+		)}
 		transition:slide={{ axis: 'x', duration: 150 }}>
 		<div class="gc-constraint-editor">
 			<div class="gc-constraint-editor-title">Custom Range</div>
@@ -1185,7 +1187,9 @@
 					type="number"
 					placeholder="none"
 					bind:value={rangeDraft.min}
-					onkeydown={(e) => { if (e.key === 'Enter') applyRange(); }} />
+					onkeydown={(e) => {
+						if (e.key === 'Enter') applyRange();
+					}} />
 			</label>
 			<label class="gc-constraint-editor-field">
 				<span>Max</span>
@@ -1193,7 +1197,9 @@
 					type="number"
 					placeholder="none"
 					bind:value={rangeDraft.max}
-					onkeydown={(e) => { if (e.key === 'Enter') applyRange(); }} />
+					onkeydown={(e) => {
+						if (e.key === 'Enter') applyRange();
+					}} />
 			</label>
 			<button class="gc-constraint-editor-apply" onclick={applyRange}>Apply</button>
 		</div>
@@ -1203,17 +1209,26 @@
 {#if showOptionsSubMenu}
 	<div
 		class="gc-node-context-side-panel"
-		{@attach captureSubPanelContainer((d) => { optionsSubMenuDiv = d; }, () => optionsAnchorElement)}
+		{@attach captureSubPanelContainer(
+			(d) => {
+				optionsSubMenuDiv = d;
+			},
+			() => optionsAnchorElement
+		)}
 		transition:slide={{ axis: 'x', duration: 150 }}>
 		<div class="gc-constraint-editor">
 			<div class="gc-constraint-editor-title">Enum Options</div>
-			<div class="gc-constraint-editor-hint">One option per line. Use Label=value for a custom id.</div>
+			<div class="gc-constraint-editor-hint">
+				One option per line. Use Label=value for a custom id.
+			</div>
 			<textarea
 				class="gc-constraint-editor-textarea"
 				rows={6}
 				placeholder={'Option 1\nOption 2=value2'}
 				bind:value={optionsDraft}
-				onkeydown={(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) applyOptions(); }}></textarea>
+				onkeydown={(e) => {
+					if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) applyOptions();
+				}}></textarea>
 			<button class="gc-constraint-editor-apply" onclick={applyOptions}>Apply</button>
 		</div>
 	</div>

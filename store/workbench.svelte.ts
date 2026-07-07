@@ -63,10 +63,76 @@ export interface WorkbenchSessionOptions {
 }
 
 export type WorkbenchConnectionStatus = 'disconnected' | 'connecting' | 'connected';
+export type WorkbenchLoadingTone = 'busy' | 'attention' | 'ready';
+export type WorkbenchLoadingStepStatus = 'pending' | 'active' | 'complete' | 'attention';
+
+export type WorkbenchLoadingStepId = string;
+
+export interface WorkbenchLoadingStepDefinition {
+	id: WorkbenchLoadingStepId;
+	label: string;
+}
+
+const WORKBENCH_LOADING_STEP_DEFINITIONS: readonly WorkbenchLoadingStepDefinition[] = [
+	{ id: 'session', label: 'Prepare interface' },
+	{ id: 'transport', label: 'Connect runtime' },
+	{ id: 'snapshot', label: 'Load graph' },
+	{ id: 'apply', label: 'Build workspace' },
+	{ id: 'subscribe', label: 'Start live updates' },
+	{ id: 'ready', label: 'Ready' }
+] as const;
+
+export interface WorkbenchLoadingStep {
+	id: WorkbenchLoadingStepId;
+	label: string;
+	status: WorkbenchLoadingStepStatus;
+}
+
+export interface WorkbenchLoadingState {
+	visible: boolean;
+	title: string;
+	message: string;
+	detail: string | null;
+	progress: number;
+	tone: WorkbenchLoadingTone;
+	steps: WorkbenchLoadingStep[];
+}
+
+export interface WorkbenchLoadingStateRequest {
+	activeStep: WorkbenchLoadingStepId;
+	title: string;
+	message: string;
+	detail?: string | null;
+	progress: number;
+	visible?: boolean;
+	tone?: WorkbenchLoadingTone;
+	stepDefinitions?: readonly WorkbenchLoadingStepDefinition[];
+}
+
+export interface WorkbenchLoadingStateOptions {
+	preserveProgress?: boolean;
+}
+
+export interface WorkbenchLoadingFinishRequest {
+	activeStep?: WorkbenchLoadingStepId;
+	title?: string;
+	message?: string;
+	detail?: string | null;
+	progress?: number;
+	tone?: WorkbenchLoadingTone;
+}
+
+export interface WorkbenchLoadingOperation {
+	update(next: WorkbenchLoadingStateRequest, options?: WorkbenchLoadingStateOptions): void;
+	finish(next?: WorkbenchLoadingFinishRequest): void;
+	fail(next: WorkbenchLoadingFinishRequest): void;
+	cancel(): void;
+}
 
 export interface WorkbenchSession {
 	readonly graph: GraphStore;
 	readonly client: UiClient;
+	readonly loading: WorkbenchLoadingState;
 	readonly logRecords: UiLogRecord[];
 	readonly logMaxEntries: number;
 	readonly logUiUpdateHz: number;
@@ -111,6 +177,7 @@ export interface WorkbenchSession {
 	undo(): Promise<void>;
 	redo(): Promise<void>;
 	refreshSnapshot(): Promise<boolean>;
+	startLoadingOperation(initial: WorkbenchLoadingStateRequest): WorkbenchLoadingOperation;
 	mount(): () => void;
 }
 
@@ -125,6 +192,7 @@ interface QueuedIntent {
 }
 
 const DEFAULT_RETRY_MS = 1000;
+const MIN_INITIAL_LOADING_VISIBLE_MS = 650;
 const UI_LOG_TAG_INTENT = 'intent';
 const UI_LOG_TAG_TRANSPORT = 'transport';
 const UI_PERF_SLOW_SNAPSHOT_MS = 100;
@@ -146,6 +214,51 @@ const toConnectionStatus = (
 		return 'connecting';
 	}
 	return 'disconnected';
+};
+
+const clampProgress = (value: number): number => Math.min(1, Math.max(0, value));
+
+const loadingStepIndex = (
+	stepDefinitions: readonly WorkbenchLoadingStepDefinition[],
+	stepId: WorkbenchLoadingStepId
+): number => stepDefinitions.findIndex((step) => step.id === stepId);
+
+const lastLoadingStepId = (
+	stepDefinitions: readonly WorkbenchLoadingStepDefinition[]
+): WorkbenchLoadingStepId => stepDefinitions[stepDefinitions.length - 1]?.id ?? 'ready';
+
+const createWorkbenchLoadingState = ({
+	activeStep,
+	title,
+	message,
+	detail = null,
+	progress,
+	visible = true,
+	tone = 'busy',
+	stepDefinitions = WORKBENCH_LOADING_STEP_DEFINITIONS
+}: WorkbenchLoadingStateRequest): WorkbenchLoadingState => {
+	const activeIndex = loadingStepIndex(stepDefinitions, activeStep);
+	return {
+		visible,
+		title,
+		message,
+		detail,
+		progress: clampProgress(progress),
+		tone,
+		steps: stepDefinitions.map((step, index) => {
+			let status: WorkbenchLoadingStepStatus = 'pending';
+			if (index < activeIndex) {
+				status = 'complete';
+			} else if (index === activeIndex) {
+				status = tone === 'attention' ? 'attention' : 'active';
+			}
+			return {
+				id: step.id,
+				label: step.label,
+				status
+			};
+		})
+	};
 };
 
 const controlStateEquals = (
@@ -204,6 +317,19 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 	const nowMs = (): number => (typeof performance !== 'undefined' ? performance.now() : Date.now());
 
 	let status = $state<WorkbenchConnectionStatus>('connecting');
+	let initialLoadingStartedAt = nowMs();
+	let loadingHideTimer: ReturnType<typeof setTimeout> | null = null;
+	let nextLoadingOperationId = 0;
+	let activeLoadingOperationId: number | null = null;
+	let loading = $state<WorkbenchLoadingState>(
+		createWorkbenchLoadingState({
+			activeStep: 'session',
+			title: 'Opening workspace',
+			message: 'Preparing the interface',
+			detail: null,
+			progress: 0.06
+		})
+	);
 	const selection = createWorkbenchSelectionStore(graph);
 	const warnings = createWorkbenchWarningStore(graph);
 	const descriptions = createWorkbenchDescriptionStore();
@@ -247,6 +373,147 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 		return footerHover.getFooterHoverInfo();
 	};
 
+	const clearLoadingHideTimer = (): void => {
+		if (loadingHideTimer === null) {
+			return;
+		}
+		clearTimeout(loadingHideTimer);
+		loadingHideTimer = null;
+	};
+
+	const setLoadingState = (
+		next: WorkbenchLoadingStateRequest,
+		options: WorkbenchLoadingStateOptions = {}
+	): void => {
+		clearLoadingHideTimer();
+		const progress =
+			options.preserveProgress === false
+				? next.progress
+				: Math.max(loading.progress, next.progress);
+		loading = createWorkbenchLoadingState({
+			...next,
+			progress
+		});
+	};
+
+	const scheduleLoadingHide = (startedAt: number, minimumVisibleMs: number): void => {
+		const visibleElapsedMs = nowMs() - startedAt;
+		const delayMs = Math.max(120, minimumVisibleMs - visibleElapsedMs);
+		loadingHideTimer = setTimeout(() => {
+			loadingHideTimer = null;
+			loading = {
+				...loading,
+				visible: false
+			};
+		}, delayMs);
+	};
+
+	const completeInitialLoading = (): void => {
+		clearLoadingHideTimer();
+		loading = createWorkbenchLoadingState({
+			activeStep: 'ready',
+			title: 'Workspace ready',
+			message: 'Live updates are running',
+			detail: null,
+			progress: 1,
+			tone: 'ready'
+		});
+		scheduleLoadingHide(initialLoadingStartedAt, MIN_INITIAL_LOADING_VISIBLE_MS);
+	};
+
+	const resetInitialLoading = (): void => {
+		clearLoadingHideTimer();
+		activeLoadingOperationId = null;
+		initialLoadingStartedAt = nowMs();
+		loading = createWorkbenchLoadingState({
+			activeStep: 'session',
+			title: 'Opening workspace',
+			message: 'Preparing the interface',
+			detail: null,
+			progress: 0.06
+		});
+	};
+
+	const startLoadingOperation = (
+		initial: WorkbenchLoadingStateRequest
+	): WorkbenchLoadingOperation => {
+		nextLoadingOperationId += 1;
+		const operationId = nextLoadingOperationId;
+		activeLoadingOperationId = operationId;
+		const startedAt = nowMs();
+		let stepDefinitions = initial.stepDefinitions ?? WORKBENCH_LOADING_STEP_DEFINITIONS;
+
+		const isActiveOperation = (): boolean => activeLoadingOperationId === operationId;
+		const withOperationSteps = (
+			next: WorkbenchLoadingStateRequest
+		): WorkbenchLoadingStateRequest => {
+			stepDefinitions = next.stepDefinitions ?? stepDefinitions;
+			return {
+				...next,
+				stepDefinitions
+			};
+		};
+
+		setLoadingState(withOperationSteps(initial), { preserveProgress: false });
+
+		return {
+			update: (
+				next: WorkbenchLoadingStateRequest,
+				options: WorkbenchLoadingStateOptions = {}
+			): void => {
+				if (!isActiveOperation()) {
+					return;
+				}
+				setLoadingState(withOperationSteps(next), options);
+			},
+			finish: (next: WorkbenchLoadingFinishRequest = {}): void => {
+				if (!isActiveOperation()) {
+					return;
+				}
+				activeLoadingOperationId = null;
+				clearLoadingHideTimer();
+				loading = createWorkbenchLoadingState({
+					stepDefinitions,
+					activeStep: next.activeStep ?? lastLoadingStepId(stepDefinitions),
+					title: next.title ?? 'Done',
+					message: next.message ?? 'Operation complete',
+					detail: next.detail ?? null,
+					progress: next.progress ?? 1,
+					tone: next.tone ?? 'ready'
+				});
+				scheduleLoadingHide(startedAt, MIN_INITIAL_LOADING_VISIBLE_MS);
+			},
+			fail: (next: WorkbenchLoadingFinishRequest): void => {
+				if (!isActiveOperation()) {
+					return;
+				}
+				activeLoadingOperationId = null;
+				clearLoadingHideTimer();
+				loading = createWorkbenchLoadingState({
+					stepDefinitions,
+					activeStep: next.activeStep ?? lastLoadingStepId(stepDefinitions),
+					title: next.title ?? 'Operation failed',
+					message: next.message ?? 'The requested operation could not finish',
+					detail: next.detail ?? null,
+					progress: next.progress ?? loading.progress,
+					tone: next.tone ?? 'attention'
+				});
+				scheduleLoadingHide(startedAt, 1800);
+			},
+			cancel: (): void => {
+				if (!isActiveOperation()) {
+					return;
+				}
+				activeLoadingOperationId = null;
+				clearLoadingHideTimer();
+				loading = {
+					...loading,
+					visible: false
+				};
+			}
+		};
+	};
+
 	const dismissToast = (toastId: number): void => {
 		logger.dismissToast(toastId);
 	};
@@ -272,13 +539,84 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 		status = toConnectionStatus(connectionState, hasLoadedSnapshot);
 	};
 
+	const formatRetryDelay = (delayMs: number): string => {
+		const seconds = Math.max(1, Math.ceil(delayMs / 1000));
+		return `${seconds}s`;
+	};
+
+	const updateLoadingForTransportState = (
+		state: UiTransportConnectionState,
+		detail?: string
+	): void => {
+		if (hasLoadedSnapshot) {
+			return;
+		}
+		if (state === 'connected') {
+			setLoadingState({
+				activeStep: 'snapshot',
+				title: 'Runtime connected',
+				message: 'Requesting the workspace graph',
+				detail: detail ?? null,
+				progress: 0.34
+			});
+			return;
+		}
+		if (state === 'fallbackPolling') {
+			setLoadingState({
+				activeStep: 'snapshot',
+				title: 'Using fallback transport',
+				message: 'Loading the graph over HTTP',
+				detail: detail ?? 'Live updates will reconnect in the background',
+				progress: 0.32,
+				tone: 'attention'
+			});
+			return;
+		}
+		if (state === 'reconnecting') {
+			setLoadingState(
+				{
+					activeStep: 'transport',
+					title: 'Reconnecting to runtime',
+					message: 'Restoring the live transport',
+					detail: detail ?? null,
+					progress: 0.22,
+					tone: 'attention'
+				},
+				{ preserveProgress: false }
+			);
+			return;
+		}
+		if (state === 'disconnected') {
+			setLoadingState(
+				{
+					activeStep: 'transport',
+					title: 'Runtime unavailable',
+					message: 'Waiting before the next attempt',
+					detail: detail ?? 'The interface will keep retrying',
+					progress: 0.2,
+					tone: 'attention'
+				},
+				{ preserveProgress: false }
+			);
+			return;
+		}
+		setLoadingState({
+			activeStep: 'transport',
+			title: 'Connecting to runtime',
+			message: 'Opening the live transport',
+			detail: detail ?? null,
+			progress: 0.18
+		});
+	};
+
 	const transportOptions: UiTransportOptions = {
 		wsUrl: options.wsUrl,
 		httpBaseUrl: options.httpBaseUrl,
 		pollIntervalMs: options.pollIntervalMs,
-		onConnectionStateChange: (state) => {
+		onConnectionStateChange: (state, detail) => {
 			connectionState = state;
 			syncConnectionStatus();
+			updateLoadingForTransportState(state, detail);
 			if (state === 'fallbackPolling') {
 				appendUiLogRecord(
 					'warning',
@@ -675,6 +1013,9 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 		if (mountedCleanup !== null) {
 			return mountedCleanup;
 		}
+		if (!hasLoadedSnapshot) {
+			resetInitialLoading();
+		}
 
 		let stopped = false;
 		let subscribed = false;
@@ -697,6 +1038,19 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 			}
 			const delay = retryDelayMs;
 			retryDelayMs = Math.min(10000, Math.max(retryMs, retryDelayMs * 2));
+			if (!hasLoadedSnapshot) {
+				setLoadingState(
+					{
+						activeStep: 'transport',
+						title: 'Runtime unavailable',
+						message: 'Retrying connection',
+						detail: `Next attempt in ${formatRetryDelay(delay)}`,
+						progress: 0.22,
+						tone: 'attention'
+					},
+					{ preserveProgress: false }
+				);
+			}
 			retryTimer = setTimeout(() => {
 				retryTimer = null;
 				void bootstrap();
@@ -710,6 +1064,13 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 
 			bootstrapInFlight = true;
 			try {
+				setLoadingState({
+					activeStep: 'snapshot',
+					title: 'Loading workspace graph',
+					message: 'Requesting the initial snapshot',
+					detail: null,
+					progress: 0.38
+				});
 				const fetchStartedAt = typeof performance !== 'undefined' ? performance.now() : Date.now();
 				const snapshot = await requestSnapshot();
 				const fetchElapsedMs =
@@ -717,6 +1078,13 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 				if (stopped) {
 					return;
 				}
+				setLoadingState({
+					activeStep: 'apply',
+					title: 'Building workspace',
+					message: 'Applying the project graph',
+					detail: `${snapshot.nodes.length} nodes loaded`,
+					progress: 0.72
+				});
 				const applyStartedAt = typeof performance !== 'undefined' ? performance.now() : Date.now();
 				applySnapshotToState(snapshot);
 				const applyElapsedMs =
@@ -726,10 +1094,18 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 						1
 					)} nodes=${snapshot.nodes.length}`
 				);
+				setLoadingState({
+					activeStep: 'subscribe',
+					title: 'Starting live updates',
+					message: 'Subscribing to runtime events',
+					detail: null,
+					progress: 0.9
+				});
 				unsubscribe = client.subscribe(scope, snapshot.at, applyBatch);
 				subscribed = true;
 				clearRetry();
 				retryDelayMs = retryMs;
+				completeInitialLoading();
 			} catch (error) {
 				if (stopped) {
 					return;
@@ -737,6 +1113,17 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 				const message = error instanceof Error ? error.message : 'unknown connection error';
 				connectionState = 'disconnected';
 				syncConnectionStatus();
+				setLoadingState(
+					{
+						activeStep: 'transport',
+						title: 'Runtime unavailable',
+						message: 'Connection failed. Retrying',
+						detail: message,
+						progress: 0.22,
+						tone: 'attention'
+					},
+					{ preserveProgress: false }
+				);
 				appendUiLogRecord(
 					'error',
 					UI_LOG_TAG_TRANSPORT,
@@ -764,6 +1151,7 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 		mountedCleanup = (): void => {
 			stopped = true;
 			clearRetry();
+			clearLoadingHideTimer();
 			rejectQueuedIntents(new Error('workbench session unmounted'));
 			if (enableGlobalShortcuts && typeof window !== 'undefined') {
 				window.removeEventListener('keydown', onWindowKeydown, true);
@@ -784,6 +1172,7 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 			connectionState = 'connecting';
 			engineHz = null;
 			syncConnectionStatus();
+			resetInitialLoading();
 			mountedCleanup = null;
 		};
 
@@ -796,6 +1185,9 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 		},
 		get client(): UiClient {
 			return client;
+		},
+		get loading(): WorkbenchLoadingState {
+			return loading;
 		},
 		get logRecords(): UiLogRecord[] {
 			return logger.logRecords;
@@ -864,6 +1256,7 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 		undo,
 		redo,
 		refreshSnapshot,
+		startLoadingOperation,
 		mount
 	};
 };

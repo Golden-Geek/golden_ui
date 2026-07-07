@@ -11,6 +11,7 @@
 		type WorkbenchSessionOptions
 	} from '../../store/workbench.svelte';
 	import { mountWindowExitHandling } from '../../store/window-exit.svelte';
+	import WorkbenchLoadingOverlay from './WorkbenchLoadingOverlay.svelte';
 
 	let {
 		wsUrl,
@@ -76,3 +77,5 @@
 {#if children}
 	{@render children()}
 {/if}
+
+<WorkbenchLoadingOverlay {session} />

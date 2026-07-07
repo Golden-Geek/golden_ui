@@ -143,35 +143,6 @@ export const createWorkbenchCommandSuite = (
 		return null;
 	};
 
-	const waitForCreatedChildLabel = async (
-		parentId: NodeId,
-		knownChildren: Set<NodeId>,
-		expectedLabel: string
-	): Promise<NodeId | null> => {
-		const deadline = Date.now() + 450;
-		while (Date.now() <= deadline) {
-			const parent = options.graph.state.nodesById.get(parentId);
-			if (parent) {
-				for (const childId of parent.children) {
-					if (knownChildren.has(childId)) {
-						continue;
-					}
-					const child = options.graph.state.nodesById.get(childId);
-					if (!child) {
-						continue;
-					}
-					if (child.meta.label.trim() === expectedLabel.trim()) {
-						return childId;
-					}
-				}
-			}
-			await new Promise((resolve) => {
-				setTimeout(resolve, 16);
-			});
-		}
-		return null;
-	};
-
 	const createNodeUnderParent = async (
 		parentId: NodeId,
 		nodeType: string,
@@ -300,11 +271,6 @@ export const createWorkbenchCommandSuite = (
 				continue;
 			}
 
-			const baseLabel =
-				source.meta.label.trim().length > 0
-					? `${source.meta.label.trim()} Copy`
-					: `${source.node_type} Copy`;
-			const label = nextLabelInParent(parentId, baseLabel);
 			const parentBefore = options.graph.state.nodesById.get(parentId);
 			if (!parentBefore) {
 				continue;
@@ -314,10 +280,9 @@ export const createWorkbenchCommandSuite = (
 				kind: 'duplicateNode',
 				source: sourceId,
 				new_parent: parentId,
-				new_prev_sibling: insertAfterNodeId,
-				label
+				new_prev_sibling: insertAfterNodeId
 			});
-			const createdNodeId = await waitForCreatedChildLabel(parentId, knownChildren, label);
+			const createdNodeId = await waitForCreatedChild(parentId, knownChildren, source.node_type);
 			if (createdNodeId === null) {
 				continue;
 			}
@@ -369,10 +334,9 @@ export const createWorkbenchCommandSuite = (
 					kind: 'duplicateNode',
 					source: source.node_id,
 					new_parent: targetParentId,
-					new_prev_sibling: insertAfterNodeId ?? undefined,
-					label
+					new_prev_sibling: insertAfterNodeId ?? undefined
 				});
-				createdNodeId = await waitForCreatedChildLabel(targetParentId, knownChildren, label);
+				createdNodeId = await waitForCreatedChild(targetParentId, knownChildren, source.node_type);
 			} else if (canParentCreateNodeType(targetParentId, entry.node_type)) {
 				createdNodeId = await createNodeUnderParent(
 					targetParentId,

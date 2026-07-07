@@ -105,10 +105,6 @@ new_parent: NodeId,
  */
 new_prev_sibling?: NodeId | null, 
 /**
- * Optional explicit label for the duplicated root.
- */
-label?: string | null, 
-/**
  * Optional direct parameter values applied to the duplicated root before the intent completes.
  */
 initial_params?: Array<UiCreateUserItemInitialParam>, } | { "kind": "duplicateNodes", 
