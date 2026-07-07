@@ -32,6 +32,10 @@
 	import { getPanelByType, showPanel } from '../../store/ui-panels';
 	import { PERSISTED_PANEL_STATE_KEY } from '../../dockview/panel-persistence';
 	import { copyTextToClipboard } from '../../utils/clipboard';
+	import {
+		buildNodeTreeClipboardPayload,
+		nodeTreeClipboardJson
+	} from '../../store/session/node-tree-clipboard';
 	import addIcon from '../../style/icons/node/add.svg';
 	import copyPathIcon from '../../style/icons/copy.svg';
 	import colorIcon from '../../style/icons/parameter/color.svg';
@@ -49,6 +53,27 @@
 		inspectorLocked: boolean;
 		inspectorLockedNodeId: NodeId;
 	}
+
+	interface SaveFilePickerOptions {
+		suggestedName?: string;
+		types?: Array<{
+			description: string;
+			accept: Record<string, string[]>;
+		}>;
+	}
+
+	interface FileSystemWritableFileStream {
+		write: (data: BlobPart) => Promise<void>;
+		close: () => Promise<void>;
+	}
+
+	interface FileSystemFileHandle {
+		createWritable: () => Promise<FileSystemWritableFileStream>;
+	}
+
+	type SaveFilePickerWindow = Window & {
+		showSaveFilePicker?: (options?: SaveFilePickerOptions) => Promise<FileSystemFileHandle>;
+	};
 
 	let session = $derived(appState.session);
 	let graphState = $derived(session?.graph.state ?? null);
@@ -779,28 +804,53 @@
 	};
 
 	const activeNodeClipboardJson = (): string | null => {
-		if (!activeNode) {
+		if (!activeNode || !graphState) {
 			return null;
 		}
-		return JSON.stringify(
-			{
-				kind: 'golden-ui.nodes',
-				version: 1,
-				nodes: [
-					{
-						sourceId: activeNode.node_id,
-						node_type: activeNode.node_type,
-						itemKind: activeNode.user_item_kind,
-						label:
-							activeNode.meta.label.trim().length > 0
-								? activeNode.meta.label.trim()
-								: activeNode.node_type
-					}
-				]
-			},
-			null,
-			2
-		);
+		return nodeTreeClipboardJson(buildNodeTreeClipboardPayload([activeNode], graphState.nodesById));
+	};
+
+	const nodeJsonFileName = (node: UiNodeDto): string => {
+		const label = node.meta.label.trim().length > 0 ? node.meta.label : node.node_type;
+		const stem = label
+			.replace(/[<>:"/\\|?*\u0000-\u001f]+/g, '-')
+			.replace(/\s+/g, '-')
+			.replace(/^-+|-+$/g, '')
+			.slice(0, 80);
+		return `${stem || 'node'}.json`;
+	};
+
+	const downloadTextFile = (fileName: string, text: string): void => {
+		const blob = new Blob([text], { type: 'application/json;charset=utf-8' });
+		const url = URL.createObjectURL(blob);
+		const link = document.createElement('a');
+		link.href = url;
+		link.download = fileName;
+		link.rel = 'noopener';
+		document.body.appendChild(link);
+		link.click();
+		link.remove();
+		URL.revokeObjectURL(url);
+	};
+
+	const saveTextFile = async (fileName: string, text: string): Promise<void> => {
+		const picker = (window as SaveFilePickerWindow).showSaveFilePicker;
+		if (!picker) {
+			downloadTextFile(fileName, text);
+			return;
+		}
+		const handle = await picker({
+			suggestedName: fileName,
+			types: [
+				{
+					description: 'JSON',
+					accept: { 'application/json': ['.json'] }
+				}
+			]
+		});
+		const writable = await handle.createWritable();
+		await writable.write(text);
+		await writable.close();
 	};
 
 	const duplicateNode = (): void => {
@@ -888,11 +938,23 @@
 		closeMenu();
 	};
 
-	const selectCopyNodeAsJson = (_event: MouseEvent): void => {
+	const selectExportNodeAsJson = (_event: MouseEvent): void => {
 		const json = activeNodeClipboardJson();
-		if (json) {
-			void copyTextToClipboard(json);
+		if (json && activeNode) {
+			void saveTextFile(nodeJsonFileName(activeNode), json).catch((error) => {
+				if (error instanceof DOMException && error.name === 'AbortError') return;
+				console.error('failed to export node JSON', error);
+			});
 		}
+		closeMenu();
+	};
+
+	const selectPasteNode = (_event: MouseEvent): void => {
+		if (!activeNode) {
+			return;
+		}
+		session?.selectNode(activeNode.node_id, 'REPLACE');
+		void executeCommand('edit.paste', { source: 'menu' });
 		closeMenu();
 	};
 
@@ -955,6 +1017,7 @@
 		if (!activeNode) {
 			return [];
 		}
+		const canPaste = activeNode.accepted_user_item_kinds.length > 0 || creatableItems.length > 0;
 
 		const items: ContextMenuItem[] = [
 			...(creatableItems.length > 0
@@ -1001,8 +1064,17 @@
 			items.push(...customNodeContextMenuItems);
 		}
 
-		if (canCopy || canDuplicate || canDelete) {
+		if (canPaste || canCopy || canDuplicate || canDelete) {
 			items.push({ separator: true });
+		}
+		if (canPaste) {
+			items.push({
+				id: 'paste',
+				label: 'Paste',
+				commandId: 'edit.paste',
+				icon: copyPathIcon,
+				action: selectPasteNode
+			});
 		}
 		if (canCopy) {
 			items.push({
@@ -1013,10 +1085,10 @@
 				action: selectCopyNode
 			});
 			items.push({
-				id: 'copy-json',
-				label: 'Copy as JSON',
+				id: 'export-json',
+				label: 'Export as JSON',
 				icon: copyPathIcon,
-				action: selectCopyNodeAsJson
+				action: selectExportNodeAsJson
 			});
 		}
 		if (canDuplicate) {

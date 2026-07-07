@@ -22,6 +22,7 @@
 
 	let {
 		node,
+		siblingNodeIds = node ? [node.node_id] : [],
 		level = 0,
 		maxLevels = undefined,
 		mode = 'outliner',
@@ -46,6 +47,7 @@
 		onNodeDragEnd = null
 	} = $props<{
 		node: UiNodeDto | null;
+		siblingNodeIds?: readonly NodeId[];
 		level?: number;
 		maxLevels?: number;
 		mode?: 'outliner' | 'tree';
@@ -80,6 +82,34 @@
 	let iconURL = $derived(getIconURLForNode(node));
 	let accentColor = $derived(node ? getContainerColorForNode(node) : 'rgba(124, 138, 162, 1)');
 
+	const visibleSelectableSiblingIds = (): NodeId[] => {
+		if (!mainGraphState) {
+			return [];
+		}
+		return siblingNodeIds.filter((nodeId: NodeId) => {
+			const sibling = mainGraphState.nodesById.get(nodeId) ?? null;
+			return subtreeHasVisibleNode(sibling) && isSelectable(sibling);
+		});
+	};
+
+	const rangeSelectionNodeIds = (next: UiNodeDto): NodeId[] | null => {
+		const selectedNodeIds = session?.selectedNodesIds ?? [];
+		const anchorNodeId = selectedNodeIds[selectedNodeIds.length - 1];
+		if (anchorNodeId === undefined) {
+			return null;
+		}
+		const rangeCandidates = visibleSelectableSiblingIds();
+		const anchorIndex = rangeCandidates.indexOf(anchorNodeId);
+		const nextIndex = rangeCandidates.indexOf(next.node_id);
+		if (anchorIndex < 0 || nextIndex < 0) {
+			return null;
+		}
+		const startIndex = Math.min(anchorIndex, nextIndex);
+		const endIndex = Math.max(anchorIndex, nextIndex);
+		const range = rangeCandidates.slice(startIndex, endIndex + 1);
+		return anchorIndex <= nextIndex ? range : range.reverse();
+	};
+
 	const selectNode = (next: UiNodeDto, event: MouseEvent): void => {
 		if (!nodeSelectable(next)) {
 			return;
@@ -87,6 +117,13 @@
 		if (onSelectNode) {
 			onSelectNode(next, event);
 			return;
+		}
+		if (event.shiftKey && !event.ctrlKey && !event.metaKey && !event.altKey) {
+			const rangeNodeIds = rangeSelectionNodeIds(next);
+			if (rangeNodeIds !== null) {
+				session?.selectNodes(rangeNodeIds, 'REPLACE');
+				return;
+			}
 		}
 		session?.selectNode(
 			next.node_id,
@@ -424,6 +461,7 @@
 				{#each node.children as child (child)}
 					<Self
 						node={mainGraphState?.nodesById.get(child) ?? null}
+						siblingNodeIds={node.children}
 						level={level + 1}
 						{maxLevels}
 						{mode}

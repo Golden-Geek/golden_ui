@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { appState } from '../../../../store/workbench.svelte';
-	import { sendSetParamControlStateIntent, sendSetParamIntent } from '../../../../store/ui-intents';
+	import { sendSetTextParamSmartIntent } from '../../../../store/ui-intents';
 	import type { UiNodeDto } from '../../../../types';
 
 	let {
@@ -38,85 +38,16 @@
 		draftValue = value;
 	});
 
-	const hasWildcardToken = (input: string): boolean => {
-		const chars = [...input];
-		let index = 0;
-		while (index < chars.length) {
-			if (chars[index] !== '{') {
-				index += 1;
-				continue;
-			}
-
-			// Escaped literal "{{"
-			if (index + 1 < chars.length && chars[index + 1] === '{') {
-				index += 2;
-				continue;
-			}
-
-			let end = index + 1;
-			while (end < chars.length && chars[end] !== '}') {
-				end += 1;
-			}
-			if (end >= chars.length) {
-				break;
-			}
-
-			const token = chars
-				.slice(index + 1, end)
-				.join('')
-				.trim();
-			if (token.length > 0) {
-				return true;
-			}
-			index = end + 1;
-		}
-		return false;
-	};
-
 	const commitValue = async (nextValue: string): Promise<void> => {
 		if (!param || param.value.kind !== 'str' || readOnly || !enabled) {
 			return;
 		}
-		const shouldUseTemplateMode = hasWildcardToken(nextValue);
-		const isTemplateMode = param.control.mode === 'templateText';
-		const isManualMode = param.control.mode === 'manual';
-		const modeNeedsUpdate =
-			(shouldUseTemplateMode && !isTemplateMode) ||
-			(!shouldUseTemplateMode && !isManualMode) ||
-			(shouldUseTemplateMode &&
-				param.control.spec.mode === 'templateText' &&
-				param.control.spec.template !== nextValue);
-
-		if (!modeNeedsUpdate && nextValue === value) {
+		if (nextValue === value) {
 			return;
 		}
 
 		draftValue = nextValue;
-
-		if (shouldUseTemplateMode) {
-			const applied = await sendSetParamControlStateIntent(liveNode.node_id, {
-				mode: 'templateText',
-				spec: { mode: 'templateText', template: nextValue }
-			});
-			if (applied) {
-				return;
-			}
-		}
-
-		if (!isManualMode) {
-			await sendSetParamControlStateIntent(liveNode.node_id, {
-				mode: 'manual',
-				spec: { mode: 'manual' }
-			});
-		}
-
-		if (nextValue !== (param.value.kind === 'str' ? param.value.value : '')) {
-			await sendSetParamIntent(
-				liveNode.node_id,
-				{ kind: 'str', value: nextValue },
-				param.event_behaviour
-			);
-		}
+		await sendSetTextParamSmartIntent(liveNode.node_id, nextValue, param.event_behaviour);
 	};
 
 	const updateDraftValue = (event: Event): void => {

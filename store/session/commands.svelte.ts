@@ -1,4 +1,4 @@
-import type { NodeId, UiEditIntent, UiNodeDto } from '../../types';
+import type { NodeId, ParamValue, UiEditIntent, UiNodeDto } from '../../types';
 import type { GraphStore } from '../graph.svelte';
 import { registerCommandHandler, type CommandId } from '../commands.svelte';
 import {
@@ -10,18 +10,16 @@ import {
 } from '../project-files.svelte';
 import { copyTextToClipboard } from '../../utils/clipboard';
 import type { SelectionMode } from './types';
+import {
+	buildNodeTreeClipboardPayload,
+	nodeTreeClipboardFromJson,
+	nodeTreeClipboardJson,
+	type NodeTreeClipboardNode
+} from './node-tree-clipboard';
 
-interface NodeClipboardEntry {
-	sourceId: NodeId;
-	node_type: string;
-	itemKind: string;
-	label: string;
-}
-
-interface NodeClipboardPayload {
-	kind: 'golden-ui.nodes';
-	version: 1;
-	nodes: NodeClipboardEntry[];
+interface NodeTreeReferenceLookup {
+	bySourceId: Map<NodeId, UiNodeDto>;
+	bySourceUuid: Map<string, UiNodeDto>;
 }
 
 interface WorkbenchCommandSuiteOptions {
@@ -43,7 +41,7 @@ export interface WorkbenchCommandSuite {
 export const createWorkbenchCommandSuite = (
 	options: WorkbenchCommandSuiteOptions
 ): WorkbenchCommandSuite => {
-	let nodeClipboard = $state<NodeClipboardEntry[]>([]);
+	let nodeClipboard = $state<NodeTreeClipboardNode[]>([]);
 
 	const getNodeDepth = (nodeId: NodeId): number => {
 		let depth = 0;
@@ -84,34 +82,6 @@ export const createWorkbenchCommandSuite = (
 			parent.accepted_user_item_kinds.includes('*') ||
 			parent.accepted_user_item_kinds.includes(itemKind)
 		);
-	};
-
-	const nextLabelInParent = (parentId: NodeId, baseLabel: string): string => {
-		const parent = options.graph.state.nodesById.get(parentId);
-		if (!parent) {
-			return baseLabel;
-		}
-		const usedLabels = new Set<string>();
-		for (const childId of parent.children) {
-			const sibling = options.graph.state.nodesById.get(childId);
-			if (!sibling) {
-				continue;
-			}
-			const label = sibling.meta.label.trim();
-			if (label.length > 0) {
-				usedLabels.add(label);
-			}
-		}
-
-		if (!usedLabels.has(baseLabel)) {
-			return baseLabel;
-		}
-
-		let suffix = 2;
-		while (usedLabels.has(`${baseLabel} ${suffix}`)) {
-			suffix += 1;
-		}
-		return `${baseLabel} ${suffix}`;
 	};
 
 	const waitForCreatedChild = async (
@@ -173,6 +143,223 @@ export const createWorkbenchCommandSuite = (
 		return createdNodeId;
 	};
 
+	const hasSelectedAncestor = (node: UiNodeDto, selectedIds: ReadonlySet<NodeId>): boolean => {
+		let current = options.graph.state.parentById.get(node.node_id);
+		while (current !== undefined) {
+			if (selectedIds.has(current)) {
+				return true;
+			}
+			current = options.graph.state.parentById.get(current);
+		}
+		return false;
+	};
+
+	const createReferenceLookup = (): NodeTreeReferenceLookup => ({
+		bySourceId: new Map(),
+		bySourceUuid: new Map()
+	});
+
+	const addReferenceTarget = (
+		lookup: NodeTreeReferenceLookup,
+		sourceTree: NodeTreeClipboardNode,
+		targetNode: UiNodeDto
+	): void => {
+		lookup.bySourceId.set(sourceTree.sourceId, targetNode);
+		lookup.bySourceUuid.set(sourceTree.sourceUuid, targetNode);
+	};
+
+	const matchingTargetChild = (
+		targetParent: UiNodeDto,
+		sourceTree: NodeTreeClipboardNode,
+		claimedTargetIds: ReadonlySet<NodeId>
+	): UiNodeDto | null => {
+		const children = targetParent.children
+			.map((childId) => options.graph.state.nodesById.get(childId) ?? null)
+			.filter(
+				(child): child is UiNodeDto => child !== null && !claimedTargetIds.has(child.node_id)
+			);
+		return (
+			children.find(
+				(child) => child.decl_id === sourceTree.decl_id && child.node_type === sourceTree.node_type
+			) ??
+			children.find((child) => child.decl_id === sourceTree.decl_id) ??
+			null
+		);
+	};
+
+	const materializeNodeTree = async (
+		sourceTree: NodeTreeClipboardNode,
+		targetNode: UiNodeDto,
+		lookup: NodeTreeReferenceLookup
+	): Promise<void> => {
+		addReferenceTarget(lookup, sourceTree, targetNode);
+		const claimedTargetIds = new Set<NodeId>();
+		for (const sourceChild of sourceTree.children) {
+			let targetChild = matchingTargetChild(targetNode, sourceChild, claimedTargetIds);
+			if (!targetChild && canParentCreateNodeType(targetNode.node_id, sourceChild.node_type)) {
+				const createdNodeId = await createNodeUnderParent(
+					targetNode.node_id,
+					sourceChild.node_type,
+					sourceChild.label || sourceChild.node_type,
+					null
+				);
+				targetChild =
+					createdNodeId === null
+						? null
+						: (options.graph.state.nodesById.get(createdNodeId) ?? null);
+			}
+			if (!targetChild) {
+				continue;
+			}
+			claimedTargetIds.add(targetChild.node_id);
+			await materializeNodeTree(sourceChild, targetChild, lookup);
+		}
+	};
+
+	const importedParamValue = (
+		value: ParamValue,
+		lookup: NodeTreeReferenceLookup
+	): ParamValue | null => {
+		if (value.kind !== 'reference') {
+			return value;
+		}
+		const remapped =
+			(value.cached_id === undefined ? undefined : lookup.bySourceId.get(value.cached_id)) ??
+			lookup.bySourceUuid.get(value.uuid);
+		if (remapped) {
+			return {
+				...value,
+				uuid: remapped.uuid,
+				cached_id: remapped.node_id,
+				cached_name: remapped.meta.label
+			};
+		}
+		for (const candidate of options.graph.state.nodesById.values()) {
+			if (candidate.uuid !== value.uuid) continue;
+			return {
+				...value,
+				cached_id: candidate.node_id,
+				cached_name: candidate.meta.label
+			};
+		}
+		return null;
+	};
+
+	const appendNodeTreeRestoreIntents = (
+		sourceTree: NodeTreeClipboardNode,
+		targetNode: UiNodeDto,
+		lookup: NodeTreeReferenceLookup,
+		intents: UiEditIntent[]
+	): void => {
+		const metaPatch: Partial<UiNodeDto['meta']> = {};
+		if (
+			targetNode.meta.user_permissions.can_edit_name &&
+			sourceTree.meta.label.trim().length > 0 &&
+			targetNode.meta.label !== sourceTree.meta.label
+		) {
+			metaPatch.label = sourceTree.meta.label;
+		}
+		if (targetNode.meta.can_be_disabled && targetNode.meta.enabled !== sourceTree.meta.enabled) {
+			metaPatch.enabled = sourceTree.meta.enabled;
+		}
+		if (
+			sourceTree.meta.presentation !== undefined &&
+			JSON.stringify(targetNode.meta.presentation) !== JSON.stringify(sourceTree.meta.presentation)
+		) {
+			metaPatch.presentation = sourceTree.meta.presentation;
+		}
+		if (Object.keys(metaPatch).length > 0) {
+			intents.push({ kind: 'patchMeta', node: targetNode.node_id, patch: metaPatch });
+		}
+
+		if (
+			sourceTree.data.kind === 'parameter' &&
+			targetNode.data.kind === 'parameter' &&
+			!targetNode.data.param.read_only
+		) {
+			const value = importedParamValue(sourceTree.data.param.value, lookup);
+			if (value && JSON.stringify(value) !== JSON.stringify(targetNode.data.param.value)) {
+				intents.push({
+					kind: 'setParam',
+					node: targetNode.node_id,
+					value,
+					behaviour: targetNode.data.param.event_behaviour
+				});
+			}
+			if (
+				targetNode.meta.user_permissions.can_edit_constraints &&
+				JSON.stringify(sourceTree.data.param.constraints) !==
+					JSON.stringify(targetNode.data.param.constraints)
+			) {
+				intents.push({
+					kind: 'setParamConstraints',
+					node: targetNode.node_id,
+					constraints: sourceTree.data.param.constraints
+				});
+			}
+			if (
+				JSON.stringify(sourceTree.data.param.control) !==
+				JSON.stringify(targetNode.data.param.control)
+			) {
+				intents.push({
+					kind: 'setParamControlState',
+					node: targetNode.node_id,
+					state: sourceTree.data.param.control
+				});
+			}
+		}
+
+		for (const sourceChild of sourceTree.children) {
+			const targetChild =
+				lookup.bySourceId.get(sourceChild.sourceId) ??
+				lookup.bySourceUuid.get(sourceChild.sourceUuid) ??
+				null;
+			if (targetChild) {
+				appendNodeTreeRestoreIntents(sourceChild, targetChild, lookup, intents);
+			}
+		}
+	};
+
+	const restoreNodeTree = async (
+		sourceTree: NodeTreeClipboardNode,
+		targetNode: UiNodeDto
+	): Promise<void> => {
+		const lookup = createReferenceLookup();
+		await materializeNodeTree(sourceTree, targetNode, lookup);
+		const intents: UiEditIntent[] = [];
+		appendNodeTreeRestoreIntents(sourceTree, targetNode, lookup, intents);
+		if (intents.length === 0) {
+			return;
+		}
+		const clientEditId = `node-tree-paste-${Date.now().toString(36)}-${Math.random()
+			.toString(36)
+			.slice(2, 8)}`;
+		await options.sendIntent({
+			kind: 'beginEdit',
+			client_edit_id: clientEditId,
+			label: `Restore ${sourceTree.label || sourceTree.node_type}`
+		});
+		try {
+			for (const intent of intents) {
+				await options.sendIntent(intent);
+			}
+		} finally {
+			await options.sendIntent({ kind: 'endEdit', client_edit_id: clientEditId }).catch(() => {});
+		}
+	};
+
+	const readNodeClipboardFromSystem = async (): Promise<NodeTreeClipboardNode[] | null> => {
+		if (typeof navigator === 'undefined' || !navigator.clipboard?.readText) {
+			return null;
+		}
+		try {
+			const payload = nodeTreeClipboardFromJson(await navigator.clipboard.readText());
+			return payload?.nodes ?? null;
+		} catch {
+			return null;
+		}
+	};
+
 	const removeSelectedNodesCommand = async (): Promise<boolean> => {
 		const selected = options.getSelectedNodes();
 		if (selected.length === 0) {
@@ -214,18 +401,13 @@ export const createWorkbenchCommandSuite = (
 		if (selected.length === 0) {
 			return false;
 		}
-		nodeClipboard = selected.map((node) => ({
-			sourceId: node.node_id,
-			node_type: node.node_type,
-			itemKind: node.user_item_kind,
-			label: node.meta.label.trim().length > 0 ? node.meta.label.trim() : node.node_type
-		}));
-		const payload: NodeClipboardPayload = {
-			kind: 'golden-ui.nodes',
-			version: 1,
-			nodes: nodeClipboard
-		};
-		void copyTextToClipboard(JSON.stringify(payload, null, 2));
+		const selectedIds = new Set(selected.map((node) => node.node_id));
+		const roots = selected
+			.filter((node) => !hasSelectedAncestor(node, selectedIds))
+			.sort((left, right) => getNodeDepth(left.node_id) - getNodeDepth(right.node_id));
+		const payload = buildNodeTreeClipboardPayload(roots, options.graph.state.nodesById);
+		nodeClipboard = payload.nodes;
+		void copyTextToClipboard(nodeTreeClipboardJson(payload));
 		return true;
 	};
 
@@ -298,9 +480,13 @@ export const createWorkbenchCommandSuite = (
 	};
 
 	const pasteNodesCommand = async (): Promise<boolean> => {
-		if (nodeClipboard.length === 0) {
+		const systemClipboard = await readNodeClipboardFromSystem();
+		const clipboardNodes =
+			systemClipboard && systemClipboard.length > 0 ? systemClipboard : nodeClipboard;
+		if (clipboardNodes.length === 0) {
 			return false;
 		}
+		nodeClipboard = clipboardNodes;
 
 		const anchorNode = options.getFirstSelectedNode();
 		if (!anchorNode) {
@@ -320,11 +506,16 @@ export const createWorkbenchCommandSuite = (
 		}
 
 		const createdNodeIds: NodeId[] = [];
-		for (const entry of nodeClipboard) {
-			const label = nextLabelInParent(targetParentId, entry.label);
+		for (const entry of clipboardNodes) {
 			const source = options.graph.state.nodesById.get(entry.sourceId);
+			const sourceMatchesClipboard = source !== undefined && source.uuid === entry.sourceUuid;
 			let createdNodeId: NodeId | null = null;
-			if (source && canParentAcceptItemKind(targetParentId, entry.itemKind)) {
+			let shouldRestoreTree = false;
+			if (
+				source &&
+				sourceMatchesClipboard &&
+				canParentAcceptItemKind(targetParentId, entry.user_item_kind)
+			) {
 				const parentBefore = options.graph.state.nodesById.get(targetParentId);
 				if (!parentBefore) {
 					continue;
@@ -341,17 +532,22 @@ export const createWorkbenchCommandSuite = (
 				createdNodeId = await createNodeUnderParent(
 					targetParentId,
 					entry.node_type,
-					label,
+					entry.label || entry.node_type,
 					insertAfterNodeId
 				);
+				shouldRestoreTree = true;
 			}
 			if (createdNodeId === null) {
 				continue;
 			}
-			createdNodeIds.push(createdNodeId);
-			if (insertAfterNodeId !== null) {
-				insertAfterNodeId = createdNodeId;
+			if (shouldRestoreTree) {
+				const createdNode = options.graph.state.nodesById.get(createdNodeId);
+				if (createdNode) {
+					await restoreNodeTree(entry, createdNode);
+				}
 			}
+			createdNodeIds.push(createdNodeId);
+			insertAfterNodeId = createdNodeId;
 		}
 
 		if (createdNodeIds.length === 0) {

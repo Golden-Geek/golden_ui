@@ -29,7 +29,6 @@
 		createDashboardContainerWidget,
 		createDashboardNodeWidget,
 		duplicateDashboardWidget,
-		type DashboardGenericWidgetKind,
 		getDashboardContainerCreationDefaults,
 		getDashboardGenericWidgetCreationDefaults,
 		getDashboardNodeWidgetCreationDefaults,
@@ -41,6 +40,8 @@
 		type DashboardWidgetCreationPlacement,
 		wrapDashboardWidgetInContainer
 	} from './dashboard-actions';
+
+	type DashboardGenericPreviewKind = 'button' | 'slider' | 'checkbox' | 'textInput' | 'text';
 	import { readDashboardDragPayload, type DashboardDragPayload } from './dashboard-drag';
 	import {
 		type DashboardAnchor,
@@ -78,7 +79,7 @@
 		targetKind: DashboardDragPayload['kind'];
 		placement: DashboardWidgetCreationPlacement;
 		targetIndex: number | null;
-		genericWidgetKind: DashboardGenericWidgetKind | null;
+		genericWidgetKind: DashboardGenericPreviewKind | null;
 		previewText: string | null;
 		previewPlaceholder: string | null;
 		multiline: boolean;
@@ -1094,7 +1095,7 @@
 	const buildCurrentWidgetMovePreview = (
 		dropTarget: Pick<WidgetMoveDropTarget, 'placement' | 'targetIndex'>
 	): SurfaceDropPreview => {
-		const genericWidgetKind = isGenericWidget ? (widgetKind as DashboardGenericWidgetKind) : null;
+		const genericWidgetKind = isGenericWidget ? (widgetKind as DashboardGenericPreviewKind) : null;
 		return {
 			label: widgetLabelText.length > 0 ? widgetLabelText : liveNode.meta.label,
 			targetKind: isNodeWidget || isContainerWidget ? 'node' : 'parameter',

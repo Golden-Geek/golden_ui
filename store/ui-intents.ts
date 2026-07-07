@@ -6,34 +6,14 @@ import type {
 	ParamEventBehaviour,
 	ParamValue,
 	UiCreateUserItemInitialParam,
+	UiDashboardWidgetPlacement,
 	UiEditIntent,
-	UiNodeDto,
 	UiNodeMetaDto,
 	UiParamConstraints,
 	UiParameterControlState,
 	UiScriptConfig
 } from '../types';
 import { appState } from './workbench.svelte';
-
-const makeUniqueChildLabel = (
-	parent: NodeId,
-	baseLabel: string,
-	nodesById: ReadonlyMap<NodeId, UiNodeDto>
-): string => {
-	const parentNode = nodesById.get(parent);
-	if (!parentNode) return baseLabel;
-	const siblingLabels = new Set(
-		parentNode.children
-			.map((childId) => nodesById.get(childId)?.meta.label)
-			.filter((label): label is string => label !== undefined)
-	);
-	if (!siblingLabels.has(baseLabel)) return baseLabel;
-	let counter = 2;
-	while (siblingLabels.has(`${baseLabel} ${counter}`)) {
-		counter++;
-	}
-	return `${baseLabel} ${counter}`;
-};
 
 let intentSequence = 0;
 
@@ -116,6 +96,19 @@ export const sendSetParamIntent = async (
 ): Promise<boolean> => {
 	return sendUiIntent({
 		kind: 'setParam',
+		node,
+		value,
+		behaviour
+	});
+};
+
+export const sendSetTextParamSmartIntent = async (
+	node: NodeId,
+	value: string,
+	behaviour: ParamEventBehaviour
+): Promise<boolean> => {
+	return sendUiIntent({
+		kind: 'setTextParamSmart',
 		node,
 		value,
 		behaviour
@@ -262,15 +255,12 @@ export const sendCreateUserItemByTypeIntent = async (
 	options?: CreateUserItemOptions
 ): Promise<CreateUserItemResult> => {
 	const session = appState.session;
-	const nodesById = session?.graph.state.nodesById;
-	const uniqueLabel =
-		label !== undefined && nodesById ? makeUniqueChildLabel(parent, label, nodesById) : label;
 	const knownChildren = new Set(session?.graph.state.nodesById.get(parent)?.children ?? []);
 	const success = await sendUiIntent({
 		kind: 'createUserItem',
 		parent,
 		node_type,
-		label: uniqueLabel,
+		label,
 		initial_params: options?.initial_params
 	});
 	if (!success) {
@@ -289,6 +279,96 @@ export const sendCreateUserItemByTypeIntent = async (
 		),
 		selectWhenCreated: options?.select_when_created ?? true
 	};
+};
+
+export const sendCreateDashboardContainerWidgetIntent = async (
+	parent: NodeId,
+	options?: {
+		label?: string;
+		placement?: UiDashboardWidgetPlacement;
+		layout_kind?: string;
+		prev_sibling?: NodeId;
+	}
+): Promise<boolean> => {
+	return sendUiIntent({
+		kind: 'createDashboardContainerWidget',
+		parent,
+		label: options?.label,
+		placement: options?.placement,
+		layout_kind: options?.layout_kind,
+		prev_sibling: options?.prev_sibling
+	});
+};
+
+export const sendCreateDashboardNodeWidgetIntent = async (
+	parent: NodeId,
+	target: NodeId,
+	options?: {
+		placement?: UiDashboardWidgetPlacement;
+		prev_sibling?: NodeId;
+	}
+): Promise<boolean> => {
+	return sendUiIntent({
+		kind: 'createDashboardNodeWidget',
+		parent,
+		target,
+		placement: options?.placement,
+		prev_sibling: options?.prev_sibling
+	});
+};
+
+export const sendCreateDashboardGenericWidgetIntent = async (
+	parent: NodeId,
+	target: NodeId,
+	options?: {
+		placement?: UiDashboardWidgetPlacement;
+		prev_sibling?: NodeId;
+	}
+): Promise<boolean> => {
+	return sendUiIntent({
+		kind: 'createDashboardGenericWidget',
+		parent,
+		target,
+		placement: options?.placement,
+		prev_sibling: options?.prev_sibling
+	});
+};
+
+export const sendBindDashboardNodeWidgetTargetIntent = async (
+	widget: NodeId,
+	target: NodeId
+): Promise<boolean> => {
+	return sendUiIntent({
+		kind: 'bindDashboardNodeWidgetTarget',
+		widget,
+		target
+	});
+};
+
+export const sendBindDashboardGenericWidgetTargetIntent = async (
+	widget: NodeId,
+	target: NodeId
+): Promise<boolean> => {
+	return sendUiIntent({
+		kind: 'bindDashboardGenericWidgetTarget',
+		widget,
+		target
+	});
+};
+
+export const sendWrapDashboardWidgetInContainerIntent = async (
+	widget: NodeId,
+	options?: {
+		placement?: UiDashboardWidgetPlacement;
+		layout_kind?: string;
+	}
+): Promise<boolean> => {
+	return sendUiIntent({
+		kind: 'wrapDashboardWidgetInContainer',
+		widget,
+		placement: options?.placement,
+		layout_kind: options?.layout_kind
+	});
 };
 
 export const sendFitAnimationCurvePathIntent = async (

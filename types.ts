@@ -522,6 +522,24 @@ export interface UiCreateUserItemInitialParam {
 	value: ParamValue;
 }
 
+export interface UiDashboardWidgetSizeEnabled {
+	width: boolean;
+	height: boolean;
+}
+
+export interface UiDashboardWidgetCssValue {
+	value: number;
+	unit: CssUnit;
+}
+
+export interface UiDashboardWidgetPlacement {
+	anchor: string;
+	position: [number, number];
+	width: UiDashboardWidgetCssValue;
+	height: UiDashboardWidgetCssValue;
+	size_enabled?: UiDashboardWidgetSizeEnabled;
+}
+
 export interface UiDuplicateNodeSpec {
 	source: NodeId;
 	new_parent: NodeId;
@@ -558,6 +576,7 @@ export type UiEditIntent =
 	| { kind: 'beginEdit'; client_edit_id: string; label?: string }
 	| { kind: 'endEdit'; client_edit_id: string }
 	| { kind: 'setParam'; node: NodeId; value: ParamValue; behaviour: ParamEventBehaviour }
+	| { kind: 'setTextParamSmart'; node: NodeId; value: string; behaviour?: ParamEventBehaviour }
 	| { kind: 'setParamControlState'; node: NodeId; state: UiParameterControlState }
 	| { kind: 'setParamConstraints'; node: NodeId; constraints: UiParamConstraints }
 	| { kind: 'moveNode'; node: NodeId; new_parent: NodeId; new_prev_sibling?: NodeId }
@@ -571,11 +590,40 @@ export type UiEditIntent =
 			initial_params?: UiCreateUserItemInitialParam[];
 	  }
 	| {
+			kind: 'createDashboardContainerWidget';
+			parent: NodeId;
+			label?: string;
+			placement?: UiDashboardWidgetPlacement;
+			layout_kind?: string;
+			prev_sibling?: NodeId;
+	  }
+	| {
+			kind: 'createDashboardNodeWidget';
+			parent: NodeId;
+			target: NodeId;
+			placement?: UiDashboardWidgetPlacement;
+			prev_sibling?: NodeId;
+	  }
+	| {
+			kind: 'createDashboardGenericWidget';
+			parent: NodeId;
+			target: NodeId;
+			placement?: UiDashboardWidgetPlacement;
+			prev_sibling?: NodeId;
+	  }
+	| { kind: 'bindDashboardNodeWidgetTarget'; widget: NodeId; target: NodeId }
+	| { kind: 'bindDashboardGenericWidgetTarget'; widget: NodeId; target: NodeId }
+	| {
+			kind: 'wrapDashboardWidgetInContainer';
+			widget: NodeId;
+			placement?: UiDashboardWidgetPlacement;
+			layout_kind?: string;
+	  }
+	| {
 			kind: 'duplicateNode';
 			source: NodeId;
 			new_parent: NodeId;
 			new_prev_sibling?: NodeId;
-			label?: string;
 			initial_params?: UiCreateUserItemInitialParam[];
 	  }
 	| {

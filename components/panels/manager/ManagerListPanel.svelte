@@ -128,6 +128,7 @@
 			.map((childNodeId: NodeId) => graphState.nodesById.get(childNodeId) ?? null)
 			.filter(isTreeNode);
 	});
+	let itemNodeIds = $derived(itemNodes.map((itemNode) => itemNode.node_id));
 	let isRootDropActive = $derived(
 		managerNode !== null && dropTarget?.hoverNodeId === managerNode.node_id
 	);
@@ -155,7 +156,9 @@
 	const canDragNode = (candidate: UiNodeDto): boolean => {
 		return (
 			allowDragDrop &&
-			(nodeDraggable ? nodeDraggable(candidate) : canDragOutlinerNode(graphState ?? null, candidate))
+			(nodeDraggable
+				? nodeDraggable(candidate)
+				: canDragOutlinerNode(graphState ?? null, candidate))
 		);
 	};
 
@@ -419,6 +422,7 @@
 				{#each itemNodes as itemNode (itemNode.node_id)}
 					<OutlinerItem
 						node={itemNode}
+						siblingNodeIds={itemNodeIds}
 						mode="tree"
 						{focusedNodeId}
 						{nodeFilter}
