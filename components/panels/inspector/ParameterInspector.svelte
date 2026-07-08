@@ -630,9 +630,7 @@
 				{/if}
 
 				{#if EditorComponent}
-					<div
-						class="parameter-controls"
-						class:full-width={isControlNode || layoutMode === 'dashboard'}>
+					<div class="parameter-controls">
 						<div class="parameter-wrapper {readOnly ? 'readonly' : ''} {enabled ? '' : 'disabled'}">
 							<EditorComponent node={liveNode} />
 						</div>
@@ -813,6 +811,8 @@
 <style>
 	.parameter-inspector {
 		--gc-parameter-accent: transparent;
+		--gc-parameter-label-column: 9rem;
+		--gc-parameter-control-column: 16rem;
 		width: 100%;
 		display: flex;
 		flex-direction: column;
@@ -848,9 +848,12 @@
 
 	.parameter-inspector .firstline {
 		width: 100%;
-		display: flex;
+		display: grid;
+		grid-template-columns:
+			minmax(0, var(--gc-parameter-label-column))
+			minmax(0, 1fr);
 		align-items: center;
-		justify-content: flex-start;
+		justify-content: stretch;
 		gap: 0.25rem;
 		min-inline-size: 0;
 	}
@@ -860,9 +863,10 @@
 		align-items: center;
 		justify-content: flex-end;
 		gap: 0.25rem;
-		flex: 0 1 min(15rem, 66%);
-		margin-left: auto;
-		min-inline-size: min(10rem, 100%);
+		grid-column: 2;
+		inline-size: 100%;
+		justify-self: stretch;
+		min-inline-size: 0;
 	}
 
 	.parameter-wrapper {
@@ -871,7 +875,7 @@
 		justify-content: right;
 		flex: 1 1 auto;
 		min-width: 0;
-		max-width: 15rem;
+		max-width: none;
 	}
 
 	:global(
@@ -895,10 +899,6 @@
 		cursor: grabbing;
 	}
 
-	.full-width .parameter-wrapper {
-		max-width: none;
-	}
-
 	.parameter-wrapper.readonly,
 	.parameter-wrapper.disabled {
 		pointer-events: none;
@@ -914,9 +914,8 @@
 	.parameter-info {
 		display: flex;
 		align-items: center;
-		flex: 0 1 auto;
+		grid-column: 1;
 		min-width: 0;
-		max-inline-size: min(45%, 14rem);
 		gap: 0.25rem;
 	}
 
@@ -930,6 +929,8 @@
 	}
 
 	.parameter-inspector.density-compact {
+		--gc-parameter-label-column: 7rem;
+		--gc-parameter-control-column: 12rem;
 		padding-left: 0;
 		padding-bottom: 0;
 	}
@@ -939,16 +940,13 @@
 	}
 
 	.parameter-inspector.density-compact .firstline {
-		flex-wrap: nowrap;
-		justify-content: flex-start;
+		justify-content: stretch;
 		gap: 0.25rem;
 		min-inline-size: 0;
 	}
 
 	.parameter-inspector.density-compact .parameter-info {
-		flex: 0 1 auto;
 		min-inline-size: 0;
-		max-inline-size: 36%;
 		gap: 0.18rem;
 	}
 
@@ -962,9 +960,7 @@
 	}
 
 	.parameter-inspector.density-compact .parameter-controls {
-		flex: 0 1 auto;
 		justify-content: flex-end;
-		margin-left: auto;
 		min-inline-size: 0;
 	}
 
@@ -997,11 +993,13 @@
 
 	@media (max-width: 34rem) {
 		.parameter-inspector.density-compact .firstline {
-			flex-wrap: wrap;
+			grid-template-columns: minmax(0, 1fr);
+			justify-content: stretch;
 		}
 
-		.parameter-inspector.density-compact .parameter-info {
-			max-inline-size: 100%;
+		.parameter-inspector.density-compact .parameter-info,
+		.parameter-inspector.density-compact .parameter-controls {
+			grid-column: 1;
 		}
 	}
 

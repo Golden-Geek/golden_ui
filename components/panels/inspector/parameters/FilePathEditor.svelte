@@ -178,18 +178,21 @@
 		flex-direction: column;
 		gap: 0.2rem;
 		width: 100%;
+		min-inline-size: 0;
 	}
 
 	.file-input-row {
 		display: flex;
 		align-items: center;
+		flex-wrap: wrap;
 		gap: 0.25rem;
 		width: 100%;
+		min-inline-size: 0;
 	}
 
 	.path-input {
-		flex: 1 1 auto;
-		min-width: 0;
+		flex: 1 1 14rem;
+		min-inline-size: min(12rem, 100%);
 		height: 1.3rem;
 		padding-inline: 0.4rem;
 		font-size: 0.72rem;

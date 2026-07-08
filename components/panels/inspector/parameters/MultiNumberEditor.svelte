@@ -274,6 +274,7 @@
 
 <style>
 	.multi-number-editor {
+		--gc-number-field-inline-size: 5rem;
 		display: flex;
 		flex-direction: column;
 		gap: 0.25rem;
@@ -323,9 +324,10 @@
 	}
 
 	.number-field {
+		flex: 0 0 var(--gc-number-field-inline-size);
+		inline-size: var(--gc-number-field-inline-size);
 		height: 100%;
 		box-sizing: border-box;
-		width: 30%;
 	}
 
 	.multi-number-editor.widget-layout .number-field {

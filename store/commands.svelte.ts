@@ -16,7 +16,8 @@ export type CommandId =
 	| 'file.save'
 	| 'file.saveAs'
 	| 'file.open'
-	| 'file.reopenLast';
+	| 'file.reopenLast'
+	| 'file.preferences';
 
 export interface CommandExecuteContext {
 	source: 'keyboard' | 'menu' | 'api';
@@ -128,6 +129,11 @@ const commandDefinitions: CommandDefinition[] = [
 		id: 'file.reopenLast',
 		label: 'Reopen Last',
 		shortcuts: [{ key: 'o', mod: true, shift: true }]
+	},
+	{
+		id: 'file.preferences',
+		label: 'Preferences',
+		shortcuts: []
 	}
 ];
 

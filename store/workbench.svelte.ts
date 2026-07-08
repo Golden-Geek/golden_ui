@@ -21,6 +21,7 @@ import type {
 } from '../types';
 import { wholeGraphScope } from '../types';
 import { handleCommandShortcut } from './commands.svelte';
+import { appState } from './app-state.svelte';
 import { resetProjectFileFormat, setProjectFileFormat } from './project-file-format.svelte';
 import { syncProjectFilePathFromSnapshot } from './project-files.svelte';
 import {
@@ -998,6 +999,20 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 		return history.redo(() => sendIntent({ kind: 'redo' }));
 	};
 
+	const revealNodeInInspector = (nodeId: NodeId): boolean => {
+		if (!graph.state.nodesById.has(nodeId)) {
+			return false;
+		}
+		selection.selectNode(nodeId, 'REPLACE');
+		appState.panels
+			?.showPanel({
+				panelType: 'inspector',
+				panelId: 'inspector'
+			})
+			?.setActive();
+		return true;
+	};
+
 	const commandSuite = createWorkbenchCommandSuite({
 		graph,
 		sendIntent,
@@ -1005,6 +1020,7 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 		getFirstSelectedNode: () => selection.getFirstSelectedNode(),
 		getSelectedNodeIds: () => selection.selectedNodeIds,
 		selectNodes: (nodeIds, selectionMode) => selection.selectNodes(nodeIds, selectionMode),
+		revealNodeInInspector,
 		undo,
 		redo
 	});

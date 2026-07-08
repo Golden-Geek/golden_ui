@@ -29,6 +29,7 @@ interface WorkbenchCommandSuiteOptions {
 	getFirstSelectedNode(): UiNodeDto | null;
 	getSelectedNodeIds(): NodeId[];
 	selectNodes(nodeIds: NodeId[], selectionMode?: SelectionMode): void;
+	revealNodeInInspector(nodeId: NodeId): boolean;
 	undo(): Promise<void>;
 	redo(): Promise<void>;
 }
@@ -42,6 +43,7 @@ export const createWorkbenchCommandSuite = (
 	options: WorkbenchCommandSuiteOptions
 ): WorkbenchCommandSuite => {
 	let nodeClipboard = $state<NodeTreeClipboardNode[]>([]);
+	const PREFERENCES_DECL_ID = 'preferences';
 
 	const getNodeDepth = (nodeId: NodeId): number => {
 		let depth = 0;
@@ -557,6 +559,34 @@ export const createWorkbenchCommandSuite = (
 		return true;
 	};
 
+	const preferencesNode = (): UiNodeDto | null => {
+		const rootId = options.graph.state.rootId;
+		if (rootId !== null) {
+			const root = options.graph.state.nodesById.get(rootId);
+			for (const childId of root?.children ?? []) {
+				const child = options.graph.state.nodesById.get(childId);
+				if (child?.decl_id === PREFERENCES_DECL_ID) {
+					return child;
+				}
+			}
+		}
+
+		for (const node of options.graph.state.nodesById.values()) {
+			if (node.decl_id === PREFERENCES_DECL_ID) {
+				return node;
+			}
+		}
+		return null;
+	};
+
+	const revealPreferencesCommand = (): boolean => {
+		const preferences = preferencesNode();
+		if (!preferences) {
+			return false;
+		}
+		return options.revealNodeInInspector(preferences.node_id);
+	};
+
 	const registerCommandHandlers = (): (() => void) => {
 		type CommandHandlerResult = boolean | void | Promise<boolean | void>;
 		const cleanups: Array<() => void> = [];
@@ -595,6 +625,7 @@ export const createWorkbenchCommandSuite = (
 		bind('file.saveAs', () => saveProjectFileAs(), 15);
 		bind('file.open', () => openProjectFile(), 15);
 		bind('file.reopenLast', () => reopenLastProjectFile(), 15);
+		bind('file.preferences', () => revealPreferencesCommand(), 15);
 
 		return (): void => {
 			for (const cleanup of cleanups) {

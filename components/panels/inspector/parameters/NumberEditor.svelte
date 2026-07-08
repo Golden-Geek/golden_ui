@@ -366,6 +366,8 @@
 	}
 
 	.number-property-container {
+		--gc-number-field-inline-size: 5rem;
+		--gc-number-time-field-inline-size: 7.2rem;
 		display: flex;
 		align-items: center;
 		justify-content: right;
@@ -407,8 +409,8 @@
 	}
 
 	.number-property-container.infinite .number-field {
-		flex: 0 0 5rem;
-		inline-size: 5rem;
+		flex: 0 0 var(--gc-number-field-inline-size);
+		inline-size: var(--gc-number-field-inline-size);
 		margin-left: 0;
 	}
 
@@ -433,8 +435,8 @@
 
 	:global(.parameter-inspector.density-compact) .number-property-container .number-field {
 		flex: 0 0 auto;
-		inline-size: clamp(4rem, 34%, 5.5rem);
-		min-inline-size: 4rem;
+		inline-size: var(--gc-number-field-inline-size);
+		min-inline-size: var(--gc-number-field-inline-size);
 		max-width: none;
 		margin-left: 0;
 	}
@@ -442,14 +444,14 @@
 	:global(.parameter-inspector.density-compact)
 		.number-property-container
 		.number-field.time-field {
-		inline-size: clamp(7rem, 42%, 9rem);
-		min-inline-size: 7rem;
+		inline-size: var(--gc-number-time-field-inline-size);
+		min-inline-size: var(--gc-number-time-field-inline-size);
 	}
 
 	:global(.parameter-inspector.density-compact) .number-property-container.infinite .number-field {
-		flex: 0 0 4.6rem;
-		inline-size: 4.6rem;
-		min-inline-size: 4.6rem;
+		flex: 0 0 var(--gc-number-field-inline-size);
+		inline-size: var(--gc-number-field-inline-size);
+		min-inline-size: var(--gc-number-field-inline-size);
 	}
 
 	.number-property-container.field-only .number-field {
@@ -462,23 +464,24 @@
 	}
 
 	.number-field {
+		flex: 0 0 var(--gc-number-field-inline-size);
+		inline-size: var(--gc-number-field-inline-size);
 		height: 100%;
 		box-sizing: border-box;
-		max-width: 5rem;
+		max-width: none;
 		margin-left: 0.25rem;
-		width: 40%;
 	}
 
 	.infinite .number-field {
-		max-width: 5rem;
+		max-width: none;
 	}
 
 	.number-field.time-field {
 		font-variant-numeric: tabular-nums;
-		flex: 0 0 7.2rem;
-		inline-size: 7.2rem;
-		min-inline-size: 7.2rem;
-		max-width: 9rem;
+		flex: 0 0 var(--gc-number-time-field-inline-size);
+		inline-size: var(--gc-number-time-field-inline-size);
+		min-inline-size: var(--gc-number-time-field-inline-size);
+		max-width: none;
 	}
 
 	.number-field-shell {

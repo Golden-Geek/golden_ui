@@ -87,7 +87,9 @@
 				commandMenuItem('file.reopenLast', projectFileState.busy || !canOpenLast),
 				{ separator: true },
 				commandMenuItem('file.save', projectFileState.busy),
-				commandMenuItem('file.saveAs', projectFileState.busy)
+				commandMenuItem('file.saveAs', projectFileState.busy),
+				{ separator: true },
+				commandMenuItem('file.preferences', false)
 			];
 		}
 
@@ -119,7 +121,9 @@
 				label: 'Save As',
 				disabled: true,
 				hint: 'Browser save dialog coming later'
-			}
+			},
+			{ separator: true },
+			commandMenuItem('file.preferences', false)
 		];
 	});
 </script>

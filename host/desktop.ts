@@ -123,6 +123,30 @@ export const writeDesktopAppDataFile = async (
 	return normalizeDialogPath(written ?? null);
 };
 
+/**
+ * Writes `contents` to `fileName` inside an explicit directory, creating the
+ * directory if needed. Returns the absolute path written, or null if it failed
+ * or there is no desktop host.
+ */
+export const writeDesktopFileInDirectory = async (
+	directory: string,
+	fileName: string,
+	contents: string,
+	logTag = 'desktop-host'
+): Promise<string | null> => {
+	const written = await invokeDesktopCommand<string>(
+		'write_file_in_directory',
+		{
+			directory,
+			fileName,
+			contents
+		},
+		logTag
+	);
+
+	return normalizeDialogPath(written ?? null);
+};
+
 export const requestDesktopWindowClose = async (): Promise<unknown> =>
 	invokeDesktopCommand('window_close', undefined, 'window-controls');
 
