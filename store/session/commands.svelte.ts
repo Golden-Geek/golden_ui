@@ -1,6 +1,7 @@
 import type { NodeId, ParamValue, UiEditIntent, UiNodeDto } from '../../types';
 import type { GraphStore } from '../graph.svelte';
 import { registerCommandHandler, type CommandId } from '../commands.svelte';
+import { requestRemoveNodesById } from '../node-removal';
 import {
 	createNewProjectFile,
 	openProjectFile,
@@ -373,13 +374,15 @@ export const createWorkbenchCommandSuite = (
 			return false;
 		}
 
-		removable.sort((left, right) => getNodeDepth(right.node_id) - getNodeDepth(left.node_id));
-		await options.sendIntent({
-			kind: 'removeNodes',
-			nodes: removable.map((node) => node.node_id)
-		});
-		return true;
-	};
+	removable.sort((left, right) => getNodeDepth(right.node_id) - getNodeDepth(left.node_id));
+	return requestRemoveNodesById(
+		removable.map((node) => node.node_id),
+		{
+			graph: options.graph.state,
+			sendIntent: options.sendIntent
+		}
+	);
+};
 
 	const selectSiblingNodesCommand = (): boolean => {
 		const anchorNode = options.getFirstSelectedNode();

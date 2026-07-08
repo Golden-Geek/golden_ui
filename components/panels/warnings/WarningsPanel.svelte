@@ -1,7 +1,9 @@
 <script lang="ts">
 	import type { PanelProps, PanelState } from '../../../dockview/panel-types';
 	import { appState } from '../../../store/workbench.svelte';
+	import type { NodeWarningRecord } from '../../../store/workbench.svelte';
 	import type { NodeId } from '../../../types';
+	import { copyTextToClipboard } from '../../../utils/clipboard';
 
 	let { panelId, panelType, title, params }: PanelProps = $props();
 
@@ -77,6 +79,30 @@
 		session?.selectNode(nodeId);
 	};
 
+	const formatWarningForClipboard = (warning: NodeWarningRecord): string => {
+		const lines = [
+			'Chataigne2 warning',
+			`Source node: ${warning.sourceNodeLabel} (${warning.sourceNodeId})`,
+			`Target node: ${warning.targetNodeLabel} (${warning.targetNodeId})`,
+			`Warning id: ${warningIdLabel(warning.warningId)}`,
+			`Message: ${warning.message}`
+		];
+		if (warning.distance > 0) {
+			lines.push(`Child warning depth: ${warning.distance}`);
+		}
+		if (warning.detail?.trim()) {
+			lines.push('', 'Detail:', warning.detail.trim());
+		}
+		lines.push('', 'Raw warning:', JSON.stringify(warning, null, 2));
+		return lines.join('\n');
+	};
+
+	const copyWarning = (event: MouseEvent, warning: NodeWarningRecord): void => {
+		event.preventDefault();
+		event.stopPropagation();
+		void copyTextToClipboard(formatWarningForClipboard(warning));
+	};
+
 	interface WarningDetailLine {
 		label: string | null;
 		value: string;
@@ -144,6 +170,12 @@
 							{warning.sourceNodeLabel}
 						</button>
 						<span class="warning-id">{warningIdLabel(warning.warningId)}</span>
+						<button
+							type="button"
+							class="copy-warning-button"
+							title="Copy warning"
+							aria-label={`Copy warning ${warningIdLabel(warning.warningId)} from ${warning.sourceNodeLabel}`}
+							onclick={(event) => copyWarning(event, warning)}></button>
 					</div>
 					<p class="warning-message">{warning.message}</p>
 					{#if warning.detail}
@@ -256,6 +288,29 @@
 		text-transform: uppercase;
 		background: color-mix(in srgb, var(--gc-color-panel-alt) 85%, black);
 		color: color-mix(in srgb, #cf9b37 85%, white 15%);
+	}
+
+	.copy-warning-button {
+		inline-size: 1rem;
+		block-size: 1rem;
+		margin-inline-start: auto;
+		padding: 0;
+		border: 0;
+		border-radius: 1rem;
+		background-color: transparent;
+		background-image: url('../../../style/icons/clipboard.svg');
+		background-position: center;
+		background-repeat: no-repeat;
+		background-size: 0.85rem 0.85rem;
+		cursor: pointer;
+		opacity: 0.68;
+	}
+
+	.copy-warning-button:hover,
+	.copy-warning-button:focus-visible {
+		background-color: color-mix(in srgb, var(--gc-color-warning) 12%, transparent);
+		outline: none;
+		opacity: 1;
 	}
 
 	.warning-message {

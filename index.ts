@@ -47,6 +47,7 @@ export { default as DashboardRoute } from './components/routes/DashboardRoute.sv
 export { default as DashboardPageRoute } from './components/routes/DashboardPageRoute.svelte';
 export { default as Watcher } from './components/common/Watcher.svelte';
 export { default as ContextMenu } from './components/common/ContextMenu.svelte';
+export { default as ConfirmationDialog } from './components/common/ConfirmationDialog.svelte';
 export { default as EnableButton } from './components/common/EnableButton.svelte';
 export { default as NodeAddButton } from './components/common/NodeAddButton.svelte';
 export {
@@ -138,4 +139,18 @@ export type {
 
 export * from './store/ui-warnings';
 export * from './store/ui-panels';
+export {
+	requestConfirmation,
+	cancelConfirmation,
+	resolveConfirmation,
+	confirmationDialogState,
+	type ConfirmationRequest,
+	type ConfirmationRequestAction
+} from './store/confirmation-dialog.svelte';
+export {
+	registerNodeRemovalGuard,
+	requestRemoveNodesById,
+	type NodeRemovalGuard,
+	type NodeRemovalRequest
+} from './store/node-removal';
 export * from './types';

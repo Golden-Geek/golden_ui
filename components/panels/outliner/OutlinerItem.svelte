@@ -34,6 +34,7 @@
 		autoExpandAncestorNodeIds = EMPTY_AUTO_EXPAND_ANCESTORS,
 		opennessByNodeId = null,
 		nodeFilter = (_candidate: UiNodeDto) => true,
+		nodeRowVisible = (_candidate: UiNodeDto) => true,
 		nodeSelectable = (_candidate: UiNodeDto) => true,
 		nodeDraggable = (_candidate: UiNodeDto) => false,
 		activeDragNodeId = null,
@@ -59,6 +60,7 @@
 		autoExpandAncestorNodeIds?: ReadonlySet<NodeId>;
 		opennessByNodeId?: Readonly<Record<string, boolean>> | null;
 		nodeFilter?: (candidate: UiNodeDto) => boolean;
+		nodeRowVisible?: (candidate: UiNodeDto) => boolean;
 		nodeSelectable?: (candidate: UiNodeDto) => boolean;
 		nodeDraggable?: (candidate: UiNodeDto) => boolean;
 		activeDragNodeId?: NodeId | null;
@@ -81,6 +83,7 @@
 	);
 	let iconURL = $derived(getIconURLForNode(node));
 	let accentColor = $derived(node ? getContainerColorForNode(node) : 'rgba(124, 138, 162, 1)');
+	let hasCustomColor = $derived(Boolean(node?.meta.presentation?.color));
 
 	const visibleSelectableSiblingIds = (): NodeId[] => {
 		if (!mainGraphState) {
@@ -280,6 +283,13 @@
 		return nodeSelectable(candidate);
 	};
 
+	const isRowVisible = (candidate: UiNodeDto | null): boolean => {
+		if (!candidate) {
+			return false;
+		}
+		return nodeRowVisible(candidate);
+	};
+
 	const subtreeHasVisibleNode = (candidate: UiNodeDto | null): boolean => {
 		if (!candidate) {
 			return false;
@@ -297,7 +307,7 @@
 	};
 
 	let isVisible = $derived(subtreeHasVisibleNode(node));
-	let showRow = $derived(node !== null);
+	let showRow = $derived(isRowVisible(node));
 	let rowSelectable = $derived(isSelectable(node));
 	let rowMoveDraggable = $derived(Boolean(node && nodeDraggable(node)));
 	let rowDashboardDraggable = $derived(
@@ -374,6 +384,7 @@
 				class:selected={selectionHighlightEnabled && isSelected}
 				class:has-arrow={hasArrow}
 				class:current-reference={isCurrentReference}
+				class:custom-color={hasCustomColor}
 				class:drag-source={isDragSource}
 				class:drop-before={activeDropZone === 'before'}
 				class:drop-inside={activeDropZone === 'inside'}
@@ -442,13 +453,14 @@
 						onclick={(event) => selectNode(node, event)}
 						ondblclick={() => startRename()}>{meta?.label ?? ''}</button>
 				{/if}
-				<NodeWarningBadge {warnings} />
-
-				{#if ResolvedRowSupplementComponent}
-					<ResolvedRowSupplementComponent {node} />
-				{:else}
-					<span class="outliner-item-spacer"></span>
-				{/if}
+				<span class="outliner-item-trailing">
+					<NodeWarningBadge {warnings} />
+					{#if ResolvedRowSupplementComponent}
+						<span class="outliner-item-supplement">
+							<ResolvedRowSupplementComponent {node} />
+						</span>
+					{/if}
+				</span>
 
 				{#if isOutlinerMode}
 					<span class="outliner-item-type">{node.node_type}</span>
@@ -456,8 +468,11 @@
 			</div>
 		{/if}
 
-		{#if isExpanded && canRenderChildren}
-			<div class="outliner-children" transition:slide|local={{ duration: transitionDurationMs }}>
+		{#if canRenderChildren && (!showRow || isExpanded)}
+			<div
+				class="outliner-children"
+				class:hoisted={!showRow}
+				transition:slide|local={{ duration: transitionDurationMs }}>
 				{#each node.children as child (child)}
 					<Self
 						node={mainGraphState?.nodesById.get(child) ?? null}
@@ -473,6 +488,7 @@
 						{autoExpandAncestorNodeIds}
 						{opennessByNodeId}
 						{nodeFilter}
+						{nodeRowVisible}
 						{nodeSelectable}
 						{nodeDraggable}
 						{activeDragNodeId}
@@ -515,6 +531,10 @@
 		outline: solid 0.08rem color-mix(in srgb, var(--gc-color-selection) 82%, white 18%);
 		background-color: color-mix(in srgb, var(--gc-color-selection) 16%, transparent);
 		border-radius: 0.3rem;
+	}
+
+	.outliner-item-content.custom-color {
+		background-color: rgba(from var(--node-accent-color) r g b / 0.11);
 	}
 
 	.outliner-item-content.drag-source {
@@ -562,6 +582,8 @@
 	}
 
 	.outliner-item-label {
+		flex: 0 1 auto;
+		min-width: 0;
 		color: var(--gc-color-text);
 		background: transparent;
 		border: none;
@@ -572,6 +594,9 @@
 		cursor: pointer;
 		outline: solid 1px transparent;
 		border-radius: 0.3rem;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
 		transition:
 			background-color 0.1s ease,
 			outline 0.1s ease;
@@ -603,13 +628,32 @@
 		opacity: 0.6;
 	}
 
-	.outliner-item-spacer {
-		flex: 1 1 auto;
+	.outliner-item-trailing {
+		margin-left: auto;
+		display: inline-flex;
+		align-items: center;
+		justify-content: flex-end;
+		gap: 0.25rem;
+		flex: 0 0 auto;
+		min-width: 0;
+	}
+
+	.outliner-item-supplement {
+		display: inline-flex;
+		align-items: center;
+		justify-content: flex-end;
+		gap: 0.25rem;
+		flex: 0 0 auto;
 	}
 
 	.outliner-children {
 		padding-left: 0.7rem;
 		border-left: 0.025rem dashed var(--node-accent-color);
+	}
+
+	.outliner-children.hoisted {
+		padding-left: 0;
+		border-left: none;
 	}
 
 	.outliner-item-rename-input {

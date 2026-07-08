@@ -291,6 +291,10 @@
 		return activeView?.nodeVisibilityFilter?.(candidate) ?? true;
 	};
 
+	const rowVisibleByConstraints = (candidate: UiNodeDto): boolean => {
+		return activeView?.nodeRowVisibilityFilter?.(candidate) ?? true;
+	};
+
 	const searchMatchByNodeId = $derived.by(() => {
 		const directMatches = new Map<number, boolean>();
 		const subtreeMatches = new Map<number, boolean>();
@@ -413,6 +417,7 @@
 						focusedNodeId={selectedNodeId}
 						{autoExpandAncestorNodeIds}
 						nodeFilter={passesFilter}
+						nodeRowVisible={rowVisibleByConstraints}
 						nodeSelectable={selectableByConstraints}
 						onSelectNode={(candidate, event) => {
 							if (event.detail >= 2) {

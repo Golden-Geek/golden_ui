@@ -284,7 +284,9 @@ export const getContainerColorForNode = (node: UiNodeDto | null): string => {
 		return 'rgba(30,30,30, 1)';
 	}
 
-	const explicitColor = normalizeNodeColor(node.meta.presentation?.color);
+	const explicitColor = normalizeNodeColor(
+		node.meta.presentation?.color ?? node.meta.presentation?.default_color
+	);
 	if (explicitColor) {
 		return toCssRgba(explicitColor);
 	}

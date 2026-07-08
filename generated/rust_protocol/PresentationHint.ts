@@ -7,9 +7,13 @@ import type { NodeWarning } from "./NodeWarning";
  */
 export type PresentationHint = { 
 /**
- * Preferred UI color.
+ * User-selected UI color override.
  */
 color?: Color | null, 
+/**
+ * Backend-provided default UI color for this node kind or declaration.
+ */
+default_color?: Color | null, 
 /**
  * Preferred UI icon, as a data URI (e.g. `data:image/svg+xml;base64,...`).
  */

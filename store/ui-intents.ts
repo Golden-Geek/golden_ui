@@ -13,6 +13,7 @@ import type {
 	UiParameterControlState,
 	UiScriptConfig
 } from '../types';
+import { requestRemoveNodesById } from './node-removal';
 import { appState } from './workbench.svelte';
 
 let intentSequence = 0;
@@ -160,20 +161,14 @@ export const sendSetLogMaxEntriesIntent = async (max_entries: number): Promise<b
 };
 
 export const sendRemoveNodeIntent = async (node: NodeId): Promise<boolean> => {
-	return sendUiIntent({
-		kind: 'removeNode',
-		node
-	});
+	return requestRemoveNodesById([node]);
 };
 
 export const sendRemoveNodesIntent = async (nodes: NodeId[]): Promise<boolean> => {
 	if (nodes.length === 0) {
 		return false;
 	}
-	return sendUiIntent({
-		kind: 'removeNodes',
-		nodes
-	});
+	return requestRemoveNodesById(nodes);
 };
 
 export const sendMoveNodeIntent = async (

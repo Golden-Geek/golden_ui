@@ -117,7 +117,10 @@ export interface UiColorDto {
 }
 
 export interface UiNodePresentationHintsDto {
+	// User-selected UI color override.
 	color?: UiColorDto;
+	// Backend-provided default UI color for this node kind or declaration.
+	default_color?: UiColorDto;
 	// Preferred UI icon, as a data URI (e.g. `data:image/svg+xml;base64,...`).
 	icon?: string;
 	// Default collapsed state for tree/inspector containers until the user toggles them.

@@ -9,6 +9,7 @@
 		sendPatchMetaIntent,
 		sendSetParamConstraintsIntent
 	} from '../../store/ui-intents';
+	import { requestRemoveNodesById } from '../../store/node-removal';
 	import { executeCommand } from '../../store/commands.svelte';
 	import type { ContextMenuAnchor, ContextMenuItem } from './context-menu';
 	import {
@@ -151,29 +152,46 @@
 		const bounds = getMainViewportBounds();
 		const paddingPx = remToPx(0.45);
 		const gapPx = remToPx(0.35);
-		const maxInlineSize = Math.max(1, bounds.width - paddingPx * 2);
+		const viewportMaxInlineSize = Math.max(1, bounds.width - paddingPx * 2);
 		const maxBlockSize = Math.max(1, bounds.height - paddingPx * 2);
-		node.style.setProperty('--gc-node-context-panel-max-inline-size', `${maxInlineSize}px`);
-		node.style.maxInlineSize = `${maxInlineSize}px`;
+		node.style.setProperty('--gc-node-context-panel-max-inline-size', `${viewportMaxInlineSize}px`);
+		node.style.maxInlineSize = `${viewportMaxInlineSize}px`;
 		node.style.maxBlockSize = `${maxBlockSize}px`;
 
 		const anchorRect = anchorElement.getBoundingClientRect();
-		const rect = node.getBoundingClientRect();
+		const menuRect =
+			anchorElement.closest<HTMLElement>('.gc-context-menu')?.getBoundingClientRect() ?? anchorRect;
+		const initialRect = node.getBoundingClientRect();
 
 		const minLeft = bounds.left + paddingPx;
-		const maxLeft = Math.max(minLeft, bounds.right - rect.width - paddingPx);
+		const maxRight = bounds.right - paddingPx;
 		const minTop = bounds.top + paddingPx;
+
+		const rightSpace = Math.max(1, maxRight - menuRect.right - gapPx);
+		const leftSpace = Math.max(1, menuRect.left - minLeft - gapPx);
+		const minimumComfortWidth = remToPx(16);
+		const preferredWidth = Math.max(initialRect.width, minimumComfortWidth);
+		const shouldOpenLeft = rightSpace < preferredWidth;
+		const sideSpace = shouldOpenLeft ? leftSpace : rightSpace;
+		const availablePanelWidth =
+			sideSpace >= minimumComfortWidth
+				? Math.min(preferredWidth, sideSpace)
+				: Math.min(preferredWidth, viewportMaxInlineSize);
+
+		node.style.setProperty('--gc-node-context-panel-max-inline-size', `${availablePanelWidth}px`);
+		node.style.maxInlineSize = `${availablePanelWidth}px`;
+
+		const rect = node.getBoundingClientRect();
 		const maxTop = Math.max(minTop, bounds.bottom - rect.height - paddingPx);
 
-		const rightSpace = bounds.right - paddingPx - anchorRect.right - gapPx;
-		const leftSpace = anchorRect.left - bounds.left - paddingPx - gapPx;
-		const shouldOpenLeft = rightSpace < rect.width && leftSpace > rightSpace;
-		let left = shouldOpenLeft ? anchorRect.left - rect.width - gapPx : anchorRect.right + gapPx;
-		if (!shouldOpenLeft && left > maxLeft && leftSpace > rightSpace) {
-			left = anchorRect.left - rect.width - gapPx;
+		if (shouldOpenLeft) {
+			const viewportRight = typeof window === 'undefined' ? bounds.right : window.innerWidth;
+			node.style.left = 'auto';
+			node.style.right = `${Math.max(0, viewportRight - (menuRect.left - gapPx))}px`;
+		} else {
+			node.style.right = 'auto';
+			node.style.left = `${Math.min(maxRight - rect.width, menuRect.right + gapPx)}px`;
 		}
-
-		node.style.left = `${Math.min(Math.max(minLeft, left), maxLeft)}px`;
 		node.style.top = `${Math.min(Math.max(minTop, anchorRect.top), maxTop)}px`;
 	};
 
@@ -422,6 +440,7 @@
 		);
 	});
 	let canSetColor = $derived(Boolean(activeNode?.meta.user_permissions.can_edit_color));
+	let hasCustomColor = $derived(Boolean(activeNode?.meta.presentation?.color));
 	let canSetConstraints = $derived(
 		Boolean(
 			activeNode?.meta.user_permissions.can_edit_constraints && activeNode.data.kind === 'parameter'
@@ -753,7 +772,7 @@
 	};
 
 	const currentNodeColor = (node: UiNodeDto | null): UiColorDto => {
-		const color = node?.meta.presentation?.color;
+		const color = node?.meta.presentation?.color ?? node?.meta.presentation?.default_color;
 		return {
 			r: clamp01(color?.r ?? 1),
 			g: clamp01(color?.g ?? 1),
@@ -875,12 +894,7 @@
 		if (!session || !activeNode || !canDelete) {
 			return;
 		}
-		void session
-			.sendIntent({
-				kind: 'removeNode',
-				node: activeNode.node_id
-			})
-			.catch(() => {});
+		void requestRemoveNodesById([activeNode.node_id]).catch(() => {});
 	};
 
 	const setNodeColor = (nextColor: UiColorDto): void => {
@@ -894,6 +908,15 @@
 				color: nextColor
 			}
 		});
+	};
+
+	const resetNodeColor = (): void => {
+		if (!activeNode || !canSetColor || !hasCustomColor) {
+			return;
+		}
+		const presentation = { ...(activeNode.meta.presentation ?? {}) };
+		delete presentation.color;
+		void sendPatchMetaIntent(activeNode.node_id, { presentation });
 	};
 
 	const openColorSubMenu = (event: MouseEvent): void => {
@@ -983,6 +1006,11 @@
 		openColorSubMenu(event);
 	};
 
+	const selectResetColor = (_event: MouseEvent): void => {
+		resetNodeColor();
+		closeMenu();
+	};
+
 	const selectDuplicateNode = (_event: MouseEvent): void => {
 		duplicateNode();
 		closeMenu();
@@ -1054,6 +1082,13 @@
 				icon: colorIcon,
 				className: colorSubMenu.open ? 'gc-node-context-item-open' : '',
 				action: selectSetColor
+			});
+			items.push({
+				id: 'reset-color',
+				label: 'Reset Color',
+				icon: colorIcon,
+				disabled: !hasCustomColor,
+				action: selectResetColor
 			});
 		}
 		if (canSetConstraints) {
@@ -1328,10 +1363,7 @@
 		position: fixed;
 		left: -10000px;
 		top: -10000px;
-		min-inline-size: min(
-			16rem,
-			var(--gc-node-context-panel-max-inline-size, calc(100vw - 0.9rem))
-		);
+		min-inline-size: min(16rem, var(--gc-node-context-panel-max-inline-size, calc(100vw - 0.9rem)));
 		max-inline-size: min(
 			24rem,
 			42vw,
@@ -1362,10 +1394,7 @@
 		flex-direction: column;
 		gap: 0.5rem;
 		padding: 0.65rem 0.75rem;
-		min-inline-size: min(
-			13rem,
-			var(--gc-node-context-panel-max-inline-size, calc(100vw - 0.9rem))
-		);
+		min-inline-size: min(13rem, var(--gc-node-context-panel-max-inline-size, calc(100vw - 0.9rem)));
 	}
 
 	.gc-constraint-editor-title {

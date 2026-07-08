@@ -786,7 +786,6 @@
 									copyEntry(event, entry);
 									copyButtonText = 'Copied !';
 								}}
-								onmouseenter={() => (copyButtonText = 'Copy')}
 								onmouseleave={() => (copyButtonText = null)}>
 								{#if copyButtonText}
 									<div class="copy-text" transition:slide={{ duration: 200, axis: 'x' }}>
@@ -1058,14 +1057,12 @@
 			cursor: pointer;
 			user-select: none;
 			-webkit-user-select: none;
-			min-width: 1rem;
-			height: 1rem;
+			min-inline-size: 1rem;
+			block-size: 1rem;
 			background-color: var(--gc-color-background);
 			background-image: url('../../../style/icons/clipboard.svg');
 			background-repeat: no-repeat;
 			background-size: contain;
-			position: absolute;
-			right: 0;
 			background-position: center right;
 			border-radius: 1rem;
 			padding: 0;

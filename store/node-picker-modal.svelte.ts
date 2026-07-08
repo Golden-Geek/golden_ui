@@ -13,6 +13,7 @@ export interface NodePickerModalView {
 	id: string;
 	label: string;
 	nodeVisibilityFilter?: (candidate: UiNodeDto) => boolean;
+	nodeRowVisibilityFilter?: (candidate: UiNodeDto) => boolean;
 }
 
 export interface NodePickerModalOptions {

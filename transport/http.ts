@@ -991,6 +991,14 @@ const fromRustNode = (node: RustUiNodeDto, enumOptionsById: EnumOptionsById): Ui
 								a: node.meta.presentation.color.a
 							}
 						: undefined,
+					default_color: node.meta.presentation.default_color
+						? {
+								r: node.meta.presentation.default_color.r,
+								g: node.meta.presentation.default_color.g,
+								b: node.meta.presentation.default_color.b,
+								a: node.meta.presentation.default_color.a
+							}
+						: undefined,
 					icon: node.meta.presentation.icon ?? undefined,
 					collapsed: node.meta.presentation.collapsed ?? undefined,
 					warnings: Array.isArray(node.meta.presentation.warnings)
@@ -1297,9 +1305,7 @@ const fromRustAck = (ack: RustUiAck): UiAck => ({
 	history: ack.history
 });
 
-const toRustInitialParams = (
-	initialParams: UiCreateUserItemInitialParam[] | undefined
-) =>
+const toRustInitialParams = (initialParams: UiCreateUserItemInitialParam[] | undefined) =>
 	initialParams?.map((entry) => ({
 		...entry,
 		value: toRustParamValue(entry.value)
