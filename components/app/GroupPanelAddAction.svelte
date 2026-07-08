@@ -70,6 +70,20 @@
 	};
 </script>
 
+{#snippet panelMenuItem(item: ContextMenuItem)}
+	<span class="gc-group-panel-add-menu-content">
+		<span class="gc-group-panel-add-menu-copy">
+			<span class="gc-group-panel-add-menu-title">{item.label}</span>
+			{#if item.hint}
+				<span class="gc-group-panel-add-menu-subtitle">{item.hint}</span>
+			{/if}
+		</span>
+		{#if item.submenu}
+			<span class="gc-group-panel-add-menu-chevron" aria-hidden="true">></span>
+		{/if}
+	</span>
+{/snippet}
+
 <div class="gc-group-panel-add">
 	<button
 		bind:this={triggerElement}
@@ -92,8 +106,11 @@
 		items={menuItems}
 		anchor={menuAnchor}
 		insideElements={[triggerElement]}
+		menuClassName="gc-group-panel-add-menu"
+		itemClassName="gc-group-panel-add-menu-button"
+		itemContent={panelMenuItem}
 		minWidthRem={9}
-		maxWidthCss="min(14rem, calc(100vw - 2rem))"
+		maxWidthCss="max-content"
 		zIndex={20} />
 </div>
 
@@ -131,5 +148,49 @@
 		inline-size: 100%;
 		block-size: 100%;
 		display: block;
+	}
+
+	:global(.gc-context-item.gc-group-panel-add-menu-button) {
+		display: block;
+		padding: 0.38rem 0.5rem;
+	}
+
+	.gc-group-panel-add-menu-content {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 0.75rem;
+		inline-size: 100%;
+		min-inline-size: max-content;
+	}
+
+	.gc-group-panel-add-menu-copy {
+		display: block;
+		min-inline-size: 0;
+	}
+
+	.gc-group-panel-add-menu-title {
+		display: block;
+		line-height: 1.18;
+		white-space: nowrap;
+		overflow-wrap: normal;
+	}
+
+	.gc-group-panel-add-menu-subtitle {
+		display: block;
+		max-inline-size: 13rem;
+		margin-block-start: 0.16rem;
+		opacity: 0.66;
+		font-size: 0.72em;
+		line-height: 1.24;
+		white-space: normal;
+		overflow-wrap: break-word;
+	}
+
+	.gc-group-panel-add-menu-chevron {
+		flex: 0 0 auto;
+		align-self: center;
+		opacity: 0.68;
+		font-size: 0.74em;
 	}
 </style>

@@ -34,7 +34,9 @@ interface CommandHandlerEntry {
 }
 
 interface Shortcut {
-	key: string;
+	key?: string;
+	code?: string;
+	displayKey?: string;
 	mod?: boolean;
 	shift?: boolean;
 	alt?: boolean;
@@ -133,7 +135,7 @@ const commandDefinitions: CommandDefinition[] = [
 	{
 		id: 'file.preferences',
 		label: 'Preferences',
-		shortcuts: []
+		shortcuts: [{ key: ',', code: 'Comma', displayKey: ',', mod: true }]
 	}
 ];
 
@@ -152,6 +154,8 @@ const normalizeKey = (rawKey: string): string => {
 	return key;
 };
 
+const normalizeCode = (rawCode: string): string => rawCode.trim().toLowerCase();
+
 const keyDisplayLabel = (key: string): string => {
 	switch (key) {
 		case 'delete':
@@ -163,9 +167,16 @@ const keyDisplayLabel = (key: string): string => {
 	}
 };
 
+const isShortcutKeyMatch = (event: KeyboardEvent, shortcut: Shortcut): boolean => {
+	const matchesKey =
+		shortcut.key !== undefined && normalizeKey(event.key) === normalizeKey(shortcut.key);
+	const matchesCode =
+		shortcut.code !== undefined && normalizeCode(event.code) === normalizeCode(shortcut.code);
+	return matchesKey || matchesCode;
+};
+
 const isShortcutMatch = (event: KeyboardEvent, shortcut: Shortcut): boolean => {
-	const normalizedEventKey = normalizeKey(event.key);
-	if (normalizedEventKey !== normalizeKey(shortcut.key)) {
+	if (!isShortcutKeyMatch(event, shortcut)) {
 		return false;
 	}
 
@@ -261,7 +272,10 @@ const shortcutLabel = (shortcut: Shortcut): string => {
 	if (shortcut.alt) {
 		parts.push('Alt');
 	}
-	parts.push(keyDisplayLabel(normalizeKey(shortcut.key)));
+	const displayKey = shortcut.displayKey ?? shortcut.key ?? shortcut.code;
+	if (displayKey) {
+		parts.push(keyDisplayLabel(normalizeKey(displayKey)));
+	}
 	return parts.join('+');
 };
 

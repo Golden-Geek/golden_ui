@@ -134,6 +134,7 @@
 						description: entry.description,
 						defaultParams: entry.defaultParams,
 						renderPolicy: entry.renderPolicy,
+						category: entry.category,
 						origin: 'user'
 					};
 					return accumulator;
