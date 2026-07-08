@@ -1,5 +1,6 @@
 import type { Snippet } from 'svelte';
 import type { UiNodeDto } from '../../../types';
+import type { NodePickerModalView } from '../../../store/node-picker-modal.svelte';
 import ScriptNodeInspector from './nodes/ScriptNodeInspector.svelte';
 import AnimationCurveNodeInspector from './nodes/AnimationCurveNodeInspector.svelte';
 import GradientNodeInspector from './nodes/GradientNodeInspector.svelte';
@@ -20,6 +21,7 @@ export interface NodeInspectorComponentProps {
 	defaultHeader?: Snippet<[Snippet?]>;
 	defaultContent?: Snippet<[Snippet?, String?]>;
 	defaultChildren?: Snippet<[String?]>;
+	referencePickerViews?: NodePickerModalView[];
 }
 
 export interface NodeInspectorPanelHeaderComponentProps {

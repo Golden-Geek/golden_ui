@@ -9,6 +9,12 @@ export interface ViewportAnchorRect {
 	height: number;
 }
 
+export interface NodePickerModalView {
+	id: string;
+	label: string;
+	nodeVisibilityFilter?: (candidate: UiNodeDto) => boolean;
+}
+
 export interface NodePickerModalOptions {
 	rootNode: UiNodeDto | null;
 	selectedNodeId?: NodeId | null;
@@ -22,6 +28,7 @@ export interface NodePickerModalOptions {
 	nodeFilter?: (candidate: UiNodeDto) => boolean;
 	nodeVisibilityFilter?: (candidate: UiNodeDto) => boolean;
 	nodeSearchText?: (candidate: UiNodeDto) => string;
+	views?: NodePickerModalView[];
 	projectionOptions?: (candidate: UiNodeDto) => UiParamValueProjection[];
 	projectionRequired?: (candidate: UiNodeDto) => boolean;
 	projectionLabel?: (projection: UiParamValueProjection) => string;
@@ -76,6 +83,7 @@ const normalizeOptions = (options: NodePickerModalOptions): NodePickerModalOptio
 		nodeVisibilityFilter: (_candidate: UiNodeDto) => true,
 		nodeSearchText: (candidate: UiNodeDto) =>
 			`${candidate.meta.label} ${candidate.meta.short_name} ${candidate.node_type}`,
+		views: [],
 		projectionOptions: undefined,
 		projectionRequired: undefined,
 		projectionLabel: undefined,

@@ -24,6 +24,7 @@ export type {
 	WorkbenchSessionOptions,
 	NodeWarningRecord
 } from './store/workbench.svelte';
+export type { NodePickerModalView } from './store/node-picker-modal.svelte';
 export type { NodeIconSet } from './store/node-types';
 
 export {

@@ -13,6 +13,7 @@
 	import NodeAddButton from '../../common/NodeAddButton.svelte';
 	import type { Snippet } from 'svelte';
 	import Arrow from '../../common/Arrow.svelte';
+	import type { NodePickerModalView } from '../../../store/node-picker-modal.svelte';
 
 	let {
 		nodes = [],
@@ -23,7 +24,8 @@
 		includeChildren = true,
 		maxChildLevel = null,
 		labelOverride = null,
-		density = 'default'
+		density = 'default',
+		referencePickerViews = []
 	} = $props<{
 		nodes: UiNodeDto[];
 		level: number;
@@ -34,6 +36,7 @@
 		maxChildLevel?: number | null;
 		labelOverride?: string | null;
 		density?: 'default' | 'compact';
+		referencePickerViews?: NodePickerModalView[];
 	}>();
 
 	let session = $derived(appState.session);
@@ -368,6 +371,7 @@
 					{includeChildren}
 					{maxChildLevel}
 					{density}
+					{referencePickerViews}
 					{controlNodeType} />
 			{/each}
 		{/snippet}
@@ -408,7 +412,8 @@
 				{controlNodeType}
 				{layoutMode}
 				{labelOverride}
-				{density}>
+				{density}
+				{referencePickerViews}>
 				{#snippet defaultChildren(extraClass: String = '')}
 					{@render builtInChildren(extraClass)}
 				{/snippet}

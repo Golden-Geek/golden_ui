@@ -1,6 +1,9 @@
 <script lang="ts">
 	import { appState } from '../../../../store/workbench.svelte';
-	import { openNodePickerModal } from '../../../../store/node-picker-modal.svelte';
+	import {
+		openNodePickerModal,
+		type NodePickerModalView
+	} from '../../../../store/node-picker-modal.svelte';
 	import { sendSetParamIntent } from '../../../../store/ui-intents';
 	import { projectionLabel } from '../../../../projection-labels';
 	import type {
@@ -14,11 +17,13 @@
 	let {
 		node,
 		layoutMode = 'default',
-		insideLabel = null
+		insideLabel = null,
+		referencePickerViews = []
 	} = $props<{
 		node: UiNodeDto;
 		layoutMode?: 'default' | 'widget';
 		insideLabel?: string | null;
+		referencePickerViews?: NodePickerModalView[];
 	}>();
 
 	const NIL_UUID = '00000000-0000-0000-0000-000000000000';
@@ -360,6 +365,7 @@
 			nodeFilter: pickerFilter,
 			nodeVisibilityFilter: pickerVisibilityFilter,
 			nodeSearchText: pickerSearchText,
+			views: referencePickerViews,
 			projectionOptions: (candidate) => projectionOptionsForCandidate(candidate),
 			projectionRequired: (candidate) => projectionRequiredForCandidate(candidate),
 			projectionLabel,

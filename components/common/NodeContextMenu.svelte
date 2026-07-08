@@ -143,13 +143,21 @@
 		};
 	};
 
-	const clampPosition = (
-		node: HTMLElement,
-		desiredLeft: number,
-		desiredTop: number
-	): { left: number; top: number } => {
+	const applyPanelPosition = (node: HTMLElement, anchorElement: HTMLElement | null): void => {
+		if (!anchorElement) {
+			return;
+		}
+
 		const bounds = getMainViewportBounds();
 		const paddingPx = remToPx(0.45);
+		const gapPx = remToPx(0.35);
+		const maxInlineSize = Math.max(1, bounds.width - paddingPx * 2);
+		const maxBlockSize = Math.max(1, bounds.height - paddingPx * 2);
+		node.style.setProperty('--gc-node-context-panel-max-inline-size', `${maxInlineSize}px`);
+		node.style.maxInlineSize = `${maxInlineSize}px`;
+		node.style.maxBlockSize = `${maxBlockSize}px`;
+
+		const anchorRect = anchorElement.getBoundingClientRect();
 		const rect = node.getBoundingClientRect();
 
 		const minLeft = bounds.left + paddingPx;
@@ -157,25 +165,23 @@
 		const minTop = bounds.top + paddingPx;
 		const maxTop = Math.max(minTop, bounds.bottom - rect.height - paddingPx);
 
-		const left = Math.min(Math.max(minLeft, desiredLeft), maxLeft);
-		const top = Math.min(Math.max(minTop, desiredTop), maxTop);
-		return { left, top };
-	};
+		const rightSpace = bounds.right - paddingPx - anchorRect.right - gapPx;
+		const leftSpace = anchorRect.left - bounds.left - paddingPx - gapPx;
+		const shouldOpenLeft = rightSpace < rect.width && leftSpace > rightSpace;
+		let left = shouldOpenLeft ? anchorRect.left - rect.width - gapPx : anchorRect.right + gapPx;
+		if (!shouldOpenLeft && left > maxLeft && leftSpace > rightSpace) {
+			left = anchorRect.left - rect.width - gapPx;
+		}
 
-	const applyPanelPosition = (node: HTMLElement, desiredLeft: number, desiredTop: number): void => {
-		const clamped = clampPosition(node, desiredLeft, desiredTop);
-		node.style.left = `${clamped.left}px`;
-		node.style.top = `${clamped.top}px`;
+		node.style.left = `${Math.min(Math.max(minLeft, left), maxLeft)}px`;
+		node.style.top = `${Math.min(Math.max(minTop, anchorRect.top), maxTop)}px`;
 	};
 
 	const updateColorSubMenuPosition = (): void => {
 		if (!colorSubMenuDiv || !colorSubMenu.open || !colorAnchorElement) {
 			return;
 		}
-		const anchorRect = colorAnchorElement.getBoundingClientRect();
-		const desiredLeft = anchorRect.right + remToPx(0.35);
-		const desiredTop = anchorRect.top;
-		applyPanelPosition(colorSubMenuDiv, desiredLeft, desiredTop);
+		applyPanelPosition(colorSubMenuDiv, colorAnchorElement);
 	};
 
 	const captureColorSubMenuContainer = () => {
@@ -198,10 +204,7 @@
 		anchorEl: HTMLElement | null
 	): void => {
 		if (!panelDiv || !anchorEl) return;
-		const anchorRect = anchorEl.getBoundingClientRect();
-		const desiredLeft = anchorRect.right + remToPx(0.35);
-		const desiredTop = anchorRect.top;
-		applyPanelPosition(panelDiv, desiredLeft, desiredTop);
+		applyPanelPosition(panelDiv, anchorEl);
 	};
 
 	const captureSubPanelContainer = (
@@ -356,6 +359,8 @@
 
 	const handleWindowViewportChange = (): void => {
 		updateColorSubMenuPosition();
+		positionSubPanel(rangeSubMenuDiv, rangeAnchorElement);
+		positionSubPanel(optionsSubMenuDiv, optionsAnchorElement);
 	};
 
 	onMount(() => {
@@ -1321,19 +1326,35 @@
 
 	.gc-node-context-color-submenu {
 		position: fixed;
-		min-inline-size: 16rem;
-		max-inline-size: min(24rem, 42vw);
+		left: -10000px;
+		top: -10000px;
+		min-inline-size: min(
+			16rem,
+			var(--gc-node-context-panel-max-inline-size, calc(100vw - 0.9rem))
+		);
+		max-inline-size: min(
+			24rem,
+			42vw,
+			var(--gc-node-context-panel-max-inline-size, calc(100vw - 0.9rem))
+		);
+		overflow: auto;
+		overscroll-behavior: contain;
+		box-sizing: border-box;
 		z-index: 1301;
 	}
 
 	.gc-node-context-side-panel {
 		position: fixed;
+		left: -10000px;
+		top: -10000px;
 		z-index: 1301;
 		background: var(--gc-color-surface-2, #1e1e1e);
-		border: 1px solid var(--gc-color-border, #444);
+		border: 0.0625rem solid var(--gc-color-border, #444);
 		border-radius: 0.4rem;
-		box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
-		overflow: hidden;
+		box-shadow: 0 0.25rem 1rem rgba(0, 0, 0, 0.4);
+		overflow: auto;
+		overscroll-behavior: contain;
+		box-sizing: border-box;
 	}
 
 	.gc-constraint-editor {
@@ -1341,7 +1362,10 @@
 		flex-direction: column;
 		gap: 0.5rem;
 		padding: 0.65rem 0.75rem;
-		min-inline-size: 13rem;
+		min-inline-size: min(
+			13rem,
+			var(--gc-node-context-panel-max-inline-size, calc(100vw - 0.9rem))
+		);
 	}
 
 	.gc-constraint-editor-title {

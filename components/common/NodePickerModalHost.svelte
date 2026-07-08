@@ -4,6 +4,7 @@
 	import OutlinerItem from '../panels/outliner/OutlinerItem.svelte';
 	import {
 		closeNodePickerModal,
+		type NodePickerModalView,
 		nodePickerModalState,
 		resolveNodePickerModal
 	} from '../../store/node-picker-modal.svelte';
@@ -24,6 +25,7 @@
 	let isOpen = $derived(options !== null);
 	let query = $state('');
 	let panelElement = $state<HTMLDivElement | null>(null);
+	let searchInputElement = $state<HTMLInputElement | null>(null);
 	let treeElement = $state<HTMLDivElement | null>(null);
 	let topPx = $state(0);
 	let leftPx = $state(0);
@@ -35,6 +37,16 @@
 		collectOutlinerAncestorNodeIds(graphState, selectedNodeId)
 	);
 	let selectedProjection = $state<UiParamValueProjection | undefined>(undefined);
+	let activeViewId = $state<string | null>(null);
+	let pickerViews = $derived(options?.views ?? []);
+	let activeView = $derived.by((): NodePickerModalView | null => {
+		const firstView = pickerViews[0] ?? null;
+		if (activeViewId === null) {
+			return firstView;
+		}
+		return pickerViews.find((view) => view.id === activeViewId) ?? firstView;
+	});
+	let showViewBar = $derived(pickerViews.length > 1);
 
 	const getLiveAnchorRect = (): ViewportRect | null => {
 		if (!options) {
@@ -105,6 +117,15 @@
 	let selectedNode = $derived.by(() => nodeById(selectedNodeId));
 	let selectedProjectionOptions = $derived.by(() => projectionOptionsForNode(selectedNode));
 	let selectedProjectionRequired = $derived.by(() => projectionRequiredForNode(selectedNode));
+	let selectedProjectionChoiceCount = $derived.by(() => {
+		if (!options?.projectionOptions || !selectedNode) {
+			return 0;
+		}
+		return selectedProjectionOptions.length + (selectedProjectionRequired ? 0 : 1);
+	});
+	let showProjectionControls = $derived(
+		Boolean(options?.projectionOptions && selectedProjectionChoiceCount > 1)
+	);
 	let canConfirmPick = $derived.by(() => {
 		if (!selectedNode) {
 			return false;
@@ -135,15 +156,32 @@
 		selectedProjection = undefined;
 	};
 
+	const autoProjectionForNode = (candidate: UiNodeDto): UiParamValueProjection | undefined => {
+		if (!options?.projectionOptions) {
+			return undefined;
+		}
+		if (!projectionRequiredForNode(candidate)) {
+			return undefined;
+		}
+		return projectionOptionsForNode(candidate)[0];
+	};
+
+	const resolvePick = (
+		candidate: UiNodeDto,
+		projection: UiParamValueProjection | undefined = autoProjectionForNode(candidate)
+	): void => {
+		resolveNodePickerModal({
+			kind: 'pick',
+			node: candidate,
+			projection
+		});
+	};
+
 	const confirmPick = (): void => {
 		if (!selectedNode || !canConfirmPick) {
 			return;
 		}
-		resolveNodePickerModal({
-			kind: 'pick',
-			node: selectedNode,
-			projection: selectedProjection
-		});
+		resolvePick(selectedNode, selectedProjection);
 	};
 
 	$effect(() => {
@@ -151,15 +189,20 @@
 			query = '';
 			selectedNodeId = null;
 			selectedProjection = undefined;
+			activeViewId = null;
 			return;
 		}
 		query = options?.defaultSearchQuery ?? '';
 		selectedNodeId = options?.selectedNodeId ?? null;
 		selectedProjection = options?.selectedProjection ?? undefined;
+		activeViewId = options?.views?.[0]?.id ?? null;
 		void tick().then(() => {
+			searchInputElement?.focus();
+			searchInputElement?.select();
 			recomputePosition();
 			scrollToSelectedNode();
 			requestAnimationFrame(() => {
+				searchInputElement?.focus();
 				recomputePosition();
 				scrollToSelectedNode();
 			});
@@ -242,7 +285,10 @@
 		if (!options) {
 			return false;
 		}
-		return options.nodeVisibilityFilter?.(candidate) ?? true;
+		if (!(options.nodeVisibilityFilter?.(candidate) ?? true)) {
+			return false;
+		}
+		return activeView?.nodeVisibilityFilter?.(candidate) ?? true;
 	};
 
 	const searchMatchByNodeId = $derived.by(() => {
@@ -314,6 +360,9 @@
 			}
 		}}
 		onkeydown={(event) => {
+			if (event.target !== event.currentTarget) {
+				return;
+			}
 			if (event.key === 'Escape' || event.key === 'Enter' || event.key === ' ') {
 				event.preventDefault();
 				closeNodePickerModal();
@@ -337,7 +386,23 @@
 				type="search"
 				class="picker-search"
 				placeholder={options.searchPlaceholder}
+				bind:this={searchInputElement}
 				bind:value={query} />
+			<div class="picker-view-bar" aria-label="Picker views">
+				{#if showViewBar}
+					{#each pickerViews as view}
+						<button
+							type="button"
+							class:active={activeView?.id === view.id}
+							aria-pressed={activeView?.id === view.id}
+							onclick={() => {
+								activeViewId = view.id;
+							}}>
+							{view.label}
+						</button>
+					{/each}
+				{/if}
+			</div>
 			<div class="picker-tree" bind:this={treeElement}>
 				{#if options.rootNode}
 					<OutlinerItem
@@ -349,9 +414,13 @@
 						{autoExpandAncestorNodeIds}
 						nodeFilter={passesFilter}
 						nodeSelectable={selectableByConstraints}
-						onSelectNode={(candidate) => {
+						onSelectNode={(candidate, event) => {
+							if (event.detail >= 2) {
+								resolvePick(candidate);
+								return;
+							}
 							if (!options.projectionOptions) {
-								resolveNodePickerModal({ kind: 'pick', node: candidate });
+								resolvePick(candidate);
 								return;
 							}
 							selectedNodeId = candidate.node_id;
@@ -361,7 +430,7 @@
 					<div class="picker-empty">No root available</div>
 				{/if}
 			</div>
-			{#if options.projectionOptions}
+			{#if showProjectionControls}
 				<div class="projection-controls">
 					<span class="projection-label">Projection</span>
 					<select
@@ -390,7 +459,6 @@
 				{#if options.projectionOptions}
 					<button type="button" disabled={!canConfirmPick} onclick={confirmPick}> Select </button>
 				{/if}
-				<button type="button" onclick={() => closeNodePickerModal()}>Cancel</button>
 			</footer>
 		</div>
 	</div>
@@ -438,6 +506,24 @@
 	.picker-search {
 		inline-size: 100%;
 		box-sizing: border-box;
+	}
+
+	.picker-view-bar {
+		display: flex;
+		align-items: center;
+		gap: 0.35rem;
+		min-block-size: 1.45rem;
+	}
+
+	.picker-view-bar button {
+		padding: 0.12rem 0.45rem;
+		border-radius: 0.35rem;
+		font-size: 0.72rem;
+	}
+
+	.picker-view-bar button.active {
+		background: color-mix(in srgb, var(--gc-color-selection) 32%, transparent);
+		outline: solid 0.06rem color-mix(in srgb, var(--gc-color-selection) 60%, transparent);
 	}
 
 	.picker-tree {

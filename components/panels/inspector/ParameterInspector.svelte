@@ -22,6 +22,7 @@
 	import type { ContextMenuAnchor, ContextMenuItem } from '../../common/context-menu';
 	import { resolveParameterEditor } from './inspector.svelte';
 	import { projectionLabel } from '../../../projection-labels';
+	import type { NodePickerModalView } from '../../../store/node-picker-modal.svelte';
 	import resetIcon from '../../../style/icons/reset.svg';
 	import referenceIcon from '../../../style/icons/parameter/reference.svg';
 	import expressionIcon from '../../../style/icons/parameter/control/expression.svg';
@@ -45,7 +46,8 @@
 		controlNodeType = '',
 		layoutMode = 'default',
 		labelOverride = null,
-		density = 'default'
+		density = 'default',
+		referencePickerViews = []
 	} = $props<{
 		node: UiNodeDto;
 		level: number;
@@ -55,6 +57,7 @@
 		defaultChildren?: Snippet<[String?]>;
 		labelOverride?: string | null;
 		density?: 'default' | 'compact';
+		referencePickerViews?: NodePickerModalView[];
 	}>();
 
 	let session = $derived(appState.session);
@@ -632,7 +635,7 @@
 				{#if EditorComponent}
 					<div class="parameter-controls">
 						<div class="parameter-wrapper {readOnly ? 'readonly' : ''} {enabled ? '' : 'disabled'}">
-							<EditorComponent node={liveNode} />
+							<EditorComponent node={liveNode} {referencePickerViews} />
 						</div>
 
 						{#if !readOnly && !onlyOneAvailableControlMode && !isControlNode}

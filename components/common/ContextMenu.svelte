@@ -51,6 +51,25 @@
 		onMenuTreeMount?: (node: HTMLDivElement | null) => void;
 	}
 
+	type MenuOriginX = 'left' | 'right';
+	type MenuOriginY = 'top' | 'bottom';
+
+	interface MenuPosition {
+		left: number;
+		top: number;
+		originX: MenuOriginX;
+		originY: MenuOriginY;
+	}
+
+	interface MenuViewportMetrics {
+		availableWidth: number;
+		availableHeight: number;
+	}
+
+	const estimatedMenuRowHeightRem = 1.95;
+	const menuColumnGapRem = 0.25;
+	const preferredMenuColumnWidthRem = 22;
+
 	let {
 		open = $bindable(false),
 		items = [],
@@ -80,7 +99,7 @@
 
 	let menuLayerNode: HTMLDivElement | null = $state(null);
 	let submenuPath = $state<number[]>([]);
-	let menuPositions = $state<Record<number, { left: number; top: number }>>({});
+	let menuPositions = $state<Record<number, MenuPosition>>({});
 	let renderedOpen = $state(false);
 	let closing = $state(false);
 
@@ -192,6 +211,94 @@
 		submenuPath = submenuPath.slice(0, depth);
 	};
 
+	const defaultMenuPosition = (left: number, top: number): MenuPosition => ({
+		left,
+		top,
+		originX: 'left',
+		originY: 'top'
+	});
+
+	const menuViewportMetrics = (): MenuViewportMetrics => {
+		const bounds = getMainViewportBounds();
+		const marginPx = remToPx(viewportPaddingRem);
+		return {
+			availableWidth: Math.max(1, bounds.width - marginPx * 2),
+			availableHeight: Math.max(1, bounds.height - marginPx * 2)
+		};
+	};
+
+	const rowCountForMenu = (
+		itemCount: number,
+		metrics: MenuViewportMetrics
+	): number => {
+		const visibleItemCount = Math.max(1, itemCount);
+		const rowHeightPx = Math.max(1, remToPx(estimatedMenuRowHeightRem));
+		const rowsByHeight = Math.max(1, Math.floor(metrics.availableHeight / rowHeightPx));
+		const columnGapPx = remToPx(menuColumnGapRem);
+		const minColumnWidthPx = Math.max(1, Math.min(metrics.availableWidth, remToPx(minWidthRem)));
+		const columnsByWidth = Math.max(
+			1,
+			Math.floor((metrics.availableWidth + columnGapPx) / (minColumnWidthPx + columnGapPx))
+		);
+		const rowsNeededForAvailableWidth = Math.ceil(visibleItemCount / columnsByWidth);
+		const preferredRows = Math.min(visibleItemCount, rowsByHeight);
+		return clampNumber(
+			Math.max(preferredRows, rowsNeededForAvailableWidth),
+			1,
+			visibleItemCount
+		);
+	};
+
+	const menuStyle = (layer: MenuLayer, position: MenuPosition): string => {
+		const metrics = menuViewportMetrics();
+		const rowCount = rowCountForMenu(layer.items.length, metrics);
+		const wrapsIntoColumns = rowCount < layer.items.length;
+		const defaultColumnWidthPx = Math.min(
+			metrics.availableWidth,
+			Math.max(remToPx(minWidthRem), remToPx(preferredMenuColumnWidthRem))
+		);
+		const columnWidthCss =
+			maxWidthCss.trim() === 'max-content'
+				? wrapsIntoColumns
+					? `${defaultColumnWidthPx}px`
+					: 'max-content'
+				: maxWidthCss;
+		return [
+			`left:${position.left}px`,
+			`top:${position.top}px`,
+			`--gc-context-min-width:${minWidthRem}rem`,
+			`--gc-context-max-width:${maxWidthCss}`,
+			`--gc-context-column-width:${columnWidthCss}`,
+			`--gc-context-available-width:${metrics.availableWidth}px`,
+			`--gc-context-available-height:${metrics.availableHeight}px`,
+			`--gc-context-row-count:${rowCount}`,
+			`--gc-context-column-gap:${menuColumnGapRem}rem`,
+			`--gc-context-origin-x:${position.originX}`,
+			`--gc-context-origin-y:${position.originY}`
+		].join(';');
+	};
+
+	const originForElementPlacement = (
+		placement: ContextMenuPlacement
+	): { originX: MenuOriginX; originY: MenuOriginY } => {
+		if (placement.startsWith('left')) {
+			return {
+				originX: 'right',
+				originY: placement.endsWith('end') ? 'bottom' : 'top'
+			};
+		}
+		if (placement.startsWith('right')) {
+			return {
+				originX: 'left',
+				originY: placement.endsWith('end') ? 'bottom' : 'top'
+			};
+		}
+		return {
+			originX: placement.endsWith('end') ? 'right' : 'left',
+			originY: placement.startsWith('top') ? 'bottom' : 'top'
+		};
+	};
+
 	const resolveElementPlacement = (
 		rect: DOMRect,
 		menuWidth: number,
@@ -244,29 +351,7 @@
 		}
 	};
 
-	const approximateRootPosition = (
-		currentAnchor: ContextMenuAnchor
-	): { left: number; top: number } => {
-		if (currentAnchor.kind === 'point') {
-			return {
-				left: currentAnchor.x,
-				top: currentAnchor.y
-			};
-		}
-
-		const element = currentAnchor.element;
-		if (!element) {
-			return { left: 0, top: 0 };
-		}
-		const rect = element.getBoundingClientRect();
-		const gapPx = remToPx(currentAnchor.offsetRem ?? 0.25);
-		const placement = currentAnchor.placement ?? 'bottom-start';
-		return resolveElementPlacement(rect, 0, 0, placement, gapPx);
-	};
-
-	const computeRootMenuPosition = (
-		menuNode: HTMLDivElement
-	): { left: number; top: number } | null => {
+	const computeRootMenuPosition = (menuNode: HTMLDivElement): MenuPosition | null => {
 		if (!anchor) {
 			return null;
 		}
@@ -286,7 +371,9 @@
 			});
 			return {
 				left: placement.left,
-				top: placement.top
+				top: placement.top,
+				originX: placement.originX,
+				originY: placement.originY
 			};
 		}
 
@@ -306,7 +393,9 @@
 				});
 				return {
 					left: placement.left,
-					top: placement.top
+					top: placement.top,
+					originX: placement.originX,
+					originY: placement.originY
 				};
 			} else if (lastAnchorPointer) {
 				const pointerAgeMs = performance.now() - lastAnchorPointer.time;
@@ -322,7 +411,9 @@
 					});
 					return {
 						left: placement.left,
-						top: placement.top
+						top: placement.top,
+						originX: placement.originX,
+						originY: placement.originY
 					};
 				}
 			}
@@ -332,6 +423,7 @@
 		const gapPx = remToPx(anchor.offsetRem ?? 0.25);
 		const requestedPlacement = anchor.placement ?? 'bottom-start';
 		const desired = resolveElementPlacement(rect, width, height, requestedPlacement, gapPx);
+		const origin = originForElementPlacement(requestedPlacement);
 
 		const marginPx = remToPx(viewportPaddingRem);
 		const minLeft = bounds.left + marginPx;
@@ -341,14 +433,16 @@
 
 		return {
 			left: clampNumber(desired.left, minLeft, maxLeft),
-			top: clampNumber(desired.top, minTop, maxTop)
+			top: clampNumber(desired.top, minTop, maxTop),
+			originX: origin.originX,
+			originY: origin.originY
 		};
 	};
 
 	const computeSubMenuPosition = (
 		parentNode: HTMLButtonElement,
 		menuNode: HTMLDivElement
-	): { left: number; top: number } => {
+	): MenuPosition => {
 		const bounds = getMainViewportBounds();
 		const marginPx = remToPx(viewportPaddingRem);
 		const gapPx = remToPx(submenuGapRem);
@@ -361,14 +455,24 @@
 		const minTop = bounds.top + marginPx;
 		const maxTop = Math.max(minTop, bounds.bottom - menuRect.height - marginPx);
 
-		let left = parentRect.right + gapPx;
-		if (left > maxLeft) {
+		const rightSpace = bounds.right - marginPx - parentRect.right - gapPx;
+		const leftSpace = parentRect.left - bounds.left - marginPx - gapPx;
+		const shouldOpenLeft = rightSpace < menuRect.width && leftSpace > rightSpace;
+		let left = shouldOpenLeft
+			? parentRect.left - menuRect.width - gapPx
+			: parentRect.right + gapPx;
+
+		if (!shouldOpenLeft && left > maxLeft && leftSpace > rightSpace) {
 			left = parentRect.left - menuRect.width - gapPx;
 		}
 
+		const clampedLeft = clampNumber(left, minLeft, maxLeft);
+		const top = clampNumber(parentRect.top, minTop, maxTop);
 		return {
-			left: clampNumber(left, minLeft, maxLeft),
-			top: clampNumber(parentRect.top, minTop, maxTop)
+			left: clampedLeft,
+			top,
+			originX: clampedLeft + menuRect.width <= parentRect.left ? 'right' : 'left',
+			originY: top < parentRect.top ? 'bottom' : 'top'
 		};
 	};
 
@@ -387,7 +491,7 @@
 			return;
 		}
 
-		const nextPositions: Record<number, { left: number; top: number }> = {
+		const nextPositions: Record<number, MenuPosition> = {
 			0: rootPosition
 		};
 
@@ -586,16 +690,6 @@
 	});
 
 	$effect(() => {
-		if (!open || !anchor || menuPositions[0]) {
-			return;
-		}
-		menuPositions = {
-			...menuPositions,
-			0: approximateRootPosition(anchor)
-		};
-	});
-
-	$effect(() => {
 		const canRender = open && anchor !== null && rootItems.length > 0;
 		if (canRender) {
 			cancelCloseTimer();
@@ -690,16 +784,13 @@
 		{@attach captureMenuLayerNode}
 		{@attach portalMenuLayer}>
 		{#each menuLayers as layer (`layer-${layer.depth}`)}
-			{@const position =
-				menuPositions[layer.depth] ??
-				(layer.depth === 0 && anchor
-					? approximateRootPosition(anchor)
-					: { left: -10000, top: -10000 })}
+			{@const resolvedPosition = menuPositions[layer.depth]}
+			{@const position = resolvedPosition ?? defaultMenuPosition(-10000, -10000)}
 			<div
-				class={`gc-context-menu ${menuClassName} ${layer.depth > 0 ? `gc-context-submenu ${submenuClassName}` : ''}`}
+				class={`gc-context-menu ${menuClassName} ${layer.depth > 0 ? `gc-context-submenu ${submenuClassName}` : ''} ${resolvedPosition ? '' : 'is-positioning'}`}
 				role="menu"
 				tabindex="-1"
-				style={`left:${position.left}px;top:${position.top}px;--gc-context-min-width:${minWidthRem}rem;--gc-context-max-width:${maxWidthCss};`}
+				style={menuStyle(layer, position)}
 				{@attach captureMenuNode(layer.depth)}
 				oncontextmenu={handleMenuContextMenu}
 				transition:scale={{ duration: 130, start: 0.95, easing: cubicOut }}>
@@ -759,11 +850,18 @@
 		--gc-context-menu-ease: cubic-bezier(0.22, 0.72, 0.2, 1);
 		--gc-context-menu-duration: 0.18s;
 		position: fixed;
-		min-inline-size: var(--gc-context-min-width, 10rem);
-		max-inline-size: var(--gc-context-max-width, min(22rem, calc(100vw - 2rem)));
-		display: flex;
-		flex-direction: column;
-		gap: 0.05rem;
+		inline-size: max-content;
+		min-inline-size: min(var(--gc-context-min-width, 10rem), var(--gc-context-available-width));
+		max-inline-size: var(--gc-context-available-width, calc(100vw - 1rem));
+		max-block-size: var(--gc-context-available-height, calc(100vh - 1rem));
+		display: grid;
+		grid-auto-flow: column;
+		grid-template-rows: repeat(var(--gc-context-row-count, 1), minmax(0, max-content));
+		grid-auto-columns: minmax(
+			min(var(--gc-context-min-width, 10rem), var(--gc-context-available-width)),
+			var(--gc-context-column-width, max-content)
+		);
+		gap: 0.05rem var(--gc-context-column-gap, 0.25rem);
 		padding: 0.24rem;
 		border-radius: 0.5rem;
 		border: solid 0.0625rem rgba(from var(--gc-color-text) r g b / 5%);
@@ -780,9 +878,12 @@
 			0 0.75rem 2rem rgba(0, 0, 0, 0.5),
 			0 0.12rem 0.42rem rgba(0, 0, 0, 0.3);
 		pointer-events: auto;
+		overflow: auto;
+		overscroll-behavior: contain;
+		scrollbar-width: thin;
 		animation: gc-context-menu-enter var(--gc-context-menu-duration) var(--gc-context-menu-ease)
 			both;
-		transform-origin: top left;
+		transform-origin: var(--gc-context-origin-x, left) var(--gc-context-origin-y, top);
 	}
 
 	.gc-context-menu-layer.is-closing .gc-context-menu {
@@ -791,12 +892,19 @@
 		pointer-events: none;
 	}
 
+	.gc-context-menu.is-positioning {
+		opacity: 0;
+		pointer-events: none;
+		animation: none;
+	}
+
 	.gc-context-item {
 		display: grid;
-		grid-template-columns: auto 1fr auto auto;
+		grid-template-columns: auto minmax(0, 1fr) auto auto;
 		align-items: center;
 		gap: 0.4rem;
 		inline-size: 100%;
+		min-inline-size: 0;
 		min-block-size: 1.78rem;
 		padding: 0.22rem 0.42rem;
 		border: none;
@@ -845,12 +953,20 @@
 	}
 
 	.gc-context-item-label {
-		white-space: nowrap;
+		min-inline-size: 0;
+		white-space: normal;
+		overflow-wrap: anywhere;
+		line-height: 1.18;
 	}
 
 	.gc-context-item-hint {
+		justify-self: end;
+		max-inline-size: min(16rem, 42vw);
 		opacity: 0.68;
 		font-size: 0.72em;
+		text-align: end;
+		white-space: normal;
+		overflow-wrap: anywhere;
 	}
 
 	.gc-context-item-chevron {
@@ -860,6 +976,7 @@
 
 	.gc-context-separator {
 		margin: 0.12rem 0;
+		inline-size: 100%;
 		block-size: 0.0625rem;
 		border: none;
 		background: color-mix(in srgb, var(--gc-color-text) 16%, transparent);
