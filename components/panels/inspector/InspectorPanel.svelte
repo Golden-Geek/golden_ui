@@ -470,9 +470,9 @@
 
 				{#if headerExtra}
 					{@render headerExtra()}
-				<!-- {:else} -->
+					<!-- {:else} -->
 				{/if}
-					<div class="spacer"></div>
+				<div class="spacer"></div>
 
 				<!-- <div
 					class="node-id-badge"
@@ -553,10 +553,15 @@
 			<div class="warning-info" transition:slide={{ duration: 200 }}>
 				{#each warnings as warning}
 					<div class="warning-item" transition:slide={{ duration: 200 }}>
-						{#if warning.sourceNodeId != node.node_id}
-							<strong>{warning.sourceNodeLabel}:</strong>
+						<div class="warning-item-message">
+							{#if warning.sourceNodeId != node.node_id}
+								<strong>{warning.sourceNodeLabel}:</strong>
+							{/if}
+							<span>{warning.message}</span>
+						</div>
+						{#if warning.detail?.trim()}
+							<pre class="warning-detail">{warning.detail.trim()}</pre>
 						{/if}
-						{warning.message}
 					</div>
 				{/each}
 			</div>
@@ -704,6 +709,30 @@
 		margin: 0.25rem 0;
 		border-radius: 0.25rem;
 		gap: 0.15rem;
+	}
+
+	.warning-item {
+		display: flex;
+		flex-direction: column;
+		gap: 0.15rem;
+		padding-inline-end: 1.4rem;
+	}
+
+	.warning-item-message {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.25rem;
+		align-items: baseline;
+	}
+
+	.warning-detail {
+		margin: 0;
+		white-space: pre-wrap;
+		font: inherit;
+		font-size: 0.72rem;
+		line-height: 1.35;
+		color: color-mix(in srgb, var(--gc-color-warning) 78%, var(--gc-color-text) 22%);
+		user-select: text;
 	}
 
 	.inspector-content {

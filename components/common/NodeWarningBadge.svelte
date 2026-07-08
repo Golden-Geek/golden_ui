@@ -7,8 +7,13 @@
 		warnings?: NodeWarningRecord[] | null;
 	}>();
 
+	const warningPreviewText = (warning: NodeWarningRecord | undefined): string =>
+		warning?.detail?.trim() || warning?.message || '';
+
 	let safeCount = $derived(Math.max(0, Math.floor(warnings?.length ?? 0)));
-	let computedTitle = $derived(safeCount == 1 ? warnings[0].message : `${safeCount} warnings`);
+	let computedTitle = $derived(
+		safeCount == 1 ? warningPreviewText(warnings[0]) : `${safeCount} warnings`
+	);
 
 	let showMessage = $state(false);
 

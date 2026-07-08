@@ -11,7 +11,8 @@
 		type IGroupHeaderProps,
 		type IHeaderActionsRenderer,
 		type IDockviewPanel,
-		type PanelUpdateEvent
+		type PanelUpdateEvent,
+		type SerializedDockview
 	} from 'dockview-core';
 
 	import 'dockview-core/dist/styles/dockview.css';
@@ -33,6 +34,7 @@
 		UserPanelDefinitionMap
 	} from '../../dockview/panel-types';
 	import { configureNodeIcons, type NodeIconSet } from '../../store/node-types';
+	import { registerProjectUiStateHost } from '../../store/project-ui-state';
 	import { loadPersistedDockLayout, savePersistedDockLayout } from '../../store/ui-persistence';
 	import { appState } from '../../store/workbench.svelte';
 
@@ -620,27 +622,31 @@
 			});
 		};
 
-		const restorePersistedLayout = (): boolean => {
+		const restoreDockLayout = (layout: SerializedDockview, source: string): boolean => {
 			if (!dockview) {
-				return false;
-			}
-
-			const persistedLayout = loadPersistedDockLayout();
-			if (!persistedLayout) {
 				return false;
 			}
 
 			try {
 				isRestoringPersistedLayout = true;
-				dockview.fromJSON(persistedLayout);
+				dockview.fromJSON(layout);
 				return true;
 			} catch (error) {
 				dockview.clear();
-				console.warn('[ui-persistence] Failed to restore dock layout from storage.', error);
+				console.warn(`[ui-persistence] Failed to restore dock layout from ${source}.`, error);
 				return false;
 			} finally {
 				isRestoringPersistedLayout = false;
 			}
+		};
+
+		const restorePersistedLayout = (): boolean => {
+			const persistedLayout = loadPersistedDockLayout();
+			if (!persistedLayout) {
+				return false;
+			}
+
+			return restoreDockLayout(persistedLayout, 'storage');
 		};
 
 		dockview = new DockviewComponent(containerElement, {
@@ -652,6 +658,28 @@
 			theme: goldenDockviewTheme
 		});
 		appState.panels = panelController;
+
+		const projectUiStateHostCleanup = registerProjectUiStateHost({
+			captureDockLayout: () => {
+				if (!dockview || isUnmounted) {
+					return null;
+				}
+				clearPersistLayoutTimer();
+				const layout = dockview.toJSON();
+				savePersistedDockLayout(layout);
+				return layout;
+			},
+			restoreDockLayout: (layout) => {
+				if (!dockview || isUnmounted) {
+					return false;
+				}
+				const restored = restoreDockLayout(layout, 'project file');
+				if (restored) {
+					schedulePersistLayout();
+				}
+				return restored;
+			}
+		});
 
 		dockviewDisposables.push(
 			dockview.onDidLayoutChange(() => {
@@ -726,6 +754,7 @@
 		return () => {
 			isUnmounted = true;
 			clearPersistLayoutTimer();
+			projectUiStateHostCleanup();
 			for (const disposable of dockviewDisposables) {
 				disposable.dispose();
 			}

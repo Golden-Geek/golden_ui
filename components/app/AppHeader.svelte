@@ -30,10 +30,11 @@
 		if (hz === null) {
 			return 'unknown';
 		}
-		if (hz < 30) {
+		const lowFrequency = Math.max(1, session.engineLowFrequencyHz);
+		if (hz < lowFrequency / 2) {
 			return 'low';
 		}
-		if (hz <= 60) {
+		if (hz <= lowFrequency) {
 			return 'mid';
 		}
 		return 'high';

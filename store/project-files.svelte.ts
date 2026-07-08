@@ -5,6 +5,7 @@ import type {
 	WorkbenchSession
 } from './workbench.svelte';
 import { hasDesktopHost, openDesktopFileDialog, saveDesktopFileDialog } from '../host/desktop';
+import { captureProjectUiState, restoreProjectUiState } from './project-ui-state';
 import { loadPersistedLastProjectPath, savePersistedLastProjectPath } from './ui-persistence';
 import {
 	normalizeProjectFilePath,
@@ -214,7 +215,10 @@ const saveProjectAtPath = async (
 	const normalizedPath = normalizeProjectFilePath(path);
 	const startedAt = nowMs();
 	try {
-		await session.client.projectSave(normalizedPath);
+		await session.client.projectSave(
+			normalizedPath,
+			captureProjectUiState(session.selectedNodesIds)
+		);
 		setCurrentProjectPath(normalizedPath);
 		rememberLastOpenedPath(normalizedPath);
 		markProjectStateClean(session.currentHistoryStateId);
@@ -247,7 +251,9 @@ const loadProjectAtPath = async (session: WorkbenchSession, path: string): Promi
 			progress: 0.34
 		});
 		const loadStartedAt = nowMs();
-		await session.client.projectLoad(path);
+		const loadResult = await session.client.projectLoad(path);
+		const loadedPath = loadResult.path;
+		restoreProjectUiState(loadResult.ui_state);
 		const loadMs = nowMs() - loadStartedAt;
 		loading.update({
 			activeStep: 'snapshot',
@@ -276,20 +282,20 @@ const loadProjectAtPath = async (session: WorkbenchSession, path: string): Promi
 			detail: displayName,
 			progress: 0.86
 		});
-		setCurrentProjectPath(path);
-		rememberLastOpenedPath(path);
+		setCurrentProjectPath(loadedPath);
+		rememberLastOpenedPath(loadedPath);
 		markProjectStateClean(0);
-		recordPerformanceSample('info', 'project.open', `Opened project: ${path}`, {
-			path,
+		recordPerformanceSample('info', 'project.open', `Opened project: ${loadedPath}`, {
+			path: loadedPath,
 			loadMs,
 			refreshMs,
 			totalMs: nowMs() - startedAt
 		});
-		appendProjectFileLog(session, 'info', `Opened project: ${path}`);
+		appendProjectFileLog(session, 'info', `Opened project: ${loadedPath}`);
 		loading.finish({
 			title: 'Project loaded',
 			message: displayName,
-			detail: path
+			detail: loadedPath
 		});
 		return true;
 	} catch (error) {
@@ -512,7 +518,9 @@ export const uploadProjectFileAndLoad = async (file: File): Promise<boolean> => 
 			detail: file.name,
 			progress: 0.38
 		});
-		const path = await session.client.projectUploadLoad(file.name, contents);
+		const loadResult = await session.client.projectUploadLoad(file.name, contents);
+		const path = loadResult.path;
+		restoreProjectUiState(loadResult.ui_state);
 		loading.update({
 			activeStep: 'snapshot',
 			title: 'Refreshing workspace',

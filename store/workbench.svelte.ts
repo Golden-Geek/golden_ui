@@ -9,6 +9,7 @@ import {
 import type {
 	EventTime,
 	NodeId,
+	ParamValue,
 	UiNodeDto,
 	UiClient,
 	UiEditIntent,
@@ -138,6 +139,7 @@ export interface WorkbenchSession {
 	readonly logMaxEntries: number;
 	readonly logUiUpdateHz: number;
 	readonly engineHz: number | null;
+	readonly engineLowFrequencyHz: number;
 	readonly selectedNodesIds: NodeId[];
 	readonly selectedNodeId: NodeId | null;
 	readonly status: WorkbenchConnectionStatus;
@@ -197,8 +199,54 @@ const MIN_INITIAL_LOADING_VISIBLE_MS = 650;
 const UI_LOG_TAG_INTENT = 'intent';
 const UI_LOG_TAG_TRANSPORT = 'transport';
 const UI_PERF_SLOW_SNAPSHOT_MS = 100;
+const PREFERENCES_DECL_ID = 'preferences';
+const PREFERENCES_ENGINE_DECL_ID = 'engine';
+const PREFERENCES_ENGINE_LOW_FREQUENCY_DECL_ID = 'engine_low_frequency';
+const DEFAULT_ENGINE_LOW_FREQUENCY_HZ = 60;
 
 const defaultEventTime: EventTime = { tick: 0, micro: 0, seq: 0 };
+
+const childByDeclId = (
+	graph: GraphStore,
+	parent: UiNodeDto | null | undefined,
+	declId: string
+): UiNodeDto | null => {
+	if (!parent) {
+		return null;
+	}
+	for (const childId of parent.children) {
+		const child = graph.state.nodesById.get(childId);
+		if (child?.decl_id === declId) {
+			return child;
+		}
+	}
+	return null;
+};
+
+const paramFrequencyValue = (value: ParamValue, fallback: number): number => {
+	let frequency: number | null = null;
+	if (value.kind === 'int' || value.kind === 'float') {
+		frequency = Math.round(value.value);
+	} else if (value.kind === 'str') {
+		frequency = Number.parseInt(value.value.trim(), 10);
+	}
+	return frequency !== null && Number.isFinite(frequency) && frequency > 0 ? frequency : fallback;
+};
+
+const engineLowFrequencyFromGraph = (graph: GraphStore): number => {
+	const rootId = graph.state.rootId;
+	if (rootId === null) {
+		return DEFAULT_ENGINE_LOW_FREQUENCY_HZ;
+	}
+	const root = graph.state.nodesById.get(rootId);
+	const preferences = childByDeclId(graph, root, PREFERENCES_DECL_ID);
+	const engine = childByDeclId(graph, preferences, PREFERENCES_ENGINE_DECL_ID);
+	const lowFrequency = childByDeclId(graph, engine, PREFERENCES_ENGINE_LOW_FREQUENCY_DECL_ID);
+	if (!lowFrequency || lowFrequency.data.kind !== 'parameter') {
+		return DEFAULT_ENGINE_LOW_FREQUENCY_HZ;
+	}
+	return paramFrequencyValue(lowFrequency.data.param.value, DEFAULT_ENGINE_LOW_FREQUENCY_HZ);
+};
 
 const toConnectionStatus = (
 	transportState: UiTransportConnectionState,
@@ -1216,6 +1264,9 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 		},
 		get engineHz(): number | null {
 			return engineHz;
+		},
+		get engineLowFrequencyHz(): number {
+			return engineLowFrequencyFromGraph(graph);
 		},
 		get selectedNodesIds(): NodeId[] {
 			return selection.selectedNodeIds;

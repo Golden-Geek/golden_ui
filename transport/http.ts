@@ -21,6 +21,7 @@ import type {
 	UiParamDto,
 	UiFileConstraints,
 	UiProjectFileSpec,
+	UiProjectFileLoadResult,
 	UiReferenceConstraints,
 	UiReferenceTargets,
 	UiReferenceRoot,
@@ -61,6 +62,7 @@ import type { UiScriptStateRequest as RustScriptStateRequest } from '../generate
 import type { UiSnapshot as RustUiSnapshot } from '../generated/rust_protocol/UiSnapshot';
 import type { UiSnapshotRequest as RustSnapshotRequest } from '../generated/rust_protocol/UiSnapshotRequest';
 import type { UiSubscriptionScope as RustUiSubscriptionScope } from '../generated/rust_protocol/UiSubscriptionScope';
+import type { JsonValue as RustJsonValue } from '../generated/rust_protocol/serde_json/JsonValue';
 import { isCssUnit } from '../css-value';
 import { wholeGraphScope } from '../types';
 import { getUiClientInstanceId } from './client-instance';
@@ -78,6 +80,48 @@ export type RustScope = RustUiSubscriptionScope;
 export type { RustUiEventBatch };
 
 type RustUiEventDto = RustUiEventBatch['events'][number];
+
+const fromRustProjectPathResponse = (
+	endpoint: string,
+	response: RustProjectPathResponse
+): UiProjectFileLoadResult => {
+	if (typeof response.path !== 'string' || response.path.trim().length === 0) {
+		throw new Error(`POST ${endpoint} returned an invalid project path`);
+	}
+	return {
+		path: response.path,
+		ui_state: response.ui_state
+	};
+};
+
+const toRustJsonValue = (value: unknown): RustJsonValue | undefined => {
+	if (value === undefined) {
+		return undefined;
+	}
+	if (
+		value === null ||
+		typeof value === 'string' ||
+		typeof value === 'boolean' ||
+		(typeof value === 'number' && Number.isFinite(value))
+	) {
+		return value;
+	}
+	if (Array.isArray(value)) {
+		return value.map((entry) => toRustJsonValue(entry) ?? null);
+	}
+	if (!isRecord(value)) {
+		return undefined;
+	}
+
+	const output: { [key: string]: RustJsonValue } = {};
+	for (const [key, entry] of Object.entries(value)) {
+		const jsonEntry = toRustJsonValue(entry);
+		if (jsonEntry !== undefined) {
+			output[key] = jsonEntry;
+		}
+	}
+	return output;
+};
 type RustScriptConfig = RustScriptConfigRequest['config'];
 type RustScriptSource = RustScriptConfig['source'];
 type RustCreatableUserItem = NonNullable<RustUiNodeDto['creatable_user_items']>[number];
@@ -1575,26 +1619,31 @@ export const createHttpUiClient = (options: HttpClientOptions = {}): UiClient =>
 			await postJson<{ ok?: boolean }>('/project-new', {});
 		},
 
-		async projectSave(path: string): Promise<void> {
+		async projectSave(path: string, uiState?: unknown): Promise<void> {
 			const request: RustProjectPathRequest = { path };
+			const jsonUiState = toRustJsonValue(uiState);
+			if (jsonUiState !== undefined) {
+				request.ui_state = jsonUiState;
+			}
 			await postJson<{ ok?: boolean }>('/project-save', request);
 		},
 
-		async projectLoad(path: string): Promise<void> {
+		async projectLoad(path: string): Promise<UiProjectFileLoadResult> {
 			const request: RustProjectPathRequest = { path };
-			await postJson<{ ok?: boolean }>('/project-load', request);
+			const response = await postJson<RustProjectPathResponse>('/project-load', request);
+			return fromRustProjectPathResponse('/project-load', response);
 		},
 
-		async projectUploadLoad(fileName: string, contents: string): Promise<string> {
+		async projectUploadLoad(
+			fileName: string,
+			contents: string
+		): Promise<UiProjectFileLoadResult> {
 			const request: RustProjectUploadRequest = {
 				file_name: fileName,
 				contents
 			};
 			const response = await postJson<RustProjectPathResponse>('/project-upload-load', request);
-			if (typeof response.path !== 'string' || response.path.trim().length === 0) {
-				throw new Error('POST /project-upload-load returned an invalid project path');
-			}
-			return response.path;
+			return fromRustProjectPathResponse('/project-upload-load', response);
 		}
 	};
 

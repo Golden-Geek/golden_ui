@@ -41,6 +41,9 @@ const normalizeNodeWarning = (warning: UiNodeWarningDto): NormalizedNodeWarning 
 	};
 };
 
+const metaPatchAffectsWarnings = (patch: Partial<UiNodeDto['meta']>): boolean =>
+	patch.label !== undefined || patch.presentation !== undefined;
+
 const normalizeWarningDepth = (value: unknown): number => {
 	const rawDepth = Number(value);
 	if (!Number.isFinite(rawDepth)) {
@@ -237,6 +240,21 @@ export const createWorkbenchWarningStore = (graph: GraphStore): WorkbenchWarning
 				case 'nodeCreated':
 				case 'nodeDeleted':
 					return true;
+				case 'graphTransaction':
+					return event.kind.ops.some((op) => {
+						switch (op.kind) {
+							case 'nodeCreated':
+							case 'subtreeInserted':
+							case 'subtreeRemoved':
+							case 'nodeMoved':
+							case 'childrenReordered':
+								return true;
+							case 'nodeMetaPatched':
+								return metaPatchAffectsWarnings(op.patch);
+							default:
+								return false;
+						}
+					});
 				default:
 					break;
 			}

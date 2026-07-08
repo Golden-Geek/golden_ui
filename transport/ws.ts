@@ -694,8 +694,8 @@ export const createWebSocketUiClient = (options: WebSocketUiClientOptions = {}):
 			return httpClient.projectNew();
 		},
 
-		async projectSave(path) {
-			return httpClient.projectSave(path);
+		async projectSave(path, uiState) {
+			return httpClient.projectSave(path, uiState);
 		},
 
 		async projectLoad(path) {

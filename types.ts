@@ -660,6 +660,11 @@ export interface UiAck {
 	history?: UiHistoryState;
 }
 
+export interface UiProjectFileLoadResult {
+	path: string;
+	ui_state?: unknown;
+}
+
 export interface UiClient {
 	snapshot(scope?: UiSubscriptionScope): Promise<UiSnapshot>;
 	subscribe(
@@ -676,9 +681,9 @@ export interface UiClient {
 	setScriptConfig(nodeId: NodeId, config: UiScriptConfig, forceReload?: boolean): Promise<void>;
 	reloadScript(nodeId: NodeId): Promise<void>;
 	projectNew(): Promise<void>;
-	projectSave(path: string): Promise<void>;
-	projectLoad(path: string): Promise<void>;
-	projectUploadLoad(fileName: string, contents: string): Promise<string>;
+	projectSave(path: string, uiState?: unknown): Promise<void>;
+	projectLoad(path: string): Promise<UiProjectFileLoadResult>;
+	projectUploadLoad(fileName: string, contents: string): Promise<UiProjectFileLoadResult>;
 }
 
 export const wholeGraphScope: UiSubscriptionScope = { kind: 'wholeGraph' };
