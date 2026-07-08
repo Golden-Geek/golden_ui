@@ -35,6 +35,7 @@
 		isTreeNode,
 		canRenderNodeChildren = (_candidate: UiNodeDto) => false,
 		nodeSearchText = defaultSearchText,
+		extraNodeFilter = null,
 		initiallyExpandedDepth = 5,
 		allowDragDrop = true,
 		nodeDraggable = null,
@@ -56,6 +57,8 @@
 		isTreeNode: ManagerNodePredicate;
 		canRenderNodeChildren?: ManagerChildrenPredicate;
 		nodeSearchText?: ManagerNodeSearchText;
+		/** Additional predicate ANDed with the search-text match, e.g. a category filter. */
+		extraNodeFilter?: ManagerChildrenPredicate | null;
 		initiallyExpandedDepth?: number;
 		allowDragDrop?: boolean;
 		nodeDraggable?: ((candidate: UiNodeDto) => boolean) | null;
@@ -135,6 +138,9 @@
 
 	const nodeFilter = (candidate: UiNodeDto): boolean => {
 		if (!isTreeNode(candidate)) {
+			return false;
+		}
+		if (extraNodeFilter && !extraNodeFilter(candidate)) {
 			return false;
 		}
 		const normalizedQuery = query.trim().toLowerCase();

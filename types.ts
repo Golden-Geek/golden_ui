@@ -334,6 +334,7 @@ export interface UiCreatableUserItem {
 	initial_params: UiCreateUserItemInitialParam[];
 	menu_path_colors?: string[];
 	color?: string;
+	icon?: string;
 	select_when_created: boolean;
 	separator_before?: boolean;
 }

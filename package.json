@@ -15,7 +15,7 @@
 		"./debug/runtime-probe.svelte": "./debug/runtime-probe.svelte.ts",
 		"./dockview/*": "./dockview/*.ts",
 		"./generated/*": "./generated/*",
-		"./host/*": "./host/*",
+		"./host/*": "./host/*.ts",
 		"./store/*": "./store/*.ts",
 		"./style/*": "./style/*",
 		"./transport/*": "./transport/*.ts",

@@ -54,7 +54,7 @@ const createLeafItem = (
 ): ContextMenuItem => ({
 	id: `create:${[...normalizeMenuPath(item.menu_path), item.node_type, item.item_kind].join('/')}`,
 	label: item.label,
-	icon: getIconURLForNodeType(item.node_type, item.item_kind) ?? undefined,
+	icon: item.icon ?? getIconURLForNodeType(item.node_type, item.item_kind) ?? undefined,
 	color: item.color,
 	action: () => {
 		void onCreateItem(item);

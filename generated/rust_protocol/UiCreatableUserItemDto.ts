@@ -32,4 +32,8 @@ select_when_created: boolean,
 /**
  * Whether the Add menu should render a divider immediately above this item.
  */
-separator_before?: boolean, };
+separator_before?: boolean,
+/**
+ * Optional icon shown for this item in Add menus, as a data URI.
+ */
+icon?: string | null, };

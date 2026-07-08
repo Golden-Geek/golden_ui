@@ -2,12 +2,15 @@
 .gc-colors-default {
 	/* GENERAL*/
 	--gc-color-background: #151515;
+	--gc-color-border: #57575730;
 	--gc-color-header: #181818;
 	--gc-color-footer: #181818;
 
 	--gc-color-text: #bababa;
 	--gc-color-panel: #1f2021;
 	--gc-color-panel-outline: #7c7c7c4c;
+
+	--gc-color-accent: #d8249f;
 
 	/* SELECTION */
 	--gc-color-selection: #d81dac;

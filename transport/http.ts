@@ -951,6 +951,7 @@ const fromRustCreatableUserItem = (item: RustCreatableUserItem): UiCreatableUser
 				value: fromRustParamValue(entry.value)
 			}))
 		: [],
+	icon: item.icon ?? undefined,
 	select_when_created: Boolean(item.select_when_created),
 	separator_before: Boolean(item.separator_before)
 });

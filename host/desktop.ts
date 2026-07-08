@@ -98,6 +98,31 @@ export const saveDesktopFileDialog = async (
 	}
 };
 
+/**
+ * Writes `contents` to `fileName` inside `subdirSegments` (joined onto the
+ * OS shared application-data directory), creating the directory if needed.
+ * Returns the absolute path written, or null if it failed or there is no
+ * desktop host.
+ */
+export const writeDesktopAppDataFile = async (
+	subdirSegments: string[],
+	fileName: string,
+	contents: string,
+	logTag = 'desktop-host'
+): Promise<string | null> => {
+	const written = await invokeDesktopCommand<string>(
+		'write_app_data_file',
+		{
+			subdirSegments,
+			fileName,
+			contents
+		},
+		logTag
+	);
+
+	return normalizeDialogPath(written ?? null);
+};
+
 export const requestDesktopWindowClose = async (): Promise<unknown> =>
 	invokeDesktopCommand('window_close', undefined, 'window-controls');
 
