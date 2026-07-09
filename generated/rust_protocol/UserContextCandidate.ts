@@ -42,6 +42,14 @@ entry_param: NodeId,
  */
 compatible: boolean, 
 /**
+ * Whether the source can be coerced without selecting a projection.
+ */
+directly_compatible: boolean,
+/**
+ * Whether this candidate's multiplex indexes can be linked to the target parameter.
+ */
+multiplex_index_compatible: boolean,
+/**
  * Whether this candidate is shadowed by a nearer scope with the same symbol.
  */
 shadowed: boolean, 

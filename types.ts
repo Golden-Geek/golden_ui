@@ -229,12 +229,25 @@ export type UiParamValueProjection =
 export interface UiUserContextCandidate {
 	symbol: string;
 	value_type: UiUserContextValueType;
+	kind: 'scalar' | 'multiplexList';
+	multiplex?: UiUserContextMultiplexList;
 	scope_owner: NodeId;
 	lexical_depth: number;
 	entry_param: NodeId;
 	compatible: boolean;
+	directly_compatible: boolean;
+	multiplex_index_compatible: boolean;
 	shadowed: boolean;
 	projections: UiParamValueProjection[];
+}
+
+export interface UiUserContextMultiplexList {
+	multiplex: NodeId;
+	list: NodeId;
+	axis_id: string;
+	index_link_symbol: string;
+	index0_link_symbol: string;
+	list_link_symbol: string;
 }
 
 export interface UiTokenSuggestion {

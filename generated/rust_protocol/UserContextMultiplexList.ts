@@ -20,6 +20,18 @@ list: NodeId,
  */
 axis_id: string, 
 /**
+ * Opaque link target for the one-based lane index.
+ */
+index_link_symbol: string,
+/**
+ * Opaque link target for the zero-based lane index.
+ */
+index0_link_symbol: string,
+/**
+ * Opaque link target for this list.
+ */
+list_link_symbol: string,
+/**
  * Entry value type.
  */
 value_type: UserContextValueType, 

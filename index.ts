@@ -91,6 +91,12 @@ export {
 export { default as Inspector } from './components/panels/inspector/InspectorPanel.svelte';
 export { default as NodeInspector } from './components/panels/inspector/NodeInspector.svelte';
 export { resolveParameterEditor } from './components/panels/inspector/inspector.svelte';
+export {
+	registerParameterContextPreviewResolver,
+	resolveParameterContextPreview,
+	type ParameterContextPreview,
+	type ParameterContextPreviewResolver
+} from './components/panels/inspector/parameter-preview-registry';
 export { default as DropdownEditor } from './components/panels/inspector/parameters/DropdownEditor.svelte';
 export { default as ReferenceEditor } from './components/panels/inspector/parameters/ReferenceEditor.svelte';
 export { default as LoggerPanel } from './components/panels/logger/LoggerPanel.svelte';

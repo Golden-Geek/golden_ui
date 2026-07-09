@@ -759,13 +759,27 @@ const fromRustUserContextCandidate = (value: unknown): UiUserContextCandidate | 
 	}
 
 	const valueType = isUiUserContextValueType(value.value_type) ? value.value_type : 'str';
+	const multiplex = isRecord(value.multiplex)
+		? {
+				multiplex: Number(value.multiplex.multiplex ?? 0),
+				list: Number(value.multiplex.list ?? 0),
+				axis_id: String(value.multiplex.axis_id ?? ''),
+				index_link_symbol: String(value.multiplex.index_link_symbol ?? ''),
+				index0_link_symbol: String(value.multiplex.index0_link_symbol ?? ''),
+				list_link_symbol: String(value.multiplex.list_link_symbol ?? '')
+			}
+		: undefined;
 	return {
 		symbol: value.symbol,
 		value_type: valueType,
+		kind: value.kind === 'multiplexList' ? 'multiplexList' : 'scalar',
+		multiplex,
 		scope_owner: Number(value.scope_owner ?? 0),
 		lexical_depth: Number(value.lexical_depth ?? 0),
 		entry_param: Number(value.entry_param ?? 0),
 		compatible: Boolean(value.compatible),
+		directly_compatible: Boolean(value.directly_compatible),
+		multiplex_index_compatible: Boolean(value.multiplex_index_compatible),
 		shadowed: Boolean(value.shadowed),
 		projections: Array.isArray(value.projections)
 			? value.projections.filter((projection): projection is UiParamValueProjection =>

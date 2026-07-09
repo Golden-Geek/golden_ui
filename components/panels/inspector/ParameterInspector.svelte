@@ -7,7 +7,8 @@
 		UiParamValueProjection,
 		UiParameterControlMode,
 		UiParameterControlSpec,
-		UiParameterControlState
+		UiParameterControlState,
+		UiUserContextCandidate
 	} from '../../../types';
 	import { appState } from '../../../store/workbench.svelte';
 	import {
@@ -21,6 +22,7 @@
 	import NodeWarningBadge from '../../common/NodeWarningBadge.svelte';
 	import type { ContextMenuAnchor, ContextMenuItem } from '../../common/context-menu';
 	import { resolveParameterEditor } from './inspector.svelte';
+	import { resolveParameterContextPreview } from './parameter-preview-registry';
 	import { projectionLabel } from '../../../projection-labels';
 	import type { NodePickerModalView } from '../../../store/node-picker-modal.svelte';
 	import resetIcon from '../../../style/icons/reset.svg';
@@ -93,6 +95,7 @@
 		return !paramValuesEqual(param.value, param.default_value);
 	});
 	let currentControlMode: UiParameterControlMode = $derived(param?.control?.mode ?? 'manual');
+	let contextPreview = $derived(resolveParameterContextPreview(liveNode));
 	let canEditControl = $derived(Boolean(param && enabled && !readOnly));
 	let valueEditorReadOnly = $derived(
 		readOnly || (currentControlMode !== 'manual' && currentControlMode !== 'templateText')
@@ -158,7 +161,9 @@
 		if (!controlInfo || controlInfo.param !== liveNodeId) {
 			return true;
 		}
-		return controlInfo.context_candidates.some((candidate) => candidate.compatible);
+		return controlInfo.context_candidates.some(
+			(candidate) => candidate.compatible || (type === 'int' && candidate.multiplex !== undefined)
+		);
 	});
 	const controlModeBaseColor = (mode: UiParameterControlMode): string => {
 		switch (mode) {
@@ -216,10 +221,14 @@
 		}
 		return param.control.spec.projection;
 	});
-	let contextSymbolDraft = $state('');
-	let contextSearchDraft = $state('');
 	let contextProjectionDraft = $state<UiParamValueProjection | undefined>(undefined);
-	let contextCandidates = $derived.by(() => {
+	type ContextCandidateView = UiUserContextCandidate & {
+		scope_label: string;
+		entry_label: string;
+		multiplex_label?: string;
+		list_label?: string;
+	};
+	let contextCandidates = $derived.by((): ContextCandidateView[] => {
 		if (!controlInfo || controlInfo.param !== liveNodeId) {
 			return [];
 		}
@@ -229,52 +238,35 @@
 			scope_label:
 				nodesById?.get(candidate.scope_owner)?.meta.label ?? `Node ${candidate.scope_owner}`,
 			entry_label:
-				nodesById?.get(candidate.entry_param)?.meta.label ?? `Node ${candidate.entry_param}`
+				nodesById?.get(candidate.entry_param)?.meta.label ?? `Node ${candidate.entry_param}`,
+			multiplex_label: candidate.multiplex
+				? (nodesById?.get(candidate.multiplex.multiplex)?.meta.label ??
+					`Multiplex ${candidate.multiplex.multiplex}`)
+				: undefined,
+			list_label: candidate.multiplex
+				? (nodesById?.get(candidate.multiplex.list)?.meta.label ?? candidate.symbol)
+				: undefined
 		}));
 	});
-	let compatibleContextCount = $derived(
-		contextCandidates.filter((candidate) => candidate.compatible).length
-	);
-	let filteredContextCandidates = $derived.by(() => {
-		const query = contextSearchDraft.trim().toLowerCase();
-		if (query.length === 0) {
-			return contextCandidates;
-		}
-		return contextCandidates.filter(
-			(candidate) =>
-				candidate.symbol.toLowerCase().includes(query) ||
-				candidate.value_type.toLowerCase().includes(query) ||
-				candidate.scope_label.toLowerCase().includes(query) ||
-				candidate.entry_label.toLowerCase().includes(query)
-		);
-	});
-	let activeContextCandidate = $derived.by(() => {
+	let activeContextCandidate = $derived.by((): ContextCandidateView | undefined => {
 		if (activeContextSymbol.length === 0) {
-			return null;
+			return undefined;
 		}
-		return (
-			contextCandidates.find(
-				(candidate) => candidate.symbol === activeContextSymbol && !candidate.shadowed
-			) ??
-			contextCandidates.find((candidate) => candidate.symbol === activeContextSymbol) ??
-			null
+		return contextCandidates.find(
+			(candidate) => contextCandidateLinkSymbol(candidate) === activeContextSymbol
 		);
 	});
 	let activeContextProjectionOptions = $derived.by((): UiParamValueProjection[] => {
-		if (activeContextSymbol.length === 0) {
+		if (!activeContextCandidate || activeContextCandidate.directly_compatible) {
 			return [];
 		}
-		const options = new Set<UiParamValueProjection>();
-		for (const candidate of contextCandidates) {
-			if (candidate.symbol !== activeContextSymbol) {
-				continue;
-			}
-			for (const projection of candidate.projections) {
-				options.add(projection);
-			}
-		}
-		return [...options];
+		return activeContextCandidate.projections;
 	});
+	let contextProjectionRequired = $derived(activeContextProjectionOptions.length > 0);
+
+	function contextCandidateLinkSymbol(candidate: UiUserContextCandidate): string {
+		return candidate.multiplex?.list_link_symbol || candidate.symbol;
+	}
 
 	let renamingState = $state({
 		isRenaming: false,
@@ -436,6 +428,100 @@
 		controlMenuOpen = false;
 	};
 
+	function contextCandidateMenuItem(candidate: ContextCandidateView): ContextMenuItem {
+		const symbol = contextCandidateLinkSymbol(candidate);
+		return {
+			label: candidate.list_label ?? candidate.entry_label,
+			hint: candidate.symbol,
+			disabled: !candidate.compatible || (candidate.shadowed && !candidate.multiplex),
+			action: () => void applyContextLinkSymbol(symbol)
+		};
+	}
+
+	function contextSectionLabel(id: string, label: string): ContextMenuItem {
+		return {
+			id,
+			label,
+			disabled: true,
+			className: 'context-link-section-label'
+		};
+	}
+
+	let contextLinkMenuItems = $derived.by((): ContextMenuItem[] => {
+		const scopes = new Map<
+			number,
+			{ label: string; depth: number; candidates: ContextCandidateView[] }
+		>();
+		for (const candidate of contextCandidates) {
+			const scope = scopes.get(candidate.scope_owner) ?? {
+				label: candidate.scope_label,
+				depth: candidate.lexical_depth,
+				candidates: []
+			};
+			scope.candidates.push(candidate);
+			scopes.set(candidate.scope_owner, scope);
+		}
+
+		const items: ContextMenuItem[] = [];
+		const sortedScopes = [...scopes.entries()].sort(
+			([, left], [, right]) => left.depth - right.depth || left.label.localeCompare(right.label)
+		);
+		for (const [scopeOwner, scope] of sortedScopes) {
+			if (items.length > 0) {
+				items.push({ separator: true });
+			}
+			items.push(contextSectionLabel(`context-scope-${scopeOwner}`, scope.label));
+			const scalarItems = scope.candidates
+				.filter((candidate) => !candidate.multiplex)
+				.sort((left, right) => left.entry_label.localeCompare(right.entry_label))
+				.map(contextCandidateMenuItem);
+			items.push(...scalarItems);
+			const multiplexes = new Map<string, { label: string; candidates: ContextCandidateView[] }>();
+			for (const candidate of scope.candidates) {
+				if (!candidate.multiplex) continue;
+				const axisId = candidate.multiplex.axis_id;
+				const multiplex = multiplexes.get(axisId) ?? {
+					label: candidate.multiplex_label ?? axisId,
+					candidates: []
+				};
+				multiplex.candidates.push(candidate);
+				multiplexes.set(axisId, multiplex);
+			}
+			const sortedMultiplexes = [...multiplexes.entries()].sort(([, left], [, right]) =>
+				left.label.localeCompare(right.label)
+			);
+			for (const [axisId, multiplex] of sortedMultiplexes) {
+				items.push({ separator: true });
+				items.push(contextSectionLabel(`context-multiplex-${axisId}`, multiplex.label));
+				const first = multiplex.candidates[0];
+				const indexItems: ContextMenuItem[] =
+					first?.multiplex && first.multiplex_index_compatible
+						? [
+								{
+									label: 'Index (1-based)',
+									action: () => void applyContextLinkSymbol(first.multiplex!.index_link_symbol)
+								},
+								{
+									label: 'Index (0-based)',
+									action: () => void applyContextLinkSymbol(first.multiplex!.index0_link_symbol)
+								}
+							]
+						: [];
+				items.push(...indexItems);
+				const listItems = multiplex.candidates
+					.sort((left, right) =>
+						(left.list_label ?? left.symbol).localeCompare(right.list_label ?? right.symbol)
+					)
+					.map(contextCandidateMenuItem);
+				if (indexItems.length > 0 && listItems.length > 0) {
+					items.push({ separator: true });
+				}
+				items.push(...listItems);
+			}
+		}
+		return items;
+	});
+
 	let controlModeMenuItems = $derived.by((): ContextMenuItem[] => {
 		return displayedControlModeOptions.map((option) => ({
 			id: `control-mode-${option.mode}`,
@@ -451,33 +537,37 @@
 					? 'color-mix(in srgb, var(--gc-color-selection) 19%, transparent)'
 					: `color-mix(in srgb, ${controlModeBaseColor(option.mode)} 24%, transparent)`,
 			// hint: option.mode === currentControlMode ? 'Current' : undefined,
-			action: () => {
-				void applyControlMode(option.mode);
-			}
+			submenu: option.mode === 'contextLink' ? contextLinkMenuItems : undefined,
+			action:
+				option.mode === 'contextLink'
+					? undefined
+					: () => {
+							void applyControlMode(option.mode);
+						}
 		}));
 	});
 
-	const applyContextLinkSymbol = async (
+	async function applyContextLinkSymbol(
 		symbol: string,
-		projection: UiParamValueProjection | undefined = contextProjectionDraft
-	): Promise<void> => {
-		if (!param || !canEditControl || currentControlMode !== 'contextLink') {
+		projection?: UiParamValueProjection
+	): Promise<void> {
+		if (!param || !canEditControl) {
 			return;
 		}
 		const nextSymbol = symbol.trim();
 		const nextProjection =
 			projection === undefined ||
 			contextCandidates.some(
-				(candidate) => candidate.symbol === nextSymbol && candidate.projections.includes(projection)
+				(candidate) =>
+					contextCandidateLinkSymbol(candidate) === nextSymbol &&
+					candidate.projections.includes(projection)
 			)
 				? projection
 				: undefined;
 		if (nextSymbol === activeContextSymbol && nextProjection === activeContextProjection) {
-			contextSymbolDraft = activeContextSymbol;
 			contextProjectionDraft = activeContextProjection;
 			return;
 		}
-		contextSymbolDraft = nextSymbol;
 		contextProjectionDraft = nextProjection;
 		await sendSetParamControlStateIntent(liveNodeId, {
 			mode: 'contextLink',
@@ -487,10 +577,10 @@
 				projection: nextProjection
 			}
 		});
-	};
+		controlMenuOpen = false;
+	}
 
 	$effect(() => {
-		contextSymbolDraft = activeContextSymbol;
 		contextProjectionDraft = activeContextProjection;
 	});
 
@@ -640,11 +730,24 @@
 						<div
 							class="parameter-wrapper {valueEditorReadOnly ? 'readonly' : ''} {enabled
 								? ''
-								: 'disabled'}">
-							<EditorComponent
-								node={liveNode}
-								readOnly={valueEditorReadOnly}
-								{referencePickerViews} />
+								: 'disabled'}"
+							class:with-context-preview={contextPreview?.placement === 'below'}>
+							{#if contextPreview?.placement === 'value'}
+								<div class="context-preview-value" title={contextPreview.label}>
+									{contextPreview.text}
+								</div>
+							{:else}
+								<EditorComponent
+									node={liveNode}
+									readOnly={valueEditorReadOnly}
+									{referencePickerViews} />
+							{/if}
+							{#if contextPreview?.placement === 'below'}
+								<div class="context-preview-below" title={contextPreview.label}>
+									<span>{contextPreview.label ?? 'Resolved'}</span>
+									<strong>{contextPreview.text}</strong>
+								</div>
+							{/if}
 						</div>
 
 						{#if !readOnly && !onlyOneAvailableControlMode && !isControlNode}
@@ -678,139 +781,27 @@
 				{/if}
 			</div>
 
-			{#if currentControlMode === 'contextLink'}
+			{#if currentControlMode === 'contextLink' && contextProjectionRequired}
 				<div class="context-link-editor">
-					<div class="context-link-toolbar">
-						<label class="context-link-symbol-field">
-							<span class="context-link-field-label">Symbol</span>
-							<input
-								type="text"
-								class="context-link-symbol-input"
-								value={contextSymbolDraft}
-								disabled={!canEditControl}
-								placeholder="tempo"
-								oninput={(event) => {
-									contextSymbolDraft = (event.target as HTMLInputElement).value;
-								}}
-								onblur={() => {
-									void applyContextLinkSymbol(contextSymbolDraft);
-								}}
-								onkeydown={(event) => {
-									if (event.key === 'Enter') {
-										void applyContextLinkSymbol(contextSymbolDraft);
-										(event.target as HTMLInputElement).blur();
-									}
-									if (event.key === 'Escape') {
-										contextSymbolDraft = activeContextSymbol;
-										contextProjectionDraft = activeContextProjection;
-										(event.target as HTMLInputElement).blur();
-									}
-								}} />
-						</label>
-						<label class="context-link-projection-field">
-							<span class="context-link-field-label">Projection</span>
-							<select
-								class="context-link-projection-select"
-								disabled={!canEditControl || activeContextProjectionOptions.length === 0}
-								value={contextProjectionDraft ?? ''}
-								onchange={(event) => {
-									const value = (event.target as HTMLSelectElement).value;
-									const nextProjection =
-										value.length > 0 ? (value as UiParamValueProjection) : undefined;
-									contextProjectionDraft = nextProjection;
-									void applyContextLinkSymbol(contextSymbolDraft, nextProjection);
-								}}>
-								<option value="">Auto</option>
-								{#each activeContextProjectionOptions as projection}
-									<option value={projection}>{projectionLabel(projection)}</option>
-								{/each}
-							</select>
-						</label>
-						<input
-							type="search"
-							class="context-link-search"
-							value={contextSearchDraft}
-							placeholder="Filter"
-							disabled={controlInfoLoading}
-							oninput={(event) => {
-								contextSearchDraft = (event.target as HTMLInputElement).value;
-							}} />
-					</div>
-
-					{#if controlInfoLoading}
-						<div class="context-link-status">Loading context candidates...</div>
-					{:else if contextCandidates.length === 0}
-						<div class="context-link-status warning">
-							No context candidates were found for this parameter.
-						</div>
-					{:else}
-						<div class="context-link-status">
-							{compatibleContextCount} compatible / {contextCandidates.length} total
-							{#if activeContextCandidate}
-								<span class="context-link-active-candidate">
-									Active: {activeContextCandidate.symbol} from
-									{activeContextCandidate.scope_label}
-								</span>
-								{#if activeContextProjection}
-									<span class="context-link-active-candidate">
-										using {projectionLabel(activeContextProjection)}
-									</span>
-								{/if}
-							{:else if activeContextSymbol.length > 0}
-								<span class="context-link-active-candidate warning">
-									Active symbol is not currently resolvable.
-								</span>
-							{/if}
-						</div>
-
-						{#if filteredContextCandidates.length > 0}
-							<div class="context-link-candidates">
-								{#each filteredContextCandidates as candidate (`${candidate.symbol}:${candidate.scope_owner}:${candidate.entry_param}`)}
-									<button
-										type="button"
-										class="context-link-candidate
-											{candidate.symbol === activeContextSymbol ? 'active' : ''}
-											{candidate.compatible ? 'compatible' : 'incompatible'}
-											{candidate.shadowed ? 'shadowed' : ''}"
-										disabled={!canEditControl || !candidate.compatible}
-										title={candidate.compatible
-											? `Use '${candidate.symbol}' from ${candidate.scope_label}`
-											: `Incompatible: ${candidate.value_type}`}
-										onclick={() => {
-											contextSymbolDraft = candidate.symbol;
-											const nextProjection =
-												contextProjectionDraft !== undefined &&
-												candidate.projections.includes(contextProjectionDraft)
-													? contextProjectionDraft
-													: candidate.projections[0];
-											void applyContextLinkSymbol(candidate.symbol, nextProjection);
-										}}>
-										<span class="symbol">{candidate.symbol}</span>
-										<span class="meta">
-											{candidate.value_type}
-											{' | '}
-											{candidate.entry_label}
-											{' | '} scope
-											{candidate.scope_label}
-											{' | '} depth {candidate.lexical_depth}
-										</span>
-										{#if candidate.shadowed}
-											<span class="badge shadowed">shadowed</span>
-										{/if}
-										{#if !candidate.compatible}
-											<span class="badge incompatible">incompatible</span>
-										{:else if candidate.projections.length > 0}
-											<span class="badge projected">
-												{candidate.projections.length} projections
-											</span>
-										{/if}
-									</button>
-								{/each}
-							</div>
-						{:else}
-							<div class="context-link-status">No candidates match this filter.</div>
-						{/if}
-					{/if}
+					<label class="context-link-projection-field">
+						<span class="context-link-field-label">Projection</span>
+						<select
+							class="context-link-projection-select"
+							disabled={!canEditControl || activeContextProjectionOptions.length === 0}
+							value={contextProjectionDraft ?? ''}
+							onchange={(event) => {
+								const value = (event.target as HTMLSelectElement).value;
+								const nextProjection =
+									value.length > 0 ? (value as UiParamValueProjection) : undefined;
+								contextProjectionDraft = nextProjection;
+								void applyContextLinkSymbol(activeContextSymbol, nextProjection);
+							}}>
+							<option value="" disabled>Select projection</option>
+							{#each activeContextProjectionOptions as projection}
+								<option value={projection}>{projectionLabel(projection)}</option>
+							{/each}
+						</select>
+					</label>
 				</div>
 			{/if}
 			{@render defaultChildren?.(currentControlMode)}
@@ -888,6 +879,44 @@
 		flex: 1 1 auto;
 		min-width: 0;
 		max-width: none;
+	}
+
+	.parameter-wrapper.with-context-preview {
+		align-items: stretch;
+		flex-direction: column;
+		gap: 0.15rem;
+	}
+
+	.context-preview-value {
+		inline-size: 100%;
+		min-block-size: 1.4rem;
+		padding: 0.18rem 0.4rem;
+		overflow: hidden;
+		border: 0.06rem solid color-mix(in srgb, var(--gc-color-context) 48%, transparent);
+		border-radius: 0.3rem;
+		background: color-mix(in srgb, var(--gc-color-context) 10%, transparent);
+		color: var(--gc-color-text);
+		font-size: 0.72rem;
+		line-height: 1.1;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.context-preview-below {
+		display: flex;
+		gap: 0.35rem;
+		min-inline-size: 0;
+		color: color-mix(in srgb, var(--gc-color-text) 62%, transparent);
+		font-size: 0.62rem;
+		line-height: 1.1;
+	}
+
+	.context-preview-below strong {
+		overflow: hidden;
+		color: color-mix(in srgb, var(--gc-color-context) 72%, var(--gc-color-text));
+		font-weight: 650;
+		text-overflow: ellipsis;
+		white-space: nowrap;
 	}
 
 	:global(
@@ -1130,26 +1159,20 @@
 		text-transform: uppercase;
 	}
 
+	:global(.control-mode-context-menu .context-link-section-label) {
+		font-size: 0.68rem;
+		font-weight: 650;
+		letter-spacing: 0.04em;
+		text-transform: uppercase;
+		opacity: 0.78;
+	}
+
 	.context-link-editor {
 		display: flex;
 		flex-direction: column;
 		gap: 0.25rem;
 		padding: 0.25rem 0.15rem 0 0.05rem;
 		border-top: 0.0625rem solid rgba(from var(--text-color) r g b / 15%);
-	}
-
-	.context-link-toolbar {
-		display: flex;
-		align-items: flex-end;
-		gap: 0.3rem;
-	}
-
-	.context-link-symbol-field {
-		display: flex;
-		flex-direction: column;
-		gap: 0.12rem;
-		flex: 1;
-		min-width: 0;
 	}
 
 	.context-link-projection-field {
@@ -1166,123 +1189,12 @@
 		opacity: 0.7;
 	}
 
-	.context-link-symbol-input,
-	.context-link-search,
 	.context-link-projection-select {
 		height: 1.35rem;
 		font-size: 0.72rem;
 		padding: 0 0.35rem;
 		box-sizing: border-box;
 		min-width: 0;
-	}
-
-	.context-link-search {
-		max-width: 8rem;
-		flex: 0 0 35%;
-	}
-
-	.context-link-status {
-		display: flex;
-		align-items: center;
-		gap: 0.35rem;
-		flex-wrap: wrap;
-		font-size: 0.65rem;
-		opacity: 0.82;
-	}
-
-	.context-link-status.warning {
-		color: var(--gc-color-warning);
-	}
-
-	.context-link-active-candidate {
-		opacity: 0.85;
-	}
-
-	.context-link-active-candidate.warning {
-		color: var(--gc-color-warning);
-	}
-
-	.context-link-candidates {
-		display: grid;
-		grid-template-columns: repeat(auto-fill, minmax(12rem, 1fr));
-		gap: 0.2rem;
-	}
-
-	.context-link-candidate {
-		display: flex;
-		flex-direction: column;
-		align-items: flex-start;
-		gap: 0.08rem;
-		padding: 0.22rem 0.3rem;
-		border: 1px solid rgba(from var(--text-color) r g b / 12%);
-		border-radius: 0.25rem;
-		background: rgba(from var(--text-color) r g b / 2%);
-		cursor: pointer;
-		text-align: left;
-		color: var(--text-color);
-		min-width: 0;
-	}
-
-	.context-link-candidate .symbol {
-		font-weight: 600;
-		font-size: 0.72rem;
-	}
-
-	.context-link-candidate .meta {
-		font-size: 0.62rem;
-		opacity: 0.7;
-		white-space: nowrap;
-		overflow: hidden;
-		text-overflow: ellipsis;
-		max-width: 100%;
-	}
-
-	.context-link-candidate:hover:not(:disabled) {
-		background: rgba(from var(--text-color) r g b / 10%);
-	}
-
-	.context-link-candidate.active {
-		border-color: rgba(from var(--gc-color-success) r g b / 65%);
-		background: rgba(from var(--gc-color-success) r g b / 10%);
-	}
-
-	.context-link-candidate.shadowed {
-		border-style: dashed;
-	}
-
-	.context-link-candidate.incompatible,
-	.context-link-candidate:disabled {
-		opacity: 0.45;
-		cursor: default;
-	}
-
-	.context-link-candidate.incompatible:hover,
-	.context-link-candidate:disabled:hover {
-		background: rgba(from var(--text-color) r g b / 2%);
-	}
-
-	.context-link-candidate .badge {
-		font-size: 0.58rem;
-		line-height: 1;
-		padding: 0.1rem 0.24rem;
-		border-radius: 0.35rem;
-		text-transform: uppercase;
-		letter-spacing: 0.02em;
-	}
-
-	.context-link-candidate .badge.shadowed {
-		color: rgba(from var(--text-color) r g b / 80%);
-		background: rgba(from var(--text-color) r g b / 15%);
-	}
-
-	.context-link-candidate .badge.incompatible {
-		color: rgb(from var(--gc-color-warning) r g b / 90%);
-		background: rgb(from var(--gc-color-warning) r g b / 18%);
-	}
-
-	.context-link-candidate .badge.projected {
-		color: rgb(from var(--gc-color-success) r g b / 90%);
-		background: rgb(from var(--gc-color-success) r g b / 18%);
 	}
 
 	/* Control Nodes */
