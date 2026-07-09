@@ -12,4 +12,8 @@ path: string,
 /**
  * Optional project-owned UI state to write into the saved project document.
  */
-ui_state?: JsonValue | null, };
+ui_state?: JsonValue | null, 
+/**
+ * Whether to skip recoverable load-time rebuild problems after user confirmation.
+ */
+recover?: boolean, };

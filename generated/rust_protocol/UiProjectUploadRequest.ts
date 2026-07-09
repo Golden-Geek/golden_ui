@@ -11,4 +11,8 @@ file_name: string,
 /**
  * Uploaded project document contents.
  */
-contents: string, };
+contents: string, 
+/**
+ * Whether to skip recoverable load-time rebuild problems after user confirmation.
+ */
+recover?: boolean, };

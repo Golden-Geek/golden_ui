@@ -15,18 +15,20 @@
 		node,
 		layoutMode = 'default',
 		presentation = {},
-		rangeOverride = null
+		rangeOverride = null,
+		readOnly: externalReadOnly = false
 	} = $props<{
 		node: UiNodeDto;
 		layoutMode?: 'default' | 'widget';
 		presentation?: VectorEditorPresentation;
 		rangeOverride?: UiRangeConstraint | null;
+		readOnly?: boolean;
 	}>();
 
 	let session = $derived(appState.session);
 	let liveNode = $derived(session?.graph.state.nodesById.get(node.node_id) ?? node);
 	let param = $derived(liveNode.data.kind === 'parameter' ? liveNode.data.param : null);
-	let readOnly = $derived(Boolean(param?.read_only));
+	let readOnly = $derived(Boolean(param?.read_only) || externalReadOnly);
 	let enabled = $derived(liveNode.meta.enabled);
 	let value = $derived(
 		param && (param.value.kind === 'vec2' || param.value.kind === 'vec3') ? param.value.value : []

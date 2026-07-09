@@ -6,18 +6,20 @@
 	let {
 		node,
 		layoutMode = 'default',
-		insideLabel = null
+		insideLabel = null,
+		readOnly: externalReadOnly = false
 	} = $props<{
 		node: UiNodeDto;
 		layoutMode?: 'default' | 'widget';
 		insideLabel?: string | null;
+		readOnly?: boolean;
 	}>();
 
 	let session = $derived(appState.session);
 	let liveNode = $derived(session?.graph.state.nodesById.get(node.node_id) ?? node);
 	let param = $derived(liveNode.data.kind === 'parameter' ? liveNode.data.param : null);
 	let enabled = $derived(liveNode.meta.enabled);
-	let readOnly = $derived(Boolean(param?.read_only));
+	let readOnly = $derived(Boolean(param?.read_only) || externalReadOnly);
 	let value = $derived(param?.value.kind === 'bool' ? param.value.value : false);
 	let inlineLabel = $derived(typeof insideLabel === 'string' ? insideLabel.trim() : '');
 	let showsInlineLabel = $derived(layoutMode === 'widget' && inlineLabel.length > 0);

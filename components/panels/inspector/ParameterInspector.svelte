@@ -94,6 +94,9 @@
 	});
 	let currentControlMode: UiParameterControlMode = $derived(param?.control?.mode ?? 'manual');
 	let canEditControl = $derived(Boolean(param && enabled && !readOnly));
+	let valueEditorReadOnly = $derived(
+		readOnly || (currentControlMode !== 'manual' && currentControlMode !== 'templateText')
+	);
 	let controlMenuOpen = $state(false);
 	let controlMenuTrigger: HTMLButtonElement | null = $state(null);
 	let controlInfo = $state<UiParamControlInfo | null>(null);
@@ -634,8 +637,14 @@
 
 				{#if EditorComponent}
 					<div class="parameter-controls">
-						<div class="parameter-wrapper {readOnly ? 'readonly' : ''} {enabled ? '' : 'disabled'}">
-							<EditorComponent node={liveNode} {referencePickerViews} />
+						<div
+							class="parameter-wrapper {valueEditorReadOnly ? 'readonly' : ''} {enabled
+								? ''
+								: 'disabled'}">
+							<EditorComponent
+								node={liveNode}
+								readOnly={valueEditorReadOnly}
+								{referencePickerViews} />
 						</div>
 
 						{#if !readOnly && !onlyOneAvailableControlMode && !isControlNode}

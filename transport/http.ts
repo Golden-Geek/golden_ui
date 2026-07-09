@@ -22,6 +22,8 @@ import type {
 	UiFileConstraints,
 	UiProjectFileSpec,
 	UiProjectFileLoadResult,
+	UiProjectLoadOptions,
+	UiProjectLoadRecovery,
 	UiReferenceConstraints,
 	UiReferenceTargets,
 	UiReferenceRoot,
@@ -69,6 +71,8 @@ import { getUiClientInstanceId } from './client-instance';
 
 const DEFAULT_BASE_URL = 'http://localhost:7010/api/ui';
 const DEFAULT_POLL_INTERVAL_MS = 150;
+const DEFAULT_POST_TIMEOUT_MS = 15000;
+const PROJECT_LOAD_TIMEOUT_MS = 60000;
 
 interface HttpClientOptions {
 	baseUrl?: string;
@@ -76,10 +80,42 @@ interface HttpClientOptions {
 	fetchImpl?: typeof fetch;
 }
 
+interface PostJsonOptions {
+	timeoutMs?: number;
+}
+
 export type RustScope = RustUiSubscriptionScope;
 export type { RustUiEventBatch };
 
 type RustUiEventDto = RustUiEventBatch['events'][number];
+
+const fromRustProjectLoadRecovery = (recovery: unknown): UiProjectLoadRecovery | undefined => {
+	if (!isRecord(recovery)) {
+		return undefined;
+	}
+
+	const rawProblems = Array.isArray(recovery.problems) ? recovery.problems : [];
+	const problems = rawProblems
+		.map((problem): UiProjectLoadRecovery['problems'][number] | null => {
+			if (!isRecord(problem)) {
+				return null;
+			}
+			const message = typeof problem.message === 'string' ? problem.message.trim() : '';
+			if (message.length === 0) {
+				return null;
+			}
+			const stage =
+				typeof problem.stage === 'string' && problem.stage.trim().length > 0
+					? problem.stage.trim()
+					: 'project_load';
+			return { stage, message };
+		})
+		.filter(
+			(problem): problem is UiProjectLoadRecovery['problems'][number] => problem !== null
+		);
+
+	return problems.length > 0 ? { problems } : undefined;
+};
 
 const fromRustProjectPathResponse = (
 	endpoint: string,
@@ -90,7 +126,8 @@ const fromRustProjectPathResponse = (
 	}
 	return {
 		path: response.path,
-		ui_state: response.ui_state
+		ui_state: response.ui_state,
+		recovery: fromRustProjectLoadRecovery(response.recovery)
 	};
 };
 
@@ -1422,7 +1459,14 @@ export const toRustIntent = (intent: UiEditIntent): RustUiEditIntent => {
 
 const formatError = (context: string, response: Response, body: unknown): Error => {
 	const suffix = isRecord(body) && typeof body.error === 'string' ? `: ${body.error}` : '';
-	return new Error(`${context} failed with ${response.status} ${response.statusText}${suffix}`);
+	return Object.assign(
+		new Error(`${context} failed with ${response.status} ${response.statusText}${suffix}`),
+		{
+			status: response.status,
+			statusText: response.statusText,
+			body
+		}
+	);
 };
 
 export const createHttpUiClient = (options: HttpClientOptions = {}): UiClient => {
@@ -1431,31 +1475,56 @@ export const createHttpUiClient = (options: HttpClientOptions = {}): UiClient =>
 	const pollIntervalMs = Math.max(50, options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS);
 	const clientInstanceId = getUiClientInstanceId();
 
-	const postJson = async <TResponse>(path: string, payload: unknown): Promise<TResponse> => {
-		const response = await fetchImpl(`${baseUrl}${path}`, {
-			method: 'POST',
-			headers: {
-				'content-type': 'application/json',
-				'x-gc-ui-client-instance': clientInstanceId
-			},
-			body: JSON.stringify(payload)
-		});
+	const postJson = async <TResponse>(
+		path: string,
+		payload: unknown,
+		options: PostJsonOptions = {}
+	): Promise<TResponse> => {
+		const timeoutMs = Math.max(1000, options.timeoutMs ?? DEFAULT_POST_TIMEOUT_MS);
+		const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+		const timeoutId =
+			controller !== null
+				? setTimeout(() => {
+						controller.abort();
+					}, timeoutMs)
+				: null;
 
-		let body: unknown = undefined;
-		const text = await response.text();
-		if (text.length > 0) {
-			try {
-				body = JSON.parse(text) as unknown;
-			} catch {
-				body = text;
+		try {
+			const response = await fetchImpl(`${baseUrl}${path}`, {
+				method: 'POST',
+				headers: {
+					'content-type': 'application/json',
+					'x-gc-ui-client-instance': clientInstanceId
+				},
+				body: JSON.stringify(payload),
+				signal: controller?.signal
+			});
+
+			let body: unknown = undefined;
+			const text = await response.text();
+			if (text.length > 0) {
+				try {
+					body = JSON.parse(text) as unknown;
+				} catch {
+					body = text;
+				}
+			}
+
+			if (!response.ok) {
+				throw formatError(`POST ${path}`, response, body);
+			}
+
+			return body as TResponse;
+		} catch (error) {
+			if (controller?.signal.aborted) {
+				throw new Error(`POST ${path} timed out after ${Math.round(timeoutMs / 1000)}s`);
+			}
+			throw error;
+		} finally {
+			if (timeoutId !== null) {
+				clearTimeout(timeoutId);
 			}
 		}
-
-		if (!response.ok) {
-			throw formatError(`POST ${path}`, response, body);
-		}
-
-		return body as TResponse;
 	};
 
 	const client: UiClient = {
@@ -1628,21 +1697,35 @@ export const createHttpUiClient = (options: HttpClientOptions = {}): UiClient =>
 			await postJson<{ ok?: boolean }>('/project-save', request);
 		},
 
-		async projectLoad(path: string): Promise<UiProjectFileLoadResult> {
+		async projectLoad(
+			path: string,
+			options: UiProjectLoadOptions = {}
+		): Promise<UiProjectFileLoadResult> {
 			const request: RustProjectPathRequest = { path };
-			const response = await postJson<RustProjectPathResponse>('/project-load', request);
+			if (options.recover === true) {
+				request.recover = true;
+			}
+			const response = await postJson<RustProjectPathResponse>('/project-load', request, {
+				timeoutMs: PROJECT_LOAD_TIMEOUT_MS
+			});
 			return fromRustProjectPathResponse('/project-load', response);
 		},
 
 		async projectUploadLoad(
 			fileName: string,
-			contents: string
+			contents: string,
+			options: UiProjectLoadOptions = {}
 		): Promise<UiProjectFileLoadResult> {
 			const request: RustProjectUploadRequest = {
 				file_name: fileName,
 				contents
 			};
-			const response = await postJson<RustProjectPathResponse>('/project-upload-load', request);
+			if (options.recover === true) {
+				request.recover = true;
+			}
+			const response = await postJson<RustProjectPathResponse>('/project-upload-load', request, {
+				timeoutMs: PROJECT_LOAD_TIMEOUT_MS
+			});
 			return fromRustProjectPathResponse('/project-upload-load', response);
 		}
 	};

@@ -119,7 +119,7 @@
 	.gc-confirmation-overlay {
 		position: fixed;
 		inset: 0;
-		z-index: 120;
+		z-index: 1400;
 		display: flex;
 		align-items: center;
 		justify-content: center;

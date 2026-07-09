@@ -4,7 +4,9 @@ import type {
 	WorkbenchLoadingStepDefinition,
 	WorkbenchSession
 } from './workbench.svelte';
+import type { UiProjectFileLoadResult, UiProjectLoadRecovery } from '../types';
 import { hasDesktopHost, openDesktopFileDialog, saveDesktopFileDialog } from '../host/desktop';
+import { requestConfirmation } from './confirmation-dialog.svelte';
 import { captureProjectUiState, restoreProjectUiState } from './project-ui-state';
 import { loadPersistedLastProjectPath, savePersistedLastProjectPath } from './ui-persistence';
 import {
@@ -71,7 +73,8 @@ export const projectFileState = $state({
 	currentPath: null as string | null,
 	lastOpenedPath: normalizeProjectPath(persistedLastProjectPath),
 	busy: false,
-	savedHistoryStateId: 0
+	savedHistoryStateId: 0,
+	lastRecovery: null as UiProjectLoadRecovery | null
 });
 
 const setCurrentProjectPath = (path: string | null): void => {
@@ -144,6 +147,141 @@ const appendProjectFileLog = (
 	message: string
 ): void => {
 	session?.appendUiLogRecord(level, PROJECT_FILE_LOG_TAG, message);
+};
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+	typeof value === 'object' && value !== null && !Array.isArray(value);
+
+const projectLoadRecoveryFromUnknown = (value: unknown): UiProjectLoadRecovery | null => {
+	if (!isRecord(value)) {
+		return null;
+	}
+
+	const rawProblems = Array.isArray(value.problems) ? value.problems : [];
+	const problems = rawProblems
+		.map((problem): UiProjectLoadRecovery['problems'][number] | null => {
+			if (!isRecord(problem)) {
+				return null;
+			}
+			const message = typeof problem.message === 'string' ? problem.message.trim() : '';
+			if (message.length === 0) {
+				return null;
+			}
+			const stage =
+				typeof problem.stage === 'string' && problem.stage.trim().length > 0
+					? problem.stage.trim()
+					: 'project_load';
+			return { stage, message };
+		})
+		.filter(
+			(problem): problem is UiProjectLoadRecovery['problems'][number] => problem !== null
+		);
+
+	return problems.length > 0 ? { problems } : null;
+};
+
+const projectLoadRecoveryFromError = (error: unknown): UiProjectLoadRecovery | null => {
+	const body = isRecord(error) ? error.body : undefined;
+	if (!isRecord(body) || body.recoverable !== true) {
+		return null;
+	}
+
+	const recovery = projectLoadRecoveryFromUnknown(body.recovery);
+	if (recovery) {
+		return recovery;
+	}
+
+	const message =
+		typeof body.error === 'string' && body.error.trim().length > 0
+			? body.error.trim()
+			: error instanceof Error
+				? error.message
+				: 'Unknown project load problem';
+	return { problems: [{ stage: 'project_load', message }] };
+};
+
+const formatProjectRecoveryProblems = (recovery: UiProjectLoadRecovery): string =>
+	recovery.problems
+		.map((problem) => problem.message)
+		.filter((message) => message.length > 0)
+		.join('; ');
+
+const confirmProjectRecovery = async (
+	displayName: string,
+	recovery: UiProjectLoadRecovery
+): Promise<boolean> => {
+	const problem = formatProjectRecoveryProblems(recovery) || 'Unknown project load problem';
+	const action = await requestConfirmation({
+		title: 'Project Load Problem',
+		message: `There was a problem while opening "${displayName}". Would you like to still try to load the file?`,
+		errorMessage: problem,
+		actions: [
+			{ id: 'keep-closed', label: 'Cancel', tone: 'neutral' },
+			{ id: 'recover', label: 'Try Anyway', tone: 'primary', defaultFocus: true }
+		]
+	});
+	return action === 'recover';
+};
+
+const appendRecoveryDiagnostics = (
+	session: WorkbenchSession,
+	recovery: UiProjectLoadRecovery | undefined,
+	sourceLabel: string
+): void => {
+	if (!recovery || recovery.problems.length === 0) {
+		projectFileState.lastRecovery = null;
+		return;
+	}
+
+	projectFileState.lastRecovery = recovery;
+	appendProjectFileLog(
+		session,
+		'warning',
+		`Loaded project with recovery (${sourceLabel}): ${formatProjectRecoveryProblems(recovery)}`
+	);
+};
+
+const loadWithRecoveryPrompt = async (
+	session: WorkbenchSession,
+	displayName: string,
+	loading: WorkbenchLoadingOperation,
+	load: (recover: boolean) => Promise<UiProjectFileLoadResult>
+): Promise<UiProjectFileLoadResult | null> => {
+	try {
+		return await load(false);
+	} catch (error) {
+		const recovery = projectLoadRecoveryFromError(error);
+		if (!recovery) {
+			throw error;
+		}
+
+		loading.update({
+			activeStep: 'runtime',
+			title: 'Project load problem',
+			message: 'Waiting for confirmation',
+			detail: formatProjectRecoveryProblems(recovery),
+			progress: 0.34
+		});
+
+		const confirmed = await confirmProjectRecovery(displayName, recovery);
+		if (!confirmed) {
+			appendProjectFileLog(
+				session,
+				'warning',
+				`Project load cancelled after recoverable problem: ${formatProjectRecoveryProblems(recovery)}`
+			);
+			return null;
+		}
+
+		loading.update({
+			activeStep: 'runtime',
+			title: 'Opening project',
+			message: 'Trying partial project load',
+			detail: displayName,
+			progress: 0.42
+		});
+		return load(true);
+	}
 };
 
 const projectFileActionFailed = (
@@ -251,9 +389,22 @@ const loadProjectAtPath = async (session: WorkbenchSession, path: string): Promi
 			progress: 0.34
 		});
 		const loadStartedAt = nowMs();
-		const loadResult = await session.client.projectLoad(path);
+		const loadResult = await loadWithRecoveryPrompt(session, displayName, loading, (recover) =>
+			session.client.projectLoad(path, { recover })
+		);
+		if (!loadResult) {
+			loading.fail({
+				activeStep: 'runtime',
+				title: 'Project load cancelled',
+				message: 'The project was not loaded',
+				detail: displayName,
+				progress: 0.34
+			});
+			return false;
+		}
 		const loadedPath = loadResult.path;
 		restoreProjectUiState(loadResult.ui_state);
+		appendRecoveryDiagnostics(session, loadResult.recovery, loadedPath);
 		const loadMs = nowMs() - loadStartedAt;
 		loading.update({
 			activeStep: 'snapshot',
@@ -293,7 +444,7 @@ const loadProjectAtPath = async (session: WorkbenchSession, path: string): Promi
 		});
 		appendProjectFileLog(session, 'info', `Opened project: ${loadedPath}`);
 		loading.finish({
-			title: 'Project loaded',
+			title: loadResult.recovery ? 'Project loaded with recovery' : 'Project loaded',
 			message: displayName,
 			detail: loadedPath
 		});
@@ -357,6 +508,7 @@ export const createNewProjectFile = async (): Promise<boolean> => {
 			progress: 0.86
 		});
 		setCurrentProjectPath(null);
+		projectFileState.lastRecovery = null;
 		markProjectStateClean(0);
 		loading.finish({
 			title: 'New project ready',
@@ -518,9 +670,22 @@ export const uploadProjectFileAndLoad = async (file: File): Promise<boolean> => 
 			detail: file.name,
 			progress: 0.38
 		});
-		const loadResult = await session.client.projectUploadLoad(file.name, contents);
+		const loadResult = await loadWithRecoveryPrompt(session, file.name, loading, (recover) =>
+			session.client.projectUploadLoad(file.name, contents, { recover })
+		);
+		if (!loadResult) {
+			loading.fail({
+				activeStep: 'runtime',
+				title: 'Project load cancelled',
+				message: 'The uploaded project was not loaded',
+				detail: file.name,
+				progress: 0.38
+			});
+			return false;
+		}
 		const path = loadResult.path;
 		restoreProjectUiState(loadResult.ui_state);
+		appendRecoveryDiagnostics(session, loadResult.recovery, path);
 		loading.update({
 			activeStep: 'snapshot',
 			title: 'Refreshing workspace',
@@ -550,7 +715,7 @@ export const uploadProjectFileAndLoad = async (file: File): Promise<boolean> => 
 		rememberLastOpenedPath(path);
 		markProjectStateClean(0);
 		loading.finish({
-			title: 'Project loaded',
+			title: loadResult.recovery ? 'Project loaded with recovery' : 'Project loaded',
 			message: projectFileDisplayName(path),
 			detail: path
 		});

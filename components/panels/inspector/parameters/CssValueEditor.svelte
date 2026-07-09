@@ -6,16 +6,21 @@
 	import { CSS_UNIT_OPTIONS } from '../../../../css-value';
 	import type { CssUnit, UiNodeDto } from '../../../../types';
 
-	let { node, layoutMode = 'default' } = $props<{
+	let {
+		node,
+		layoutMode = 'default',
+		readOnly: externalReadOnly = false
+	} = $props<{
 		node: UiNodeDto;
 		layoutMode?: 'default' | 'widget';
+		readOnly?: boolean;
 	}>();
 
 	let session = $derived(appState.session);
 	let liveNode = $derived(session?.graph.state.nodesById.get(node.node_id) ?? node);
 	let param = $derived(liveNode.data.kind === 'parameter' ? liveNode.data.param : null);
 	let constraints = $derived(param?.constraints);
-	let readOnly = $derived(Boolean(param?.read_only));
+	let readOnly = $derived(Boolean(param?.read_only) || externalReadOnly);
 	let enabled = $derived(liveNode.meta.enabled);
 	let value = $derived(param?.value.kind === 'css_value' ? param.value.value : 0);
 	let unit = $derived(param?.value.kind === 'css_value' ? param.value.unit : 'rem');

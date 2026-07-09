@@ -4,8 +4,9 @@
 	import { hasDesktopHost, openDesktopFileDialog } from '../../../../host/desktop';
 	import type { UiFileTypeGroup, UiNodeDto } from '../../../../types';
 
-	let { node } = $props<{
+	let { node, readOnly: externalReadOnly = false } = $props<{
 		node: UiNodeDto;
+		readOnly?: boolean;
 	}>();
 
 	const GROUP_EXTENSIONS: Record<UiFileTypeGroup, string[]> = {
@@ -19,7 +20,7 @@
 	let param = $derived(liveNode.data.kind === 'parameter' ? liveNode.data.param : null);
 	let fileConstraints = $derived(param?.constraints.file);
 	let value = $derived(param?.value.kind === 'file' ? param.value.value : '');
-	let readOnly = $derived(Boolean(param?.read_only));
+	let readOnly = $derived(Boolean(param?.read_only) || externalReadOnly);
 	let enabled = $derived(liveNode.meta.enabled);
 	let hasDesktopDialog = $derived(hasDesktopHost());
 

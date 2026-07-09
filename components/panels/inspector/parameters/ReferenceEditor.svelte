@@ -18,12 +18,14 @@
 		node,
 		layoutMode = 'default',
 		insideLabel = null,
-		referencePickerViews = []
+		referencePickerViews = [],
+		readOnly: externalReadOnly = false
 	} = $props<{
 		node: UiNodeDto;
 		layoutMode?: 'default' | 'widget';
 		insideLabel?: string | null;
 		referencePickerViews?: NodePickerModalView[];
+		readOnly?: boolean;
 	}>();
 
 	const NIL_UUID = '00000000-0000-0000-0000-000000000000';
@@ -35,7 +37,7 @@
 	let constraints = $derived(param?.constraints.reference);
 	let value = $derived(param?.value.kind === 'reference' ? param.value : null);
 	let enabled = $derived(liveNode.meta.enabled);
-	let readOnly = $derived(Boolean(param?.read_only));
+	let readOnly = $derived(Boolean(param?.read_only) || externalReadOnly);
 	let hasCustomReferenceFilter = $derived(Boolean(constraints?.custom_filter_key));
 	let referenceTargetIds = $state<NodeId[]>([]);
 	let referenceVisibleNodeIds = $state<NodeId[]>([]);

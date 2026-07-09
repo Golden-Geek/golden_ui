@@ -14,17 +14,19 @@
 	let {
 		node,
 		layoutMode = 'default',
-		presentation = {}
+		presentation = {},
+		readOnly: externalReadOnly = false
 	} = $props<{
 		node: UiNodeDto;
 		layoutMode?: 'default' | 'widget';
 		presentation?: ColorEditorPresentation;
+		readOnly?: boolean;
 	}>();
 
 	let session = $derived(appState.session);
 	let liveNode = $derived(session?.graph.state.nodesById.get(node.node_id) ?? node);
 	let param = $derived(liveNode.data.kind === 'parameter' ? liveNode.data.param : null);
-	let readOnly = $derived(Boolean(param?.read_only));
+	let readOnly = $derived(Boolean(param?.read_only) || externalReadOnly);
 	let enabled = $derived(liveNode.meta.enabled);
 	let value = $derived.by((): [number, number, number, number] => {
 		if (param?.value.kind !== 'color') {

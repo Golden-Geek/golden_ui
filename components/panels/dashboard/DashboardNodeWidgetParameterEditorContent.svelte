@@ -62,6 +62,11 @@
 	let paramKind = $derived(
 		liveTargetNode.data.kind === 'parameter' ? liveTargetNode.data.param.value.kind : null
 	);
+	let valueEditorReadOnly = $derived(
+		liveTargetNode.data.kind === 'parameter' &&
+			liveTargetNode.data.param.control.mode !== 'manual' &&
+			liveTargetNode.data.param.control.mode !== 'templateText'
+	);
 
 	let numberPresentation = $derived.by(
 		(): NumberEditorOptions => ({
@@ -141,6 +146,7 @@
 			<NumberEditor
 				node={liveTargetNode}
 				layoutMode="widget"
+				readOnly={valueEditorReadOnly}
 				presentation={{
 					...numberPresentation,
 					inside_label: editorInsideLabel ?? undefined
@@ -152,6 +158,7 @@
 			<MultiNumberEditor
 				node={liveTargetNode}
 				layoutMode="widget"
+				readOnly={valueEditorReadOnly}
 				presentation={vectorPresentation}
 				rangeOverride={effectiveVectorRange} />
 		</div>
@@ -160,35 +167,59 @@
 			<ColorPickerEditor
 				node={liveTargetNode}
 				layoutMode="widget"
+				readOnly={valueEditorReadOnly}
 				presentation={colorPresentation} />
 		</div>
 	{:else if paramKind === 'bool'}
 		<div class="dashboard-node-widget-parameter-editor-body widget-layout checkbox-layout">
-			<CheckboxEditor node={liveTargetNode} layoutMode="widget" insideLabel={editorInsideLabel} />
+			<CheckboxEditor
+				node={liveTargetNode}
+				layoutMode="widget"
+				insideLabel={editorInsideLabel}
+				readOnly={valueEditorReadOnly} />
 		</div>
 	{:else if paramKind === 'trigger'}
 		<div class="dashboard-node-widget-parameter-editor-body widget-layout">
-			<TriggerEditor node={liveTargetNode} layoutMode="widget" insideLabel={editorInsideLabel} />
+			<TriggerEditor
+				node={liveTargetNode}
+				layoutMode="widget"
+				insideLabel={editorInsideLabel}
+				readOnly={valueEditorReadOnly} />
 		</div>
 	{:else if paramKind === 'str'}
 		<div class="dashboard-node-widget-parameter-editor-body widget-layout">
-			<TextInputEditor node={liveTargetNode} layoutMode="widget" insideLabel={editorInsideLabel} />
+			<TextInputEditor
+				node={liveTargetNode}
+				layoutMode="widget"
+				insideLabel={editorInsideLabel}
+				readOnly={valueEditorReadOnly} />
 		</div>
 	{:else if paramKind === 'enum'}
 		<div class="dashboard-node-widget-parameter-editor-body widget-layout">
-			<DropdownEditor node={liveTargetNode} layoutMode="widget" insideLabel={editorInsideLabel} />
+			<DropdownEditor
+				node={liveTargetNode}
+				layoutMode="widget"
+				insideLabel={editorInsideLabel}
+				readOnly={valueEditorReadOnly} />
 		</div>
 	{:else if paramKind === 'reference'}
 		<div class="dashboard-node-widget-parameter-editor-body widget-layout">
-			<ReferenceEditor node={liveTargetNode} layoutMode="widget" insideLabel={editorInsideLabel} />
+			<ReferenceEditor
+				node={liveTargetNode}
+				layoutMode="widget"
+				insideLabel={editorInsideLabel}
+				readOnly={valueEditorReadOnly} />
 		</div>
 	{:else if paramKind === 'css_value'}
 		<div class="dashboard-node-widget-parameter-editor-body widget-layout">
-			<CssValueEditor node={liveTargetNode} layoutMode="widget" />
+			<CssValueEditor
+				node={liveTargetNode}
+				layoutMode="widget"
+				readOnly={valueEditorReadOnly} />
 		</div>
 	{:else if EditorComponent}
 		<div class="dashboard-node-widget-parameter-editor-body widget-layout">
-			<EditorComponent node={liveTargetNode} />
+			<EditorComponent node={liveTargetNode} readOnly={valueEditorReadOnly} />
 		</div>
 	{:else}
 		<div class="dashboard-node-widget-mode-empty">
