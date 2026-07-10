@@ -6,6 +6,7 @@
 		listeningAddress: string;
 		advertisedName: string | null;
 		websocketPath: string;
+		metrics?: TransportMetrics;
 	};
 
 	type TransportMetrics = {
@@ -35,12 +36,11 @@
 
 	const refresh = async (): Promise<void> => {
 		try {
-			const [infoResponse, metricsResponse] = await Promise.all([
-				fetch(endpoint('connection-info')),
-				fetch(endpoint('metrics'))
-			]);
-			if (infoResponse.ok) info = (await infoResponse.json()) as ConnectionInfo;
-			if (metricsResponse.ok) metrics = (await metricsResponse.json()) as TransportMetrics;
+			const response = await fetch(endpoint('connection-info'));
+			if (!response.ok) return;
+			const nextInfo = (await response.json()) as ConnectionInfo;
+			info = nextInfo;
+			metrics = nextInfo.metrics ?? null;
 		} catch {
 			// The normal connection badge already owns disconnected-state presentation.
 		}
