@@ -212,10 +212,7 @@
 		</div>
 	{:else if paramKind === 'css_value'}
 		<div class="dashboard-node-widget-parameter-editor-body widget-layout">
-			<CssValueEditor
-				node={liveTargetNode}
-				layoutMode="widget"
-				readOnly={valueEditorReadOnly} />
+			<CssValueEditor node={liveTargetNode} layoutMode="widget" readOnly={valueEditorReadOnly} />
 		</div>
 	{:else if EditorComponent}
 		<div class="dashboard-node-widget-parameter-editor-body widget-layout">

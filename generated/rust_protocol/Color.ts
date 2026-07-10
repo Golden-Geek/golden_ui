@@ -3,19 +3,19 @@
 /**
  * RGBA color value with normalized channel components.
  */
-export type Color = { 
+export type Color = {
 /**
  * Red component in the `[0.0, 1.0]` range.
  */
-r: number, 
+r: number,
 /**
  * Green component in the `[0.0, 1.0]` range.
  */
-g: number, 
+g: number,
 /**
  * Blue component in the `[0.0, 1.0]` range.
  */
-b: number, 
+b: number,
 /**
  * Alpha component in the `[0.0, 1.0]` range.
  */

@@ -420,7 +420,8 @@ export const createDashboardNodeWidget = async (
 	}
 	const knownChildIds = new Set(parent.children);
 	const placement =
-		options?.placement ?? getDashboardNodeWidgetCreationDefaults(targetNode, getDefaultSizingContext());
+		options?.placement ??
+		getDashboardNodeWidgetCreationDefaults(targetNode, getDefaultSizingContext());
 	const created = await sendCreateDashboardNodeWidgetIntent(parentId, targetNode.node_id, {
 		placement: toUiDashboardWidgetPlacement(placement),
 		prev_sibling:
@@ -520,7 +521,8 @@ export const createDashboardContainerWidget = async (
 	}
 
 	const knownChildIds = new Set(parent.children);
-	const placement = options?.placement ?? getDashboardContainerCreationDefaults(getDefaultSizingContext());
+	const placement =
+		options?.placement ?? getDashboardContainerCreationDefaults(getDefaultSizingContext());
 	const created = await sendCreateDashboardContainerWidgetIntent(parentId, {
 		label: options?.label,
 		placement: toUiDashboardWidgetPlacement(placement),

@@ -11,18 +11,18 @@ import FilePathEditor from './parameters/FilePathEditor.svelte';
 import type { UiNodeDto } from '../../../types';
 
 export const propertiesInspectorClass: Record<string, { component: any }> = {
-		trigger: { component: TriggerEditor },
-		int: { component: NumberEditor },
-		str: { component: TextInputEditor },
-		file: { component: FilePathEditor },
-		float: { component: NumberEditor },
-		bool: { component: CheckboxEditor },
-		css_value: { component: CssValueEditor },
-		color: { component: ColorPickerEditor },
-		enum: { component: DropdownEditor },
-		vec2: { component: MultiNumberEditor },
-		vec3: { component: MultiNumberEditor },
-		reference: { component: ReferenceEditor }
+	trigger: { component: TriggerEditor },
+	int: { component: NumberEditor },
+	str: { component: TextInputEditor },
+	file: { component: FilePathEditor },
+	float: { component: NumberEditor },
+	bool: { component: CheckboxEditor },
+	css_value: { component: CssValueEditor },
+	color: { component: ColorPickerEditor },
+	enum: { component: DropdownEditor },
+	vec2: { component: MultiNumberEditor },
+	vec3: { component: MultiNumberEditor },
+	reference: { component: ReferenceEditor }
 };
 
 export const resolveParameterEditor = (

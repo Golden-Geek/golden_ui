@@ -3,7 +3,7 @@
 /**
  * Runtime timing metrics exposed to the UI.
  */
-export type UiRuntimeStatsDto = { 
+export type UiRuntimeStatsDto = {
 /**
  * Engine ticks completed per second over the latest sampling window.
  */
