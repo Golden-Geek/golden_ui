@@ -212,7 +212,7 @@
 		tabindex="-1"
 		onkeydown={() => {}}>
 	</div>
-	<NetworkStatus />
+	<NetworkStatus httpBaseUrl={session.httpBaseUrl} />
 	{#if hasTauriWindowApi}
 		<div class="app-buttons">
 			<button

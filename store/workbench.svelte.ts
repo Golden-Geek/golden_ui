@@ -134,6 +134,7 @@ export interface WorkbenchLoadingOperation {
 export interface WorkbenchSession {
 	readonly graph: GraphStore;
 	readonly client: UiClient;
+	readonly httpBaseUrl: string;
 	readonly loading: WorkbenchLoadingState;
 	readonly logRecords: UiLogRecord[];
 	readonly logMaxEntries: number;
@@ -333,6 +334,7 @@ const isEditableTarget = (target: EventTarget | null): boolean => {
 
 export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): WorkbenchSession => {
 	const scope = options.scope ?? wholeGraphScope;
+	const httpBaseUrl = (options.httpBaseUrl ?? 'http://localhost:7010/api/ui').replace(/\/+$/, '');
 	const retryMs = Math.max(100, options.bootstrapRetryMs ?? DEFAULT_RETRY_MS);
 	const enableGlobalShortcuts = options.enableGlobalShortcuts ?? true;
 	const graph = createGraphStore();
@@ -660,7 +662,7 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 
 	const transportOptions: UiTransportOptions = {
 		wsUrl: options.wsUrl,
-		httpBaseUrl: options.httpBaseUrl,
+		httpBaseUrl,
 		pollIntervalMs: options.pollIntervalMs,
 		onConnectionStateChange: (state, detail) => {
 			connectionState = state;
@@ -1249,6 +1251,9 @@ export const createWorkbenchSession = (options: WorkbenchSessionOptions = {}): W
 		},
 		get client(): UiClient {
 			return client;
+		},
+		get httpBaseUrl(): string {
+			return httpBaseUrl;
 		},
 		get loading(): WorkbenchLoadingState {
 			return loading;

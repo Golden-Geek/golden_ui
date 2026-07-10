@@ -144,6 +144,7 @@ export const createWebSocketUiClient = (options: WebSocketUiClientOptions = {}):
 	let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 	let reconnectAttempts = 0;
 	let reconnecting = false;
+	let fallbackActive = false;
 	let lastConnectionState: UiTransportConnectionState | null = null;
 	let lastServerSessionId: string | null = null;
 
@@ -213,8 +214,11 @@ export const createWebSocketUiClient = (options: WebSocketUiClientOptions = {}):
 			}
 			state.onBatch(batch);
 		});
-		emitConnectionState('fallbackPolling', subscriptionId);
-		console.warn(`[ui ws] subscription ${subscriptionId} switched to HTTP polling fallback`);
+		if (!fallbackActive) {
+			fallbackActive = true;
+			emitConnectionState('fallbackPolling', subscriptionId);
+			console.warn('[ui ws] WebSocket unavailable; using HTTP polling fallback');
+		}
 	};
 
 	const stopPollingFallback = (state: SubscriptionState): void => {
@@ -234,6 +238,7 @@ export const createWebSocketUiClient = (options: WebSocketUiClientOptions = {}):
 		for (const state of subscriptions.values()) {
 			stopPollingFallback(state);
 		}
+		fallbackActive = false;
 	};
 
 	const scheduleReconnect = (reason: string): void => {
@@ -586,6 +591,7 @@ export const createWebSocketUiClient = (options: WebSocketUiClientOptions = {}):
 				}
 				if (subscriptions.size === 0) {
 					clearReconnectTimer();
+					fallbackActive = false;
 				}
 			};
 		},

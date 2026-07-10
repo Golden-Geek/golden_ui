@@ -19,6 +19,8 @@
 	let info = $state<ConnectionInfo | null>(null);
 	let metrics = $state<TransportMetrics | null>(null);
 	let copied = $state(false);
+	const { httpBaseUrl } = $props<{ httpBaseUrl: string }>();
+	const endpoint = (path: string): string => `${httpBaseUrl.replace(/\/+$/, '')}/${path}`;
 
 	let isOpenLan = $derived.by(() => {
 		if (!info?.openAccess) return false;
@@ -34,8 +36,8 @@
 	const refresh = async (): Promise<void> => {
 		try {
 			const [infoResponse, metricsResponse] = await Promise.all([
-				fetch('/api/ui/connection-info'),
-				fetch('/api/ui/metrics')
+				fetch(endpoint('connection-info')),
+				fetch(endpoint('metrics'))
 			]);
 			if (infoResponse.ok) info = (await infoResponse.json()) as ConnectionInfo;
 			if (metricsResponse.ok) metrics = (await metricsResponse.json()) as TransportMetrics;
