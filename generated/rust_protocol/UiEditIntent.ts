@@ -12,11 +12,24 @@ import type { UiDuplicateCreateUserItemSpec } from "./UiDuplicateCreateUserItemS
 import type { UiDuplicateDependentUserItem } from "./UiDuplicateDependentUserItem";
 import type { UiDuplicateNodeSpec } from "./UiDuplicateNodeSpec";
 import type { UiParameterControlStateDto } from "./UiParameterControlStateDto";
+import type { JsonValue } from "./serde_json/JsonValue";
 
 /**
  * UI-originated edit intent.
  */
-export type UiEditIntent = { "kind": "beginEdit",
+export type UiEditIntent = { "kind": "setRuntimeViewInterest",
+/**
+ * Stable id for one UI surface such as an editor or inspector.
+ */
+view_id: string,
+/**
+ * App-owned observation topic.
+ */
+topic: string,
+/**
+ * Topic-specific selection, or `null` to remove this view.
+ */
+payload: JsonValue | null, } | { "kind": "beginEdit",
 /**
  * Client-generated id.
  */

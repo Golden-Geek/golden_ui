@@ -592,6 +592,12 @@ export interface UiDuplicateDependentUserItem {
 }
 
 export type UiEditIntent =
+	| {
+			kind: 'setRuntimeViewInterest';
+			view_id: string;
+			topic: string;
+			payload: unknown | null;
+	  }
 	| { kind: 'beginEdit'; client_edit_id: string; label?: string }
 	| { kind: 'endEdit'; client_edit_id: string }
 	| { kind: 'setParam'; node: NodeId; value: ParamValue; behaviour: ParamEventBehaviour }
