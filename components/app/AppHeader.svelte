@@ -7,6 +7,7 @@
 	import { projectFileDisplayName, projectFileState } from '../../store/project-files.svelte';
 	import { requestWindowExit } from '../../store/window-exit.svelte';
 	import FileMenu from './FileMenu.svelte';
+	import NetworkStatus from './NetworkStatus.svelte';
 
 	let isWindowMaximized = $state(false);
 	let hasTauriWindowApi = $state(false);
@@ -211,6 +212,7 @@
 		tabindex="-1"
 		onkeydown={() => {}}>
 	</div>
+	<NetworkStatus />
 	{#if hasTauriWindowApi}
 		<div class="app-buttons">
 			<button
