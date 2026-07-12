@@ -374,15 +374,15 @@ export const createWorkbenchCommandSuite = (
 			return false;
 		}
 
-	removable.sort((left, right) => getNodeDepth(right.node_id) - getNodeDepth(left.node_id));
-	return requestRemoveNodesById(
-		removable.map((node) => node.node_id),
-		{
-			graph: options.graph.state,
-			sendIntent: options.sendIntent
-		}
-	);
-};
+		removable.sort((left, right) => getNodeDepth(right.node_id) - getNodeDepth(left.node_id));
+		return requestRemoveNodesById(
+			removable.map((node) => node.node_id),
+			{
+				graph: options.graph.state,
+				sendIntent: options.sendIntent
+			}
+		);
+	};
 
 	const selectSiblingNodesCommand = (): boolean => {
 		const anchorNode = options.getFirstSelectedNode();

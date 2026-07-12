@@ -110,9 +110,7 @@ const fromRustProjectLoadRecovery = (recovery: unknown): UiProjectLoadRecovery |
 					: 'project_load';
 			return { stage, message };
 		})
-		.filter(
-			(problem): problem is UiProjectLoadRecovery['problems'][number] => problem !== null
-		);
+		.filter((problem): problem is UiProjectLoadRecovery['problems'][number] => problem !== null);
 
 	return problems.length > 0 ? { problems } : undefined;
 };
