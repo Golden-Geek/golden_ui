@@ -6,7 +6,11 @@
 	"svelte": "./index.ts",
 	"types": "./index.ts",
 	"exports": {
-		".": "./index.ts",
+		".": {
+			"types": "./index.ts",
+			"svelte": "./index.ts",
+			"default": "./index.ts"
+		},
 		"./css-value": "./css-value.ts",
 		"./projection-labels": "./projection-labels.ts",
 		"./types": "./types.ts",

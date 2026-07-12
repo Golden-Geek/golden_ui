@@ -108,6 +108,7 @@
 	let controlInfoPrevNodeId = $state<number | null>(null);
 	let controlInfoPrevMode = $state<UiParameterControlMode | null>(null);
 	let controlInfoPrevMenuOpen = $state(false);
+	let controlInfoPrevLoading = $state(false);
 	const controlModeOptions: ReadonlyArray<{ mode: UiParameterControlMode; label: string }> = [
 		{ mode: 'manual', label: 'Manual' },
 		{ mode: 'contextLink', label: 'Context Link' },
@@ -600,11 +601,17 @@
 		const previousNodeId = controlInfoPrevNodeId;
 		const previousMode = controlInfoPrevMode;
 		const previousMenuOpen = controlInfoPrevMenuOpen;
+		const previousLoading = controlInfoPrevLoading;
+		const loading = session?.loading.visible ?? true;
 		controlInfoPrevNodeId = liveNodeId;
 		controlInfoPrevMode = currentControlMode;
 		controlInfoPrevMenuOpen = controlMenuOpen;
+		controlInfoPrevLoading = loading;
 
-		if (!isParameterNode || !session) {
+		if (!isParameterNode || !session || loading) {
+			controlInfo = null;
+			controlInfoLoading = false;
+			controlInfoRequestSeq += 1;
 			return;
 		}
 
@@ -612,7 +619,8 @@
 		const enteredContextLink =
 			currentControlMode === 'contextLink' && previousMode !== 'contextLink';
 		const openedMenu = controlMenuOpen && !previousMenuOpen;
-		const shouldFetch = nodeChanged || enteredContextLink || openedMenu;
+		const finishedLoading = previousLoading && !loading;
+		const shouldFetch = nodeChanged || enteredContextLink || openedMenu || finishedLoading;
 		if (!shouldFetch) {
 			return;
 		}

@@ -227,10 +227,7 @@
 		};
 	};
 
-	const rowCountForMenu = (
-		itemCount: number,
-		metrics: MenuViewportMetrics
-	): number => {
+	const rowCountForMenu = (itemCount: number, metrics: MenuViewportMetrics): number => {
 		const visibleItemCount = Math.max(1, itemCount);
 		const rowHeightPx = Math.max(1, remToPx(estimatedMenuRowHeightRem));
 		const rowsByHeight = Math.max(1, Math.floor(metrics.availableHeight / rowHeightPx));
@@ -242,11 +239,7 @@
 		);
 		const rowsNeededForAvailableWidth = Math.ceil(visibleItemCount / columnsByWidth);
 		const preferredRows = Math.min(visibleItemCount, rowsByHeight);
-		return clampNumber(
-			Math.max(preferredRows, rowsNeededForAvailableWidth),
-			1,
-			visibleItemCount
-		);
+		return clampNumber(Math.max(preferredRows, rowsNeededForAvailableWidth), 1, visibleItemCount);
 	};
 
 	const menuStyle = (layer: MenuLayer, position: MenuPosition): string => {
@@ -458,9 +451,7 @@
 		const rightSpace = bounds.right - marginPx - parentRect.right - gapPx;
 		const leftSpace = parentRect.left - bounds.left - marginPx - gapPx;
 		const shouldOpenLeft = rightSpace < menuRect.width && leftSpace > rightSpace;
-		let left = shouldOpenLeft
-			? parentRect.left - menuRect.width - gapPx
-			: parentRect.right + gapPx;
+		let left = shouldOpenLeft ? parentRect.left - menuRect.width - gapPx : parentRect.right + gapPx;
 
 		if (!shouldOpenLeft && left > maxLeft && leftSpace > rightSpace) {
 			left = parentRect.left - menuRect.width - gapPx;

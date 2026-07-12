@@ -6,9 +6,7 @@ export interface ParameterContextPreview {
 	placement: 'value' | 'below';
 }
 
-export type ParameterContextPreviewResolver = (
-	node: UiNodeDto
-) => ParameterContextPreview | null;
+export type ParameterContextPreviewResolver = (node: UiNodeDto) => ParameterContextPreview | null;
 
 const resolvers: ParameterContextPreviewResolver[] = [];
 
@@ -22,9 +20,7 @@ export const registerParameterContextPreviewResolver = (
 	};
 };
 
-export const resolveParameterContextPreview = (
-	node: UiNodeDto
-): ParameterContextPreview | null => {
+export const resolveParameterContextPreview = (node: UiNodeDto): ParameterContextPreview | null => {
 	for (let index = resolvers.length - 1; index >= 0; index -= 1) {
 		const preview = resolvers[index]?.(node);
 		if (preview) return preview;
